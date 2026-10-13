@@ -655,6 +655,10 @@ impl<'a> Lifter<'a> {
             // 적혀 있고 그 판단은 HWPX 파서 몫이다(이슈 080). 무조건 켜면 교차포맷 파리티가 깨진다 —
             // `hwpx_rhwp_parity` 가 benchmark1.hwpx 에서 22쪽 vs 16쪽으로 정확히 그걸 잡았다.
             fixed_row_heights: !self.from_hwpx,
+            // #467: a table floating in front of / behind the text (기안문 직인 box) takes no flow
+            // space in Hancom; exporting it inline pushed the form onto a second page.
+            treat_as_char: lift_table_float(&t.common).map(|_| false),
+            float_placement: lift_table_float(&t.common),
             provenance: Provenance {
                 source: Some(SourceFormat::Hwp5),
                 raw: None,
@@ -1381,6 +1385,56 @@ fn border_width_to_px(width: u8) -> f64 {
     px.max(HAIRLINE_MIN_PX)
 }
 
+/// Floating placement of a non-inline table whose text wrap lets it overlap the text
+/// (`IN_FRONT_OF_TEXT`/`BEHIND_TEXT`) — see [`Table::float_placement`]. Other tables → `None`.
+/// Offsets are stored HWPUNIT as-is (unlike paragraph margins they are not doubled in HWP5).
+fn lift_table_float(c: &rhwp::model::shape::CommonObjAttr) -> Option<TableFloat> {
+    use rhwp::model::shape::{HorzAlign, HorzRelTo, TextWrap, VertAlign, VertRelTo};
+    if c.treat_as_char {
+        return None;
+    }
+    let text_wrap = match c.text_wrap {
+        TextWrap::InFrontOfText => "IN_FRONT_OF_TEXT",
+        TextWrap::BehindText => "BEHIND_TEXT",
+        _ => return None,
+    };
+    Some(TableFloat {
+        text_wrap: text_wrap.to_string(),
+        vert_rel_to: match c.vert_rel_to {
+            VertRelTo::Paper => "PAPER",
+            VertRelTo::Page => "PAGE",
+            VertRelTo::Para => "PARA",
+        }
+        .to_string(),
+        horz_rel_to: match c.horz_rel_to {
+            HorzRelTo::Paper => "PAPER",
+            HorzRelTo::Page => "PAGE",
+            HorzRelTo::Column => "COLUMN",
+            HorzRelTo::Para => "PARA",
+        }
+        .to_string(),
+        vert_align: match c.vert_align {
+            VertAlign::Top => "TOP",
+            VertAlign::Center => "CENTER",
+            VertAlign::Bottom => "BOTTOM",
+            VertAlign::Inside => "INSIDE",
+            VertAlign::Outside => "OUTSIDE",
+        }
+        .to_string(),
+        horz_align: match c.horz_align {
+            HorzAlign::Left => "LEFT",
+            HorzAlign::Center => "CENTER",
+            HorzAlign::Right => "RIGHT",
+            HorzAlign::Inside => "INSIDE",
+            HorzAlign::Outside => "OUTSIDE",
+        }
+        .to_string(),
+        vert_offset: c.vertical_offset as HwpUnit,
+        horz_offset: c.horizontal_offset as HwpUnit,
+        z_order: c.z_order,
+    })
+}
+
 /// Translate an rhwp `ParaShape` into ours — the fields `synthesize_para_pr` emits: alignment and
 /// the margin block (indent, left/right margin, space before/after). Line spacing is intentionally
 /// left to inherit the base paraPr (a fixed-unit value emitted as PERCENT would distort layout);
@@ -1480,6 +1534,46 @@ mod tests {
             ps.line_spacing_value, 1_560,
             "FIXED is HWPUNIT at 2× like the margins"
         );
+    }
+
+    /// #467: only a non-inline table that overlaps the text (글 앞으로/글 뒤로) gets a float
+    /// placement; inline and 위아래(TOP_AND_BOTTOM) tables keep the legacy inline emission.
+    #[test]
+    fn table_float_only_for_in_front_or_behind_text() {
+        use rhwp::model::shape::{CommonObjAttr, HorzRelTo, TextWrap, VertRelTo};
+        let stamp = CommonObjAttr {
+            treat_as_char: false,
+            text_wrap: TextWrap::InFrontOfText,
+            vert_rel_to: VertRelTo::Para,
+            horz_rel_to: HorzRelTo::Column,
+            vertical_offset: 1124,
+            horizontal_offset: 24802,
+            z_order: 2,
+            ..Default::default()
+        };
+        let f = lift_table_float(&stamp).expect("floating stamp box");
+        assert_eq!(f.text_wrap, "IN_FRONT_OF_TEXT");
+        assert_eq!(
+            (f.vert_rel_to.as_str(), f.horz_rel_to.as_str()),
+            ("PARA", "COLUMN")
+        );
+        assert_eq!((f.vert_offset, f.horz_offset, f.z_order), (1124, 24802, 2));
+
+        let behind = CommonObjAttr {
+            text_wrap: TextWrap::BehindText,
+            ..stamp.clone()
+        };
+        assert_eq!(lift_table_float(&behind).unwrap().text_wrap, "BEHIND_TEXT");
+        let top_bottom = CommonObjAttr {
+            text_wrap: TextWrap::TopAndBottom,
+            ..stamp.clone()
+        };
+        assert!(lift_table_float(&top_bottom).is_none());
+        let inline = CommonObjAttr {
+            treat_as_char: true,
+            ..stamp
+        };
+        assert!(lift_table_float(&inline).is_none());
     }
 
     #[test]

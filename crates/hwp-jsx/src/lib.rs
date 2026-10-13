@@ -1179,6 +1179,7 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         height_delta: 0,
         holder_para_shape: None,
         treat_as_char: None,
+        float_placement: None,
         col_widths,
         row_heights,
         // Render-IR only (HWPX auto-fit floor) — the JSX surface never carries it (defaults empty).

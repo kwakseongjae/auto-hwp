@@ -1750,6 +1750,7 @@ fn build_table_patch(
         header_off: t.repeat_header_off,
         holder_para: None, // in-place re-emit stays inside the original holder <hp:p>
         treat_as_char: t.treat_as_char.unwrap_or(true),
+        float: t.float_placement.clone(),
     };
     let tid = *next_id;
     *next_id += 1;
@@ -2414,6 +2415,8 @@ struct EmitTable {
     holder_para: Option<usize>,
     /// #441 — `<hp:pos treatAsChar>`; `true` = the legacy inline table.
     treat_as_char: bool,
+    /// #467 — floating placement (`Table::float_placement`); `None` = the legacy inline `<hp:pos>`.
+    float: Option<TableFloat>,
 }
 
 /// A dirty block ready to serialize: a paragraph, a table, or an embedded image.
@@ -2547,6 +2550,7 @@ fn project_block(b: &Block) -> EmitBlock {
             header_off: t.repeat_header_off,
             holder_para: t.holder_para_shape,
             treat_as_char: t.treat_as_char.unwrap_or(true),
+            float: t.float_placement.clone(),
         }),
     }
 }
@@ -3056,6 +3060,21 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
     let no_adjust = u8::from(t.fixed_row_heights);
     let repeat = u8::from(!t.header_off);
     let tac = u8::from(t.treat_as_char);
+    // #467: a floating table keeps its wrap, z-order and anchor offsets; everything else stays the
+    // legacy inline placement (byte-stable with earlier output).
+    let (wrap, z, vrel, hrel, valign, halign, voff, hoff) = match &t.float {
+        Some(f) => (
+            f.text_wrap.as_str(),
+            f.z_order,
+            f.vert_rel_to.as_str(),
+            f.horz_rel_to.as_str(),
+            f.vert_align.as_str(),
+            f.horz_align.as_str(),
+            f.vert_offset,
+            f.horz_offset,
+        ),
+        None => ("TOP_AND_BOTTOM", 0, "PARA", "COLUMN", "TOP", "LEFT", 0, 0),
+    };
     let tbl_bf = t
         .bf_key
         .as_deref()
@@ -3063,9 +3082,9 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
         .map(String::as_str)
         .unwrap_or(bf);
     out.push_str(&format!(
-        "<hp:tbl id=\"{tid}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"{repeat}\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{tbl_bf}\" noAdjust=\"{no_adjust}\">\
+        "<hp:tbl id=\"{tid}\" zOrder=\"{z}\" numberingType=\"TABLE\" textWrap=\"{wrap}\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"{repeat}\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{tbl_bf}\" noAdjust=\"{no_adjust}\">\
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{height}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
-<hp:pos treatAsChar=\"{tac}\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"COLUMN\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
+<hp:pos treatAsChar=\"{tac}\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"{vrel}\" horzRelTo=\"{hrel}\" vertAlign=\"{valign}\" horzAlign=\"{halign}\" vertOffset=\"{voff}\" horzOffset=\"{hoff}\"/>\
 <hp:outMargin left=\"{oml}\" right=\"{omr}\" top=\"{omt}\" bottom=\"{omb}\"/>\
 <hp:inMargin left=\"{iml}\" right=\"{imr}\" top=\"{imt}\" bottom=\"{imb}\"/>"
     ));
@@ -3509,6 +3528,81 @@ mod tests {
             header.matches("<hh:borderFills").count(),
             1,
             "container balanced"
+        );
+        assert!(crate::export::validate_open_safety(&out).ok);
+    }
+
+    /// #467: a floating table (글 앞으로 · 직인 상자) keeps its wrap, z-order and offsets — emitted
+    /// inline it took a line of flow space and pushed the 기안문 onto a second page in Hancom. A
+    /// table without `float_placement` keeps the legacy inline `<hp:pos>` byte-for-byte.
+    #[test]
+    fn floating_table_emits_its_wrap_and_offsets() {
+        let mut doc = parse_semantic(&showcase()).unwrap();
+        let cell = |text: &str| Cell {
+            blocks: vec![Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text(text.into())],
+                    ..Default::default()
+                }],
+                dirty: Dirty(true),
+                ..Default::default()
+            })],
+            dirty: Dirty(true),
+            ..Default::default()
+        };
+        let sec = doc.sections.get_mut(0).unwrap();
+        sec.blocks.push(Block::Table(Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![cell("직인")],
+            col_widths: vec![5139],
+            row_heights: vec![4895],
+            treat_as_char: Some(false),
+            float_placement: Some(TableFloat {
+                text_wrap: "IN_FRONT_OF_TEXT".into(),
+                vert_rel_to: "PARA".into(),
+                horz_rel_to: "COLUMN".into(),
+                vert_align: "TOP".into(),
+                horz_align: "LEFT".into(),
+                vert_offset: 1124,
+                horz_offset: 24802,
+                z_order: 2,
+            }),
+            dirty: Dirty(true),
+            ..Default::default()
+        }));
+        sec.blocks.push(Block::Table(Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![cell("인라인")],
+            col_widths: vec![8000],
+            row_heights: vec![1500],
+            dirty: Dirty(true),
+            ..Default::default()
+        }));
+        sec.dirty.mark();
+        let out = serialize(&doc).unwrap();
+        let pkg = Package::open(&out).unwrap();
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        let head = |text: &str| {
+            let at = sec0.find(&format!("<hp:t>{text}")).unwrap();
+            let t = sec0[..at].rfind("<hp:tbl ").unwrap();
+            sec0[t..t + sec0[t..].find("<hp:tr").unwrap()].to_string()
+        };
+        let float = head("직인");
+        assert!(float.contains(r#"zOrder="2""#), "{float}");
+        assert!(float.contains(r#"textWrap="IN_FRONT_OF_TEXT""#), "{float}");
+        assert!(
+            float.contains(r#"<hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="1124" horzOffset="24802"/>"#),
+            "{float}"
+        );
+        let inline = head("인라인");
+        assert!(inline.contains(r#"zOrder="0""#), "{inline}");
+        assert!(inline.contains(r#"textWrap="TOP_AND_BOTTOM""#), "{inline}");
+        assert!(
+            inline.contains(r#"<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>"#),
+            "{inline}"
         );
         assert!(crate::export::validate_open_safety(&out).ok);
     }

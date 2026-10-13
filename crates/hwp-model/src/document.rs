@@ -544,6 +544,13 @@ pub struct Table {
     /// EXPORT ONLY (#441): `<hp:pos treatAsChar>` for a table the serializer synthesizes. `None` = the
     /// legacy `"1"`; parsed tables keep their original `<hp:pos>` byte-verbatim and never read this.
     pub treat_as_char: Option<bool>,
+    /// EXPORT ONLY (#467): floating placement for a table that sits in front of / behind the text
+    /// (`<hp:tbl textWrap zOrder>` + `<hp:pos>` offsets). `None` = the legacy inline `<hp:pos>`.
+    /// The lift fills it only for `IN_FRONT_OF_TEXT`/`BEHIND_TEXT` tables — those take no flow space
+    /// in Hancom, so emitting them inline pushed the text down (기안문 직인 box → 빈 둘째 쪽).
+    /// Non-inline `TOP_AND_BOTTOM`/`SQUARE` tables are deliberately left `None` for now (they still
+    /// ship as inline, which lays out nearly the same). Layout does not read this.
+    pub float_placement: Option<TableFloat>,
     /// Per-column widths (HWPUNIT), `cols` entries — for faithful column proportions on render.
     /// Empty when unknown (then the renderer falls back to auto-layout).
     pub col_widths: Vec<HwpUnit>,
@@ -624,6 +631,21 @@ pub enum TableCaptionPosition {
     Top,
     #[default]
     Bottom,
+}
+
+/// Floating object placement as OWPML writes it (`<hp:pos>` + `textWrap`/`zOrder`). Tokens are the
+/// OWPML attribute values (`IN_FRONT_OF_TEXT`, `PARA`, `COLUMN`, `TOP`, `LEFT`, …); offsets are
+/// HWPUNIT, relative to `vert_rel_to`/`horz_rel_to`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TableFloat {
+    pub text_wrap: String,
+    pub vert_rel_to: String,
+    pub horz_rel_to: String,
+    pub vert_align: String,
+    pub horz_align: String,
+    pub vert_offset: HwpUnit,
+    pub horz_offset: HwpUnit,
+    pub z_order: i32,
 }
 
 /// A table caption expressed in ordinary document blocks. `spacing` is the gap between caption and
