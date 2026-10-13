@@ -792,8 +792,13 @@ pub fn synthesize_para_pr(base: &str, new_id: u64, shape: &ParaShape) -> String 
     }
     // Effective line spacing: override (PERCENT, value) if set, else keep the base's.
     let (ls_type, ls_val) = base_line_spacing(base);
+    // The IR's own line-spacing type wins — forcing PERCENT wrote a FIXED 1600 HWPUNIT pitch as
+    // "1600 %" (#466 follow-up: HWP5 forms with fixed spacing would have exploded in Hancom).
     let (ls_type, ls_val) = if shape.line_spacing_value > 0 {
-        ("PERCENT".to_string(), shape.line_spacing_value)
+        (
+            line_spacing_token(shape.line_spacing_type).to_string(),
+            shape.line_spacing_value,
+        )
     } else {
         (ls_type, ls_val)
     };
@@ -804,6 +809,16 @@ pub fn synthesize_para_pr(base: &str, new_id: u64, shape: &ParaShape) -> String 
         s = format!("{}{}{}", &s[..a], switch, &s[end..]);
     }
     s
+}
+
+/// OWPML `hh:lineSpacing@type` token for our [`LineSpacingType`] (inverse of [`parse_para_pr`]).
+fn line_spacing_token(t: LineSpacingType) -> &'static str {
+    match t {
+        LineSpacingType::Percent => "PERCENT",
+        LineSpacingType::Fixed => "FIXED",
+        LineSpacingType::BetweenLines => "BETWEEN_LINES",
+        LineSpacingType::AtLeast => "AT_LEAST",
+    }
 }
 
 /// Read the base paraPr's first `<hh:lineSpacing type=".." value="..">` (default PERCENT/130).
@@ -819,12 +834,12 @@ fn base_line_spacing(base: &str) -> (String, i32) {
     ("PERCENT".to_string(), 130)
 }
 
-/// Build `<hp:switch>` with margins V in `hp:case` and 2V in `hp:default`, lineSpacing identical.
+/// Build `<hp:switch>` with margins V in `hp:case` and 2V in `hp:default`. A non-PERCENT
+/// lineSpacing value is HWPUNIT too, so it doubles with the margins; PERCENT is identical in both.
 ///
-/// ⚠️ 실값은 `hp:case`(2016 HwpUnitChar) 쪽의 V 다 — 같은 문서의 이진 `.hwp` 와 대조하면 문단
-/// 들여쓰기가 −3456 로 **정확히 일치**한다(이슈 074 실측). `hp:default` 의 2V 는 한컴이 실물에
-/// 남기는 레거시 미러라 그대로 따라 쓴다. (vendored rhwp 의 HWPX 파서는 case 값을 다시 2배로
-/// 곱한다 — 그건 rhwp 쪽 결함이고, `hwp-rhwp` lift 에서 되돌린다.)
+/// IR 값은 HWPUNIT(1배)다. 한컴은 `hp:case`(2016 HwpUnitChar)에 실값 V 를, 레거시 `hp:default` 에
+/// HWP5 이진과 같은 2V 를 남긴다(코퍼스: left 7000→14000, intent −1310→−2620; rhwp 주석: FIXED
+/// 1560→3120). 한컴독스는 `hp:case` 를 읽는다 — 여기에 2배 값이 들어가면 여백이 두 배가 된다(#466).
 fn build_switch(shape: &ParaShape, ls_type: &str, ls_val: i32) -> String {
     let (i, l, r, p, n) = (
         shape.indent,
@@ -839,11 +854,20 @@ fn build_switch(shape: &ParaShape, ls_type: &str, ls_val: i32) -> String {
             i * k, l * k, r * k, p * k, n * k
         )
     };
-    let ls = format!("<hh:lineSpacing type=\"{ls_type}\" value=\"{ls_val}\" unit=\"HWPUNIT\"/>");
+    let ls = |k: i32| {
+        let v = if ls_type == "PERCENT" {
+            ls_val
+        } else {
+            ls_val * k
+        };
+        format!("<hh:lineSpacing type=\"{ls_type}\" value=\"{v}\" unit=\"HWPUNIT\"/>")
+    };
     format!(
-        "<hp:switch><hp:case hp:required-namespace=\"http://www.hancom.co.kr/hwpml/2016/HwpUnitChar\">{}{ls}</hp:case><hp:default>{}{ls}</hp:default></hp:switch>",
+        "<hp:switch><hp:case hp:required-namespace=\"http://www.hancom.co.kr/hwpml/2016/HwpUnitChar\">{}{}</hp:case><hp:default>{}{}</hp:default></hp:switch>",
         margin(1),
-        margin(2)
+        ls(1),
+        margin(2),
+        ls(2)
     )
 }
 
@@ -1086,6 +1110,53 @@ pub fn patch_pool(header: &str, container: &str, fragments: &str, added: usize) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #466: `hp:case` holds the IR (HWPUNIT) value, `hp:default` twice that; a FIXED line spacing
+    /// keeps its type (it used to be forced to PERCENT, i.e. "1560 %") and doubles like a margin.
+    #[test]
+    fn para_pr_switch_keeps_hwpunit_in_case_and_fixed_line_spacing() {
+        let base = r#"<hh:paraPr id="0"><hh:align horizontal="JUSTIFY" vertical="BASELINE"/><hp:switch><hp:case hp:required-namespace="http://www.hancom.co.kr/hwpml/2016/HwpUnitChar"><hh:margin><hc:intent value="0" unit="HWPUNIT"/><hc:left value="0" unit="HWPUNIT"/><hc:right value="0" unit="HWPUNIT"/><hc:prev value="0" unit="HWPUNIT"/><hc:next value="0" unit="HWPUNIT"/></hh:margin><hh:lineSpacing type="PERCENT" value="160" unit="HWPUNIT"/></hp:case><hp:default><hh:margin><hc:intent value="0" unit="HWPUNIT"/><hc:left value="0" unit="HWPUNIT"/><hc:right value="0" unit="HWPUNIT"/><hc:prev value="0" unit="HWPUNIT"/><hc:next value="0" unit="HWPUNIT"/></hh:margin><hh:lineSpacing type="PERCENT" value="160" unit="HWPUNIT"/></hp:default></hp:switch></hh:paraPr>"#;
+        let shape = ParaShape {
+            left_margin: 29_407,
+            indent: -1_200,
+            line_spacing_type: LineSpacingType::Fixed,
+            line_spacing_value: 1_560,
+            ..Default::default()
+        };
+        let pr = synthesize_para_pr(base, 7, &shape);
+        let case = &pr[pr.find("<hp:case").unwrap()..pr.find("</hp:case>").unwrap()];
+        let default = &pr[pr.find("<hp:default>").unwrap()..pr.find("</hp:default>").unwrap()];
+        assert!(case.contains(r#"<hc:left value="29407""#), "{case}");
+        assert!(case.contains(r#"<hc:intent value="-1200""#), "{case}");
+        assert!(
+            case.contains(r#"<hh:lineSpacing type="FIXED" value="1560""#),
+            "{case}"
+        );
+        assert!(default.contains(r#"<hc:left value="58814""#), "{default}");
+        assert!(
+            default.contains(r#"<hh:lineSpacing type="FIXED" value="3120""#),
+            "{default}"
+        );
+
+        // The reader takes the case branch back to the same IR.
+        let back = parse_para_pr(&pr);
+        assert_eq!(back.left_margin, 29_407);
+        assert_eq!(back.indent, -1_200);
+        assert_eq!(back.line_spacing_type, LineSpacingType::Fixed);
+        assert_eq!(back.line_spacing_value, 1_560);
+
+        // PERCENT stays identical in both branches.
+        let pct = ParaShape {
+            line_spacing_value: 130,
+            ..Default::default()
+        };
+        let pr = synthesize_para_pr(base, 8, &pct);
+        assert_eq!(
+            pr.matches(r#"<hh:lineSpacing type="PERCENT" value="130""#)
+                .count(),
+            2
+        );
+    }
 
     const BASE: &str = r##"<hh:charPr id="0" height="1000" textColor="#000000" shadeColor="none" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2"><hh:fontRef hangul="1" latin="1" hanja="1" japanese="1" other="1" symbol="1" user="1"/><hh:ratio hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/><hh:relSz hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:offset hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/><hh:underline type="NONE" shape="SOLID" color="#000000"/><hh:strikeout shape="NONE" color="#000000"/><hh:outline type="NONE"/><hh:shadow type="NONE" color="#B2B2B2" offsetX="10" offsetY="10"/></hh:charPr>"##;
 

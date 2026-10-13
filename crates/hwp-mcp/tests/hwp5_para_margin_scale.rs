@@ -13,7 +13,9 @@
 //! curl -sL -o /tmp/form-25.hwp 'https://www.law.go.kr/LSW/flDownload.do?flSeq=164952517'
 //! AUTO_HWP_MARGIN_REPRO=/tmp/form-25.hwp cargo test -p hwp-mcp --features rhwp --test hwp5_para_margin_scale -- --ignored --nocapture
 //! ```
-//! 지금은 실패한다(기대: case = 원값 / 2, 실제: case = 원값).
+//! 고침(#466): lift 가 HWP5 원값을 반으로 줄여 IR 을 HWPUNIT 로 맞춘다. 날짜 줄은 IR 29407 ·
+//! `hp:case` 29407 · `hp:default` 58814(= HWP5 원값)가 된다. 원값 대조는 `hp:default` 로 한다 —
+//! 한컴 관례상 default 는 HWP5 이진과 같은 2배 값이다.
 
 use hwp_mcp::{export_bytes, open_bytes, Session};
 use hwp_model::prelude::*;
@@ -49,7 +51,7 @@ fn attr<'a>(s: &'a str, name: &str) -> Option<&'a str> {
 }
 
 #[test]
-#[ignore = "needs AUTO_HWP_MARGIN_REPRO=<public .hwp> (see module doc); fails until the scale is fixed"]
+#[ignore = "needs AUTO_HWP_MARGIN_REPRO=<public .hwp> (see module doc)"]
 fn hwp5_paragraph_margins_are_halved_in_hwpx_case() {
     let Ok(path) = std::env::var("AUTO_HWP_MARGIN_REPRO") else {
         eprintln!("AUTO_HWP_MARGIN_REPRO not set — skipped");
@@ -72,7 +74,7 @@ fn hwp5_paragraph_margins_are_halved_in_hwpx_case() {
         .cloned()
         .expect("a paragraph");
     let ir_left = doc.para_shapes[shape].left_margin;
-    eprintln!("paragraph {text:?}: IR (HWP5 raw) left = {ir_left}");
+    eprintln!("paragraph {text:?}: IR left = {ir_left}");
     assert!(ir_left > 0, "sample has a paragraph with a left margin");
 
     // The same paragraph in the exported HWPX → its paraPr → the hp:case left value.
@@ -88,17 +90,92 @@ fn hwp5_paragraph_margins_are_halved_in_hwpx_case() {
     let pp_at = header.find(&format!("<hh:paraPr id=\"{pid}\"")).unwrap();
     let pp = &header[pp_at..pp_at + header[pp_at..].find("</hh:paraPr>").unwrap()];
     let case = &pp[pp.find("<hp:case").unwrap()..pp.find("</hp:case>").unwrap()];
-    let case_left: i32 = attr(&case[case.find("<hc:left").unwrap()..], "value")
+    let value = |branch: &str, name: &str| -> i32 {
+        attr(
+            &branch[branch.find(&format!("<hc:{name}")).unwrap()..],
+            "value",
+        )
         .unwrap()
         .parse()
-        .unwrap();
-    eprintln!("HWPX paraPr {pid}: hp:case left = {case_left}");
+        .unwrap()
+    };
+    let default = &pp[pp.find("<hp:default>").unwrap()..pp.find("</hp:default>").unwrap()];
+    let case_left = value(case, "left");
+    let default_left = value(default, "left");
+    eprintln!("HWPX paraPr {pid}: hp:case left = {case_left}, hp:default left = {default_left}");
 
-    // Hancom reads hp:case as HWPUNIT and the HWP5 record holds twice that (see module doc).
+    // IR is HWPUNIT, hp:case is the value Hancom lays out with, hp:default the legacy 2× mirror.
+    assert_eq!(case_left, ir_left, "hp:case carries the IR (HWPUNIT) value");
     assert_eq!(
-        case_left,
-        ir_left / 2,
-        "hp:case should hold the HWP5 value / 2 (Hancom shows {} HWPUNIT)",
-        ir_left / 2
+        default_left,
+        2 * case_left,
+        "hp:default mirrors the HWP5 2× value"
     );
+    // The paragraph's left margin must fit inside the body width (59528 − 2·5669 on A4 with the
+    // form's margins ≈ 48190). The un-halved 58814 did not — that is what wrapped the date line.
+    assert!(
+        case_left < 48_190,
+        "left margin {case_left} is wider than the text column"
+    );
+    if text.contains('년') && text.contains('월') && text.contains('일') {
+        // 행정심판법 별지 제25호서식 date line: HWP5 58814, Hancom column_start 29407.
+        assert_eq!(case_left, 29_407);
+    }
+}
+
+/// `hp:case` margins of the paragraph whose text contains `needle` (first hit) in an HWPX package.
+fn case_margins(pkg_bytes: &[u8], needle: &str) -> Option<Vec<(String, i32)>> {
+    let pkg = hwp_hwpx::package::Package::open(pkg_bytes).ok()?;
+    let sec = String::from_utf8(pkg.read_part("Contents/section0.xml").ok()?).ok()?;
+    let header = String::from_utf8(pkg.read_part("Contents/header.xml").ok()?).ok()?;
+    let at = sec.find(needle)?;
+    let p_open = sec[..at].rfind("<hp:p ")?;
+    let pid = attr(&sec[p_open..], "paraPrIDRef")?;
+    let pp_at = header.find(&format!("<hh:paraPr id=\"{pid}\""))?;
+    let pp = &header[pp_at..pp_at + header[pp_at..].find("</hh:paraPr>")?];
+    let case = &pp[pp.find("<hp:case")?..pp.find("</hp:case>")?];
+    Some(
+        ["intent", "left", "right", "prev", "next"]
+            .iter()
+            .map(|k| {
+                let v = case
+                    .find(&format!("<hc:{k} "))
+                    .and_then(|i| attr(&case[i..], "value"))
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                (k.to_string(), v)
+            })
+            .collect(),
+    )
+}
+
+/// #466 guard for the HWPX side: a Hancom-saved `.hwpx` reopened and re-exported keeps its
+/// `hp:case` margins exactly — the lift halving must not double-halve (or double) HWPX input.
+#[test]
+fn hwpx_round_trip_keeps_case_margins() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../benchmarks/benchmark1.hwpx"
+    );
+    let src = std::fs::read(path).expect("benchmark1.hwpx");
+    let mut s = Session::default();
+    open_bytes(&mut s, &src, "benchmark1.hwpx").expect("open .hwpx");
+    let out = export_bytes(&s).expect("export hwpx");
+
+    let mut checked = 0;
+    // Paragraphs with a hanging indent in the source (hp:case intent −6014 / −7228 / −8234).
+    for needle in ["곤충산업이 성장성이", "굼벵이는 간기능", "단백질 57."] {
+        let before = case_margins(&src, needle).expect("needle in source");
+        let after = case_margins(&out, needle).expect("needle in export");
+        assert_eq!(
+            before, after,
+            "{needle:?}: hp:case margins changed on round trip"
+        );
+        assert!(
+            before.iter().any(|(_, v)| *v != 0),
+            "{needle:?}: has a margin"
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 3);
 }
