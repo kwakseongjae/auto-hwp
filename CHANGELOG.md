@@ -38,6 +38,29 @@ packages are released in lockstep.)*
 
 ---
 
+## [0.0.17] — 2026-10-14
+
+4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep 패치. HWP5(`.hwp`) 문서를 HWPX 로 내보낼 때 생기던
+배치 오류 두 건을 고쳤다 — 문단 여백 · 간격이 두 배로 나가던 문제(#466)와 글 앞/뒤로 띄운 표가 본문 줄로 들어가 쪽이 늘던 문제(#467).
+Intent · SDK 표면은 그대로다(필드 추가 · 변경 없음).
+
+### 고침
+
+- **HWP5 문단 여백 · 들여쓰기 · 문단 위/아래 간격 · 비-퍼센트 줄 간격이 HWPX 에서 2배로 나가던 문제 (#466).** HWP5 `ParaShape` 는 이
+  값들을 HWPUNIT 의 2배로 저장하는데, 읽기 단계가 HWPX 입력만 반으로 줄여 `.hwp` 문서는 IR 에 2배 값이 들어갔고 내보내기가 그 값을
+  `hp:case` 에 그대로 썼다(한컴독스에서 별지 서식 날짜 줄이 한 글자씩 꺾임). 이제 출처와 상관없이 IR 은 HWPUNIT 이다. 퍼센트 줄 간격은
+  그대로다. 편집으로 합성한 문단 모양도 줄 간격 **종류**(고정 · 최소 · 여백만)를 보존한다 — 전에는 값이 있으면 늘 `PERCENT` 로 써서
+  고정 1560 이 「1560%」가 될 수 있었다.
+  *(EN — HWP5 paragraph margins, indent, spacing before/after and non-percent line spacing are stored at 2× HWPUNIT; they are now
+  halved for every source, so HWP5 → HWPX no longer doubles them. Synthesized paraPr keeps the line-spacing type instead of forcing PERCENT.)*
+- **글 앞/뒤로 띄운 표의 배치를 HWPX 내보내기에 보존 (#467).** 내보내기가 모든 표를 `treatAsChar="1"` · `TOP_AND_BOTTOM` · 오프셋 0 으로
+  써서, 띄운 직인 상자(기안문 별지 제1호서식) 같은 표가 본문 칸 안의 한 줄로 들어가 빈 둘째 쪽이 생겼다. 이제 글 앞으로 · 글 뒤로 띄운
+  표는 `zOrder` · `textWrap` · `<hp:pos>`(기준 · 정렬 · 오프셋)를 원본대로 쓴다(한컴독스 실측 1쪽 = 원본). 그 밖의 표 출력은 바이트 그대로다.
+  *(EN — Tables floating in front of / behind text now keep their `zOrder`, `textWrap` and `<hp:pos>` offsets in HWPX export instead of
+  being emitted inline, which had pushed content onto an extra page. Other tables are emitted byte-identically.)*
+
+---
+
 ## [0.0.16] — 2026-10-10
 
 4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep 패치. 표 행 붙이기 · 넣기 뒤 HWPX 내보내기가 표를 통째로
