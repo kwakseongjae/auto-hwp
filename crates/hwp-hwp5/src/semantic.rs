@@ -900,12 +900,18 @@ fn parse_para_shape(
             3 => LineSpacingType::AtLeast,
             _ => LineSpacingType::Percent,
         },
-        left_margin: read_i32(bytes, 4).expect("base length checked"),
-        right_margin: read_i32(bytes, 8).expect("base length checked"),
-        indent: read_i32(bytes, 12).expect("base length checked"),
-        space_before: read_i32(bytes, 16).expect("base length checked"),
-        space_after: read_i32(bytes, 20).expect("base length checked"),
-        line_spacing_value: read_i32(bytes, 24).expect("base length checked"),
+        // HWP5 stores these at 2× HWPUNIT (#466 — the source line segment's column_start is exactly
+        // margin_left / 2); the IR is HWPUNIT, same as the rhwp lift.
+        left_margin: read_i32(bytes, 4).expect("base length checked") / 2,
+        right_margin: read_i32(bytes, 8).expect("base length checked") / 2,
+        indent: read_i32(bytes, 12).expect("base length checked") / 2,
+        space_before: read_i32(bytes, 16).expect("base length checked") / 2,
+        space_after: read_i32(bytes, 20).expect("base length checked") / 2,
+        // PERCENT is unit-free; FIXED/BETWEEN_LINES/AT_LEAST are HWPUNIT at the same 2× scale.
+        line_spacing_value: match attr & 0x03 {
+            0 => read_i32(bytes, 24).expect("base length checked"),
+            _ => read_i32(bytes, 24).expect("base length checked") / 2,
+        },
         widow_orphan: attr & (1 << 16) != 0,
         keep_with_next: attr & (1 << 17) != 0,
         keep_lines: attr & (1 << 18) != 0,

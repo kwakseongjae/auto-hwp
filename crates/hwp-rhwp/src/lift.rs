@@ -51,7 +51,7 @@ struct Lifter<'a> {
     bin_seen: RefCell<HashMap<u16, String>>,
     /// Monotonic fallback id for fields lacking a stable `field_id` (so begin/end stay paired).
     field_seq: RefCell<u32>,
-    /// 입력이 HWPX 였는가 — 문단 여백 보정에 쓴다([`lift_para_shape`] 참조).
+    /// 입력이 HWPX 였는가 — 표 행 높이 고정 여부(`fixed_row_heights`)에 쓴다.
     from_hwpx: bool,
 }
 
@@ -68,7 +68,7 @@ impl<'a> Lifter<'a> {
         }
     }
 
-    /// HWPX 입력 표시 — `lift_para_shape` 의 문단 여백 보정을 켠다.
+    /// HWPX 입력 표시 — HWPX 는 행 높이를 고정으로 보지 않는다.
     fn with_hwpx_source(mut self, yes: bool) -> Self {
         self.from_hwpx = yes;
         self
@@ -89,7 +89,7 @@ impl<'a> Lifter<'a> {
             out.char_shapes.push(cs);
         }
         for (i, rps) in self.doc.doc_info.para_shapes.iter().enumerate() {
-            let ps = lift_para_shape(rps, self.from_hwpx);
+            let ps = lift_para_shape(rps);
             let idx = out.para_shapes.len();
             self.para_id_to_idx.insert(i as u16, idx);
             out.header_pools.para.insert(i as u64, ps.clone());
@@ -1385,17 +1385,22 @@ fn border_width_to_px(width: u8) -> f64 {
 /// the margin block (indent, left/right margin, space before/after). Line spacing is intentionally
 /// left to inherit the base paraPr (a fixed-unit value emitted as PERCENT would distort layout);
 /// numbering/border-fill/head-type are deferred (not emitted yet).
-/// rhwp `ParaShape` → ours. `from_hwpx` 면 문단 여백(들여쓰기/좌우/위아래)을 **절반으로 되돌린다**.
+/// rhwp `ParaShape` → ours. 문단 여백(들여쓰기/좌우/위아래)과 비-퍼센트 줄 간격을 **절반으로** 줄여
+/// IR 단위(HWPUNIT)로 맞춘다 — 입력이 `.hwp` 든 `.hwpx` 든 같다.
 ///
-/// 왜(이슈 074): vendored rhwp 의 HWPX 헤더 파서는 `<hp:case required-namespace=…HwpUnitChar>` 의
-/// 여백 값을 읽어 **2배**로 곱한다(`parser/hwpx/header.rs`: "HWP 바이너리와 동일한 2× 스케일로
-/// 변환"). 하지만 실측하면 case 값이 이미 이진 `.hwp` 와 같은 값이다 — benchmark1 의 같은 문단
-/// 들여쓰기가 이진 −3456 / HWPX case −3456 로 정확히 일치한다. 그래서 rhwp 경로로 HWPX 를 읽으면
-/// 문단 위/아래 간격이 400→800 으로 두 배가 되고, **무편집 왕복(.hwp → 우리 HWPX → 재열기)에서
-/// 쪽수가 늘어난다**(실측 18p→19p · benchmark2 24p→26p). rhwp 는 수정 금지(vendored)라 lift 에서
-/// 되돌린다. `.hwp` 이진 경로는 이 보정을 타지 않으므로 게이트(8==8·18==18)와 무관하다.
-fn lift_para_shape(p: &RParaShape, from_hwpx: bool) -> ParaShape {
-    let fix = |v: i32| if from_hwpx { v / 2 } else { v };
+/// 왜(이슈 #466): HWP5 이진 `ParaShape` 는 이 값들을 **HWPUNIT 의 2배**로 저장한다. 근거:
+/// - 같은 문단의 한컴 줄 세그먼트 `column_start` 가 정확히 `margin_left / 2` 다(행정심판법 별지
+///   제25호서식 날짜 줄: margin_left 58814 · column_start 29407, 한컴독스 눈금자 ≈ 10.4 cm).
+/// - vendored rhwp 렌더러도 두 포맷 모두 이 값을 `/ 2` 해서 그린다(`style_resolver.rs`), 그래서
+///   rhwp HWPX 파서는 `hp:case`(실값)를 2배로 곱해 같은 배율로 맞춘다.
+///
+/// 예전에는 HWPX 입력만 반으로 줄여(이슈 074) `.hwp` 문서는 IR 에 2배 값이 들어갔다 — 우리 조판은
+/// 여백이 2배로 잡혔고, HWPX 내보내기는 `hp:case` 에 2배 값을 써서 한컴독스에서 날짜 줄이 한
+/// 글자씩 꺾였다. (074 메모의 "이진 −3456 = HWPX case −3456" 은 benchmark1.hwp/hwpx 가 서로 다른
+/// 문서라 같은 문단 비교가 아니었다.) 탭 위치도 이진에서 2배지만 lift 가 탭 정의를 옮기지 않으므로
+/// 여기서 다룰 것이 없다.
+fn lift_para_shape(p: &RParaShape) -> ParaShape {
+    let fix = |v: i32| v / 2;
     use rhwp::model::style::LineSpacingType as RLst;
     ParaShape {
         align: match p.alignment {
@@ -1414,7 +1419,11 @@ fn lift_para_shape(p: &RParaShape, from_hwpx: bool) -> ParaShape {
             RLst::SpaceOnly => LineSpacingType::BetweenLines,
             RLst::Minimum => LineSpacingType::AtLeast,
         },
-        line_spacing_value: p.line_spacing,
+        // PERCENT 는 배율이 없고, 고정/최소/여백만 값(HWPUNIT)은 여백과 같이 2배로 저장된다.
+        line_spacing_value: match p.line_spacing_type {
+            RLst::Percent => p.line_spacing,
+            _ => fix(p.line_spacing),
+        },
         left_margin: fix(p.margin_left),
         right_margin: fix(p.margin_right),
         indent: fix(p.indent),
@@ -1429,6 +1438,49 @@ fn lift_para_shape(p: &RParaShape, from_hwpx: bool) -> ParaShape {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #466: rhwp holds paragraph margins/spacing (and non-PERCENT line spacing) at 2× HWPUNIT for
+    /// BOTH sources — the HWP5 record as stored, HWPX after rhwp doubles `hp:case`. The IR is
+    /// HWPUNIT, so the lift halves them regardless of the source format.
+    #[test]
+    fn para_shape_margins_are_halved_to_hwpunit() {
+        use rhwp::model::style::LineSpacingType as RLst;
+        let raw = RParaShape {
+            margin_left: 58_814,
+            margin_right: 600,
+            indent: -2_400,
+            spacing_before: 800,
+            spacing_after: 400,
+            line_spacing: 160,
+            line_spacing_type: RLst::Percent,
+            ..Default::default()
+        };
+        let ps = lift_para_shape(&raw);
+        assert_eq!(
+            ps.left_margin, 29_407,
+            "form-25 date line: column_start 29407"
+        );
+        assert_eq!(ps.right_margin, 300);
+        assert_eq!(ps.indent, -1_200);
+        assert_eq!(ps.space_before, 400);
+        assert_eq!(ps.space_after, 200);
+        assert_eq!(
+            ps.line_spacing_value, 160,
+            "PERCENT carries no unit — unchanged"
+        );
+
+        let fixed = RParaShape {
+            line_spacing: 3_120,
+            line_spacing_type: RLst::Fixed,
+            ..Default::default()
+        };
+        let ps = lift_para_shape(&fixed);
+        assert_eq!(ps.line_spacing_type, LineSpacingType::Fixed);
+        assert_eq!(
+            ps.line_spacing_value, 1_560,
+            "FIXED is HWPUNIT at 2× like the margins"
+        );
+    }
 
     #[test]
     fn cell_layout_width_uses_only_the_exact_bounded_extension() {
