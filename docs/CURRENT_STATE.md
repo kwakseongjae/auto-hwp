@@ -9,6 +9,7 @@
   · **#471 → publish 발행 0.0.17**(2026-10-14 05:26Z = KST 14:26, run 38515809026 · headSha = 머지 커밋, dry-run 38512699245): wasm 8,703,807 B ·
     sha256 `55d37f9e…0255` · SRI `sha384-Q0+FdTsp…aSl`, Node 24 컴파일 확인(브라우저 인스턴스화는 이번에 재지 않음). 레지스트리 4패키지 0.0.17 · react →
     `^0.0.17`.
+  · **사후 `--full`(main `4058bf4`)**: 전부 그린, 단 기존 이슈만 — e2e 84 통과 · 1 실패 = #462(`cell-caret-053` 붙여넣기) · platform vitest 는 워크트리에서 #460(`.git` 파일 — 임시 디렉터리로 돌려 14/14) · hwp-lab/demo-ai-proxy `npm ci` 는 #461(메인 node_modules 복사). 발행본 wasm chromium 149 · webkit 26.5 `init()` 인스턴스화 · Node 20/22/24 컴파일 OK.
   · 함정: `oracle-sweep.mjs` 는 `<repo>/target/release/auto-hwp` 를 하드코딩 — `CARGO_TARGET_DIR` 를 바꿨으면 `target` 심링크를 걸어야 한다.
   · 후속: 호스트(DO-GATE)는 0.0.14 → 0.0.17 로 세 릴리스를 건너뛴다 — 공식 양식 16종 재확인 필요. #469 의 남은 차이(발신명의 정렬 · 겉 표
     `sz height`) · 위아래 배치 비-인라인 표 `<hp:pos>` 는 후보.
