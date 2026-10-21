@@ -2164,16 +2164,20 @@ pub struct RunDto {
     pub font: Option<String>,
 }
 impl RunDto {
+    /// The op-bus run. A `RunDto` is the editor's FULL run state (what [`block_runs`] read, as edited),
+    /// so its flags and highlight are NAMED values (#481 — `bold: false` turns bold off, a `None`
+    /// highlight clears it); a size/font it does not know (`None`) is left out and inherits the run
+    /// it replaces.
     pub fn to_run_spec(&self) -> hwp_ops::RunSpec {
         hwp_ops::RunSpec {
             text: self.text.clone(),
-            bold: self.bold,
-            italic: self.italic,
-            underline: self.underline,
-            strike: self.strike,
+            bold: Some(self.bold),
+            italic: Some(self.italic),
+            underline: Some(self.underline),
+            strike: Some(self.strike),
             size_pt: self.size_pt,
             color: self.color.clone(),
-            highlight: self.highlight.clone(),
+            highlight: Some(self.highlight.clone()),
             font: self.font.clone(),
         }
     }

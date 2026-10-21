@@ -38,7 +38,7 @@ fn write_marked(name: &str, block: usize) -> Session {
                 },
                 hwp_ops::RunSpec {
                     text: "marked".into(),
-                    highlight: Some(MARK.into()),
+                    highlight: Some(Some(MARK.into())),
                     ..Default::default()
                 },
             ],

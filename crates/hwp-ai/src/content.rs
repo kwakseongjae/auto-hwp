@@ -60,16 +60,19 @@ pub struct AiRun {
 }
 
 impl AiRun {
+    /// The op-bus run. A flag the AI left `false` and a field it left out are NOT named (#481): a
+    /// replaced cell keeps the template's bold/italic/… and size/font, exactly as an AI run that
+    /// named nothing always did; only what the AI turned on (`true`) or gave a value is applied.
     pub(crate) fn to_run_spec(&self) -> RunSpec {
         RunSpec {
             text: self.text.clone(),
-            bold: self.bold,
-            italic: self.italic,
-            underline: self.underline,
-            strike: self.strike,
+            bold: self.bold.then_some(true),
+            italic: self.italic.then_some(true),
+            underline: self.underline.then_some(true),
+            strike: self.strike.then_some(true),
             size_pt: self.size_pt,
             color: self.color.clone(),
-            highlight: self.highlight.clone(),
+            highlight: self.highlight.clone().map(Some),
             font: self.font.clone(),
         }
     }
@@ -321,7 +324,7 @@ pub fn compile_to_ops(content: &AiContent) -> Vec<Op> {
                 section: 0,
                 runs: vec![RunSpec {
                     text: text.clone(),
-                    bold: true,
+                    bold: Some(true),
                     ..Default::default()
                 }],
                 para: ParaSpec {
@@ -380,6 +383,29 @@ pub fn compile_to_ops(content: &AiContent) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #481 — an AI run names only what it turned on: a `false` flag and an absent field stay UNNAMED,
+    /// so a cell the AI fills keeps the template's bold/size/font (what a plain AI run always got);
+    /// a `true` flag and a given value are named.
+    #[test]
+    fn an_ai_run_names_only_what_it_turns_on() {
+        let r = AiRun {
+            text: "a".into(),
+            bold: true,
+            ..Default::default()
+        }
+        .to_run_spec();
+        assert_eq!(r.bold, Some(true));
+        assert_eq!((r.italic, r.underline, r.strike), (None, None, None));
+        assert_eq!(r.highlight, None);
+        let r = AiRun {
+            text: "a".into(),
+            highlight: Some("#FFF2CC".into()),
+            ..Default::default()
+        }
+        .to_run_spec();
+        assert_eq!(r.highlight, Some(Some("#FFF2CC".into())));
+    }
 
     #[test]
     fn parses_and_compiles_template() {

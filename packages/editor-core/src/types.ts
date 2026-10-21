@@ -180,7 +180,8 @@ export interface ProposalV1 {
 /** A STYLED text run (Intent schema v0 `RunSpec`, INTENT-SCHEMA §6.7) — the read shape `blockRuns`
  *  returns AND the write shape `SetTableCellRuns`/`SetParagraphRuns` accept, so a text edit round-trips
  *  through the SAME type (run-format preservation, issue 027 §함정). A multi-paragraph cell's paragraphs
- *  are joined by a bare `{ text: "\n" }` run. All style fields are optional (unset = inherit). */
+ *  are joined by a bare `{ text: "\n" }` run. All style fields are optional: an unset field keeps the
+ *  value of the text it replaces (#481), except `color` (black unless given); `highlight: null` clears. */
 export interface RunSpec {
   text: string;
   bold?: boolean;
@@ -189,7 +190,7 @@ export interface RunSpec {
   strike?: boolean;
   size_pt?: number;
   color?: string;
-  highlight?: string;
+  highlight?: string | null;
   font?: string;
 }
 
