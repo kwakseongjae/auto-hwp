@@ -36,6 +36,27 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 파괴 변경 (Breaking)
+
+- **`SetParagraphRuns` · `SetTableCellRuns` 의 `RunSpec` 에서 생략한 굵게 · 기울임 · 밑줄 · 취소선 · 음영은 「끔」이 아니라 바꾸는
+  자리의 값을 물려받는다 (#481).** 마이그레이션: 끄려면 `false` 를, 음영을 지우려면 `highlight: null` 을 적는다. SDK 편집기(본문 ·
+  칸 캐럿, 칸 안 편집기, 서식 리본, `inheritRuns`)는 이미 그렇게 보낸다. `blockRuns` 로 읽은 run 을 고쳐 되돌리는 호스트는 그대로
+  동작한다(읽은 run 이 끈 속성을 `false` 로 가진다). 넣기 Intent(`InsertParagraphAt` 등)는 바뀌지 않았다.
+  *(EN — On SetParagraphRuns/SetTableCellRuns an omitted bold/italic/underline/strike/highlight now keeps the replaced text's value
+  instead of meaning "off". Migration: send `false` (or `highlight: null`) to turn one off — the SDK editors already do, and runs read
+  with `blockRuns` already carry their `false`s. Insert intents are unchanged.)*
+
+### 고침
+
+- **`RunSpec` 에서 생략한 글자 속성이 바꾸는 자리의 글자 모양을 물려받는다 (#481).** 지금까지는 「크기만」 주면 굵게가 꺼지고,
+  「굵게만」 주면 크기 · 글꼴이 바뀌었다(메모리는 `null`, 파일은 헤더 첫 글자 모양의 11pt). 기준은 그 문단 · 칸에서 글자가 있는 첫
+  run 이고, 없으면 §6.9 이웃 규칙을 따른다. 메모리(`blockRuns`)와 내보낸 파일이 같은 값을 가진다. 파일은 기준 run 의 원래
+  `<hh:charPr>` 를 복제해 다른 속성만 고친다(장평 · 자간 · 계열별 글꼴 등은 원래 그대로, 값이 같으면 원래 id). 글자 색은 생략하면
+  지금처럼 검정이다. `size_pt` · `font` 의 `null` 은 생략과 같다. 서식을 하나도 적지 않은 run 은 보이는 모양이 그대로이고, 파일은
+  헤더 첫 글자 모양 대신 기준 run 의 글자 모양을 복제한다.
+  *(EN — Omitted RunSpec fields now inherit the replaced text's character shape (its first text run), in memory and in the exported file
+  alike: the file clones that run's own charPr and patches only what differs. Color left out stays black; `null` size/font = omitted.)*
+
 ---
 
 ## [0.0.18] — 2026-10-23
