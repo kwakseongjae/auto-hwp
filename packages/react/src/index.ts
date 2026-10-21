@@ -5,6 +5,9 @@ import "./styles.css";
 // Assembly + components
 export { HwpWorkspace } from "./components/HwpWorkspace";
 export type { HwpWorkspaceProps, WorkspaceDesignSelection, WorkspaceHandle, WorkspaceHandleChange, WorkspaceSidePanel, WorkspaceTextFormat, WorkspaceToolbarItem } from "./components/HwpWorkspace";
+// #482 — React-layer hook over `WorkspaceHandle.subscribe` (pairs with `onReady`).
+export { useWorkspaceState } from "./useWorkspaceState";
+export type { WorkspaceViewState } from "./useWorkspaceState";
 // 인라인 아이콘 세트(lucide path 사본 — 의존성 0, ISC 표기는 icons.tsx 상단). 호스트가 자기 툴바를
 // 조립할 때 SDK와 같은 글리프를 쓸 수 있도록 공개한다.
 export * as icons from "./icons";

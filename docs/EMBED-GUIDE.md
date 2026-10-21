@@ -235,7 +235,7 @@ sidePanel={(api) =>
 계약이 아니다** — 한국어 문구·카드 레이아웃·상호작용 모델이 전부 우리 것이다. 실제 제품은 자기 패널을
 `WorkspaceSidePanel` 에 대고 그리고, 이 패키지에서는 편집 표면만 가져가는 쪽을 권한다.
 
-### 3.2 자기 크롬 — `handleRef` · `chrome` (#482)
+### 3.2 자기 크롬 — `handleRef` · `onReady` · `chrome` (#482)
 
 메뉴 · 도구 막대 · 상태 막대를 직접 그리는 호스트는 **작업 공간 핸들**로 보기 상태를 읽고 명령을 보낸다. 숨은 DOM 을
 읽거나 단축키 `KeyboardEvent` 를 흉내 낼 필요가 없다. 핸들은 마운트된 동안 **같은 객체**라 상태에 들고 있어도 된다.
@@ -267,6 +267,32 @@ const off = ws.current?.subscribe((c) => c.zoom && redrawZoomLabel()); // zoom �
 - `subscribe` 는 상태가 **확정된 뒤** 한 번씩 알린다(확대 제스처 중에는 알리지 않는다 — 리렌더 0 규율).
 - 사이드 패널 안에서는 `api.handle` 이 같은 핸들이다.
 - 읽기 전용 쪽 보기(`HwpPageView`)도 `handleRef` 로 `scrollToPage(page)` · `getPageSize(page)`(배율 1 의 CSS px)를 준다.
+
+#### 값을 그리는 크롬 — `onReady` + `useWorkspaceState`
+
+단추의 켜짐/꺼짐 · 배율 · 쪽 표시처럼 **값을 그리는** 호스트 크롬은 핸들을 상태로 받고(`onReady`) react 층 훅
+`useWorkspaceState` 로 구독한다. 훅은 보이는 값이 바뀔 때만 그 컴포넌트를 다시 그린다(같은 값의 알림은 무시).
+
+```tsx
+import { useState } from "react";
+import { HwpWorkspace, useWorkspaceState, type HwpWorkspaceProps, type WorkspaceHandle } from "@auto-hwp/react";
+
+function Editor(props: HwpWorkspaceProps) {
+  const [ws, setWs] = useState<WorkspaceHandle | null>(null);
+  const view = useWorkspaceState(ws); // { zoom, page, pageCount, canUndo, canRedo, format } | null
+  return (
+    <>
+      <button disabled={!view?.canUndo} onClick={() => void ws?.undo()}>되돌리기</button>
+      <span>{view && `${Math.round(view.zoom * 100)}% · ${view.page + 1}/${view.pageCount}쪽`}</span>
+      <HwpWorkspace {...props} onReady={setWs} chrome={{ toolbar: false, statusBar: false }} />
+    </>
+  );
+}
+```
+
+- `onReady` 는 마운트마다 **한 번** 같은 핸들로 불린다. 렌더마다 새 함수를 넘겨도, StrictMode 의 개발 모드 이중 실행에서도 다시 부르지 않는다.
+- `handleRef` 와 `onReady` 는 같은 핸들을 준다 — 명령만 보내는 호스트는 `handleRef`, 값을 그리는 호스트는 `onReady` + 훅.
+- 핸들은 마운트 범위다. 작업 공간이 사라지는 것을 알아야 하면 콜백 `handleRef`(언마운트 때 `null`)를 쓴다.
 
 ### `styles.css` 는 수동 import
 

@@ -425,6 +425,11 @@ export interface HwpWorkspaceProps {
   /** #482 — receives the stable `WorkspaceHandle` (null on unmount). Works with a ref object or a
    *  callback ref; the identity never changes while mounted, so it is safe to hold in host state. */
   handleRef?: React.Ref<WorkspaceHandle>;
+  /** #482 — called once per mount with the same `WorkspaceHandle` (after the first commit), for hosts that
+   *  keep the handle in state: `onReady={setHandle}`. A new function identity per render does not re-fire it,
+   *  and neither does React StrictMode's dev double-effect. The handle is mount-scoped: to learn about the
+   *  unmount, use a callback `handleRef` (it receives `null`). */
+  onReady?: (handle: WorkspaceHandle) => void;
   /** #482 — turn the workspace's own chrome off when the host draws its own (additive: omitted = all
    *  shown). Only what is DRAWN changes — shortcuts, the context menu, the canvas, ruler, caret and the
    *  side-panel slot keep working, and every feature stays reachable through `WorkspaceHandle`. */
@@ -3895,6 +3900,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     };
   }, [zoomToCenter, scrollPageIntoView, compositionStore]);
   useImperativeHandle(props.handleRef, () => handle, [handle]);
+  // #482 — `onReady` once per mounted handle. Refs survive StrictMode's simulated remount, so the guard keeps
+  // the dev double-effect from firing it twice; a real remount is a new instance and fires again.
+  const onReadyRef = useRef(props.onReady);
+  onReadyRef.current = props.onReady;
+  const readyFiredRef = useRef<WorkspaceHandle | null>(null);
+  useEffect(() => {
+    if (readyFiredRef.current === handle) return;
+    readyFiredRef.current = handle;
+    onReadyRef.current?.(handle);
+  }, [handle]);
   // Notify after state SETTLES (effects run post-commit): zoom commits once per gesture, the page once per
   // change, the selection when the design target changes, history when the undo/redo stacks move.
   const handleMountedRef = useRef(false);

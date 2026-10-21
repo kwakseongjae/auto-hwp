@@ -1,9 +1,10 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
-import { createRef } from "react";
+import { StrictMode, createRef, useEffect, useState } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HwpPageView, type PageViewHandle } from "../components/HwpPageView";
-import { HwpWorkspace, type WorkspaceHandle, type WorkspaceHandleChange, type WorkspaceSidePanel } from "../components/HwpWorkspace";
+import { HwpWorkspace, type WorkspaceHandle, type WorkspaceHandleChange, type WorkspaceSidePanel, type WorkspaceTextFormat } from "../components/HwpWorkspace";
 import type { BlockHit, CellHit, Intent, RunSpec, TableBox } from "../types";
+import { useWorkspaceState } from "../useWorkspaceState";
 import { MockAdapter } from "./mockAdapter";
 
 // #482 — 작업 공간 핸들. 호스트가 자기 크롬(메뉴 · 도구 막대 · 상태 막대)을 만들 때 숨은 DOM 을 읽거나 단축키를
@@ -345,5 +346,130 @@ describe("PageViewHandle", () => {
     expect(scrolled.map((el) => (el as HTMLElement).dataset.page)).toEqual(["1"]);
     expect(ref.current!.getPageSize(0)?.width).toBe(794); // 배율(1.5)과 무관
     expect(ref.current!.getPageSize(2)).toBeNull();
+  });
+});
+
+describe("onReady · useWorkspaceState — react 층", () => {
+  it("onReady 는 마운트마다 한 번(StrictMode 에서도) handleRef 와 같은 핸들로 부르고, 함수 · 배율이 바뀌어도 다시 부르지 않는다", async () => {
+    const ref = createRef<WorkspaceHandle>();
+    const seen: WorkspaceHandle[] = [];
+    const adapter = new MockAdapter({ pages: 1 });
+    const tree = (tag: string) => (
+      <StrictMode>
+        <HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} handleRef={ref} className={tag} onReady={(h) => seen.push(h)} />
+      </StrictMode>
+    );
+    const { container, rerender } = render(tree("a"));
+    await sheetOf(container);
+    rerender(tree("b"));
+    act(() => {
+      ref.current!.setZoom(0.75);
+    });
+    await flush();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe(ref.current);
+  });
+
+  it("useWorkspaceState 는 onReady 로 받은 핸들의 값을 그리고, 보이는 값이 그대로인 알림에는 새 값을 내지 않는다", async () => {
+    const box: { ws: WorkspaceHandle | null; panel: WorkspaceSidePanel | null } = { ws: null, panel: null };
+    let commits = 0;
+    function Host({ adapter }: { adapter: MockAdapter }) {
+      const [ws, setWs] = useState<WorkspaceHandle | null>(null);
+      const view = useWorkspaceState(ws);
+      useEffect(() => {
+        commits += 1;
+      }, [view]);
+      return (
+        <div>
+          <span data-testid="host-view">{view ? `${Math.round(view.zoom * 100)}% ${view.page + 1}/${view.pageCount} undo:${view.canUndo}` : "-"}</span>
+          <HwpWorkspace
+            adapter={adapter}
+            document={doc}
+            onAiRequest={noAi}
+            onReady={(h) => {
+              box.ws = h;
+              setWs(h);
+            }}
+            sidePanel={(api) => {
+              box.panel = api;
+              return null;
+            }}
+          />
+        </div>
+      );
+    }
+    const { container, getByTestId } = render(<Host adapter={new MockAdapter({ pages: 3 })} />);
+    await sheetOf(container);
+    await waitFor(() => expect(getByTestId("host-view").textContent).toBe("90% 1/3 undo:false"));
+    act(() => {
+      box.ws!.setZoom(1.5);
+    });
+    await waitFor(() => expect(getByTestId("host-view").textContent).toBe("150% 1/3 undo:false"));
+    await act(async () => {
+      await box.panel!.apply([{ intent: "SetParagraphText", section: 0, block: 0, text: "x" } as Intent]);
+    });
+    await waitFor(() => expect(getByTestId("host-view").textContent).toBe("150% 1/3 undo:true"));
+    // 두 번째 편집 — 기록 깊이가 1 → 2 라 history 알림은 오지만, 보이는 값(배율 · 쪽 · canUndo · canRedo)은 그대로다
+    let notified = 0;
+    const off = box.ws!.subscribe(() => {
+      notified += 1;
+    });
+    const before = commits;
+    await act(async () => {
+      await box.panel!.apply([{ intent: "SetParagraphText", section: 0, block: 0, text: "y" } as Intent]);
+    });
+    await flush();
+    off();
+    expect(notified).toBeGreaterThan(0); // 알림은 왔다 — 이 단언이 없으면 아래 단언이 공허하다
+    expect(commits).toBe(before);
+    expect(getByTestId("host-view").textContent).toBe("150% 1/3 undo:true");
+  });
+
+  it("useWorkspaceState — 핸들이 없으면 null, 값이 같은 새 서식 객체는 무시하고 바뀐 값만 내며, 언마운트하면 구독을 푼다", () => {
+    const listeners = new Set<(c: WorkspaceHandleChange) => void>();
+    let zoom = 1;
+    let fmt: WorkspaceTextFormat = { font: "A", sizePt: 10, color: null, bold: false, italic: false, underline: false, highlight: null };
+    const fake = {
+      getZoom: () => zoom,
+      getPage: () => ({ current: 0, count: 2 }),
+      canUndo: () => false,
+      canRedo: () => false,
+      getSelectionFormat: () => fmt,
+      subscribe: (l: (c: WorkspaceHandleChange) => void) => {
+        listeners.add(l);
+        return () => {
+          listeners.delete(l);
+        };
+      },
+    } as unknown as WorkspaceHandle;
+    const emit = (c: WorkspaceHandleChange) =>
+      act(() => {
+        listeners.forEach((l) => l(c));
+      });
+    let commits = 0;
+    function Probe({ handle }: { handle: WorkspaceHandle | null }) {
+      const v = useWorkspaceState(handle);
+      useEffect(() => {
+        commits += 1;
+      }, [v]);
+      return <span data-testid="probe">{v ? `${v.zoom} ${v.format?.bold}` : "-"}</span>;
+    }
+    const { getByTestId, rerender, unmount } = render(<Probe handle={null} />);
+    expect(getByTestId("probe").textContent).toBe("-");
+    rerender(<Probe handle={fake} />);
+    expect(getByTestId("probe").textContent).toBe("1 false");
+    expect(listeners.size).toBe(1);
+    const before = commits;
+    fmt = { ...fmt }; // 새 객체, 같은 값
+    emit({ selection: true });
+    expect(commits).toBe(before);
+    fmt = { ...fmt, bold: true, mixed: { italic: true } };
+    emit({ selection: true });
+    expect(getByTestId("probe").textContent).toBe("1 true");
+    zoom = 2;
+    emit({ zoom: true });
+    expect(getByTestId("probe").textContent).toBe("2 true");
+    unmount();
+    expect(listeners.size).toBe(0);
   });
 });
