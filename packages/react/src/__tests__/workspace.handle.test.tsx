@@ -100,6 +100,34 @@ describe("WorkspaceHandle — 정체성 · 보기", () => {
     expect(ref.current!.getPage()).toEqual({ current: 0, count: 3 });
   });
 
+  it("스크롤로 지금 쪽이 바뀌면 상태 막대와 같은 쪽을 주고 page 를 한 번 알린다", async () => {
+    const { ref, container } = mount(new MockAdapter({ pages: 3 }));
+    await sheetOf(container);
+    const h = ref.current!;
+    const seen: WorkspaceHandleChange[] = [];
+    h.subscribe((c) => seen.push(c));
+    // 캔버스를 두 쪽 아래로 내린 것처럼 — 쪽 틀이 위로 올라간다
+    const shifted = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const r = shifted.call(this);
+      const page = (this as HTMLElement).dataset?.page;
+      if (page == null || !this.classList.contains("hw-sheet-wrap")) return r;
+      const top = r.top - 2 * 1123;
+      return { ...r, top, y: top, bottom: top + 1123, toJSON() {} } as DOMRect;
+    };
+    try {
+      await act(async () => {
+        container.querySelector(".hw-canvas")!.dispatchEvent(new Event("scroll"));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+      });
+      expect(h.getPage()).toEqual({ current: 2, count: 3 });
+      expect(container.querySelector('[data-testid="hw-statusbar-page"]')?.textContent).toContain("3");
+      expect(seen.filter((c) => c.page)).toHaveLength(1);
+    } finally {
+      Element.prototype.getBoundingClientRect = shifted;
+    }
+  });
+
   it("scrollToPage 는 이 작업 공간 캔버스의 쪽만 민다(같은 화면의 다른 쪽 보기는 그대로)", async () => {
     const scrolled: Element[] = [];
     Element.prototype.scrollIntoView = function (this: Element) {
@@ -238,6 +266,21 @@ describe("WorkspaceHandle — 서식", () => {
     expect(viaHandle.applied[0]).toMatchObject({ intent: "SetParagraphRuns", runs: [{ text: "가나 다", underline: true }] });
   });
 
+  it("편집 정책이 거절하면 toggleStyle 은 false 이고 문서는 그대로다", async () => {
+    const adapter = bodyAdapter([{ text: "가나 다" }]);
+    const { ref, container } = mount(adapter, { enableEditing: true, onBeforeApply: () => false });
+    click(await sheetOf(container), 101, 45);
+    await waitFor(() => expect(container.querySelector(".hw-caret")).toBeTruthy());
+    fireEvent.keyDown(window, { key: "a", metaKey: true });
+    await flush();
+    let ok = true;
+    await act(async () => {
+      ok = await ref.current!.toggleStyle("bold");
+    });
+    expect(ok).toBe(false);
+    expect(adapter.applied).toHaveLength(0);
+  });
+
   it("getSelectionFormat 은 밑줄 · 글자 배경 · 섞임을 준다", async () => {
     const table: TableBox = { section: 0, block: 1, x: 40, y: 60, w: 300, h: 120, rows: 3, cols: 3, first_row: 0 };
     const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
@@ -285,5 +328,22 @@ describe("chrome — 호스트가 그리는 크롬은 DOM 에 없다", () => {
     expect(container.querySelector('[data-testid="hw-statusbar-page"]')).toBeNull();
     expect(container.querySelector(".hw-canvas .hw-sheet svg")).toBeTruthy();
     expect(ref.current!.getPage().count).toBe(2); // 상태 막대가 없어도 핸들로 읽는다
+  });
+});
+
+describe("PageViewHandle", () => {
+  it("scrollToPage 는 그 쪽 틀을 밀고, 범위 밖 쪽은 무시한다 · getPageSize 는 배율 1 의 CSS px", async () => {
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    const ref = createRef<PageViewHandle>();
+    const { container } = render(<HwpPageView adapter={new MockAdapter({ pages: 2 })} pageCount={2} zoom={1.5} handleRef={ref} />);
+    await sheetOf(container, 1);
+    ref.current!.scrollToPage(1);
+    ref.current!.scrollToPage(5);
+    expect(scrolled.map((el) => (el as HTMLElement).dataset.page)).toEqual(["1"]);
+    expect(ref.current!.getPageSize(0)?.width).toBe(794); // 배율(1.5)과 무관
+    expect(ref.current!.getPageSize(2)).toBeNull();
   });
 });
