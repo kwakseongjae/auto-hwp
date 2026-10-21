@@ -1120,6 +1120,7 @@ pub(crate) fn parse_section(
                             id: p.id.clone(),
                             simple: p.simple,
                             text_zone: compute_text_zone(&p),
+                            shape_edit_runs: None,
                         });
                         // 표 호스트 문단 = 표를 품고 보이는 텍스트가 없는 문단. 한컴은 여기에 줄을
                         // 하나도 걸지 않는다(표가 그 자리를 차지한다) — 조판이 이 플래그를 보고

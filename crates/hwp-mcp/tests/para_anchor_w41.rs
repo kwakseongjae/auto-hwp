@@ -141,6 +141,7 @@ fn hwpx_origin_insert_paragraph_at_exports_at_that_index() {
                 ..Default::default()
             }],
             para: hwp_ops::ParaSpec::default(),
+            para_like: None,
         },
     )
     .expect("InsertParagraphAt applies");

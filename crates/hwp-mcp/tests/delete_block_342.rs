@@ -254,6 +254,7 @@ fn delete_combined_with_edit_and_insert_keeps_order() {
                 ..Default::default()
             }],
             para: hwp_ops::ParaSpec::default(),
+            para_like: None,
         },
     )
     .expect("insert");

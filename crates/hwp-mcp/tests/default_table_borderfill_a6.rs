@@ -162,6 +162,7 @@ fn no_table_emitted_means_no_new_borderfill() {
                 ..Default::default()
             }],
             para: Default::default(),
+            para_like: None,
         },
     )
     .unwrap();

@@ -2,7 +2,7 @@
 //! rendering is a downstream projection. Every editable node carries provenance +
 //! a passthrough bag + a dirty flag so untouched content round-trips byte-verbatim.
 
-use crate::style::{CharShape, ParaShape};
+use crate::style::{CharShape, ParaShape, ParaShapePatch};
 use crate::types::{Dirty, HwpUnit, NodeId, Passthrough, Provenance};
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
@@ -43,6 +43,20 @@ pub struct SemanticDoc {
     /// back at exactly that id. Empty for docs from other sources.
     pub hwpx_pool_char_ids: BTreeMap<usize, u64>,
     pub hwpx_pool_para_ids: BTreeMap<usize, u64>,
+    /// #483 — `para_shapes` indices created by `SetParagraphShape`: each is `base` (the index the
+    /// paragraph used before — usually a pool shape parsed from header.xml) with `patch` applied. The
+    /// HWPX writer clones `base`'s ORIGINAL `<hh:paraPr>` (numbering, tabs, borders and the other break
+    /// settings intact) and patches only these attributes, instead of re-synthesizing from the default
+    /// paraPr. Depth is always 1: a second edit overlays its patch onto the same base.
+    pub para_shape_derived: BTreeMap<usize, ParaShapeDerivation>,
+}
+
+/// #483 — how a derived `para_shapes` entry was made (see [`SemanticDoc::para_shape_derived`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ParaShapeDerivation {
+    /// The `para_shapes` index the edit started from (never itself derived).
+    pub base: usize,
+    pub patch: ParaShapePatch,
 }
 
 /// The document's original `header.xml` shape pools, parsed to typed values (issue #003, P1).
@@ -323,6 +337,17 @@ pub struct SourceLineGeometry {
     pub segment_width: HwpUnit,
 }
 
+impl Paragraph {
+    /// #483 — a fingerprint of the run content (text, inline objects, char-shape indices). Two calls
+    /// agree iff nothing in `runs` changed in between (deterministic within one build).
+    pub fn runs_fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        format!("{:?}", self.runs).hash(&mut h);
+        h.finish()
+    }
+}
+
 /// Where a parsed top-level paragraph came from in the section XML, for surgical re-emit.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ParaSource {
@@ -337,6 +362,11 @@ pub struct ParaSource {
     /// True iff the original `<hp:p>` contained ONLY `hp:run`/`hp:t` children (no secPr/ctrl/tbl/
     /// linesegarray/pic/equation). The replace-in-place path refuses non-simple paragraphs.
     pub simple: bool,
+    /// #483 — set by `SetParagraphShape` on a paragraph whose body was untouched: the
+    /// [`Paragraph::runs_fingerprint`] at that moment. While the runs still match it, the HWPX writer
+    /// re-emits only the open tag (the body — runs and layout cache — stays byte-verbatim), even for a
+    /// `simple` paragraph that a body edit would rebuild. `None` = no such guarantee.
+    pub shape_edit_runs: Option<u64>,
     /// W4.2 — the TEXT-ONLY run window of a paragraph that is *not* `simple` but is still safe to
     /// edit: its structural children (`<hp:secPr>`, `<hp:ctrl>`, `<hp:pic>` …) all live in runs that
     /// carry no text, and the text-bearing runs are contiguous. `None` ⇒ text edits stay refused.
@@ -551,6 +581,11 @@ pub struct Table {
     /// Non-inline `TOP_AND_BOTTOM`/`SQUARE` tables are deliberately left `None` for now (they still
     /// ship as inline, which lays out nearly the same). Layout does not read this.
     pub float_placement: Option<TableFloat>,
+    /// EXPORT (#483 `SetTableProps`): placement attributes an op set explicitly. The HWPX writer applies
+    /// them to the emitted `<hp:tbl pageBreak repeatHeader>` / the table's own `<hp:pos treatAsChar>` —
+    /// patched onto the original bytes for a parsed table, at emission for a synthesized or re-emitted
+    /// one. Layout does not read this (a reopened document's parser derives the render fields).
+    pub props_override: TablePropsPatch,
     /// Per-column widths (HWPUNIT), `cols` entries — for faithful column proportions on render.
     /// Empty when unknown (then the renderer falls back to auto-layout).
     pub col_widths: Vec<HwpUnit>,
@@ -646,6 +681,54 @@ pub struct TableFloat {
     pub vert_offset: HwpUnit,
     pub horz_offset: HwpUnit,
     pub z_order: i32,
+}
+
+/// `<hp:tbl pageBreak>` — how a table may split at a page boundary (#483).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TablePageBreak {
+    /// `NONE` — never split.
+    None,
+    /// `TABLE` — split between rows.
+    Table,
+    /// `CELL` — split between rows, and inside a row taller than the page.
+    Cell,
+}
+
+impl TablePageBreak {
+    /// The OWPML attribute token.
+    pub fn token(self) -> &'static str {
+        match self {
+            TablePageBreak::None => "NONE",
+            TablePageBreak::Table => "TABLE",
+            TablePageBreak::Cell => "CELL",
+        }
+    }
+}
+
+/// #483 — table placement attributes an op set explicitly (`SetTableProps`); `None` = keep.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TablePropsPatch {
+    /// `<hp:pos treatAsChar>` — 글자처럼 취급.
+    pub treat_as_char: Option<bool>,
+    pub page_break: Option<TablePageBreak>,
+    /// `<hp:tbl repeatHeader>` — 제목 행 반복.
+    pub repeat_header: Option<bool>,
+}
+
+impl TablePropsPatch {
+    /// True when the patch changes nothing.
+    pub fn is_empty(&self) -> bool {
+        *self == TablePropsPatch::default()
+    }
+
+    /// `self` with every `Some` field of `later` laid over it.
+    pub fn overlay(&self, later: &TablePropsPatch) -> TablePropsPatch {
+        TablePropsPatch {
+            treat_as_char: later.treat_as_char.or(self.treat_as_char),
+            page_break: later.page_break.or(self.page_break),
+            repeat_header: later.repeat_header.or(self.repeat_header),
+        }
+    }
 }
 
 /// A table caption expressed in ordinary document blocks. `spacing` is the gap between caption and

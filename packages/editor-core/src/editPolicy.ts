@@ -63,7 +63,7 @@ const READ_ONLY = new Set([
 ]);
 
 const CELL = new Set(["SetTableCell", "SetTableCellRuns", "SetTableCellShade"]);
-const PARAGRAPH = new Set(["SetParagraphText", "SetParagraphRuns", "SetCharFmt", "SetRunCharFmt", "SplitParagraph", "MergeParagraph"]);
+const PARAGRAPH = new Set(["SetParagraphText", "SetParagraphRuns", "SetCharFmt", "SetRunCharFmt", "SplitParagraph", "MergeParagraph", "SetParagraphShape"]);
 const BLOCK_AT_INDEX = new Set([
   "DeleteBlock",
   "DeleteNestedBlock",
@@ -114,6 +114,12 @@ export function intentTargets(intent: Intent): EditTarget[] {
   }
   if (PARAGRAPH.has(name)) return [{ kind: "paragraph", section, block: num(intent.block) ?? 0, intent: name }];
   if (BLOCK_AT_INDEX.has(name)) return [{ kind: "block", section, block: num(intent.index) ?? num(intent.block), intent: name }];
+  if (name === "SetTableProps") {
+    // #483 — a nested table (`path` + `index` inside the parent cell) is guarded as the TOP-LEVEL table
+    // that holds it, so a policy protecting that table also protects the tables inside it.
+    const path = Array.isArray(intent.path) ? (intent.path as CellAddr[]) : [];
+    return [{ kind: "block", section, block: path.length > 0 ? path[0].block : num(intent.index), intent: name }];
+  }
   if (name === "InsertImage") return [{ kind: "block", section, block: num(intent.block), intent: name }];
   if (BLOCK_MOVE.has(name)) {
     return [
