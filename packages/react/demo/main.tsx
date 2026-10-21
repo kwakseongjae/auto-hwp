@@ -1,6 +1,6 @@
-import { StrictMode, useRef, useState } from "react";
+import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { HwpWorkspace, WasmAdapter, chatSidePanel, type Anchor, type DocContext, type Intent } from "../src/index";
+import { HwpWorkspace, WasmAdapter, chatSidePanel, type Anchor, type DocContext, type Intent, type WorkspaceHandle } from "../src/index";
 
 // One WasmAdapter for the app's lifetime (it holds the wasm instance + open document).
 const adapter = new WasmAdapter();
@@ -30,6 +30,19 @@ async function mockAi(instruction: string, anchors: Anchor[], _ctx: DocContext):
 function App() {
   const [doc, setDoc] = useState<{ bytes: Uint8Array; name?: string } | null>(null);
   const fontRef = useRef<File | null>(null);
+  // #482 — host chrome through the workspace handle (no DOM reads, no synthesized shortcuts).
+  const ws = useRef<WorkspaceHandle>(null);
+  const [view, setView] = useState("");
+  useEffect(() => {
+    const show = () => {
+      const h = ws.current;
+      if (!h) return;
+      const { current, count } = h.getPage();
+      setView(count ? `${Math.round(h.getZoom() * 100)}% · ${current + 1}/${count}쪽` : "");
+    };
+    show();
+    return ws.current?.subscribe(show);
+  }, [doc]);
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -61,9 +74,14 @@ function App() {
           <input type="file" accept=".ttf,.otf" hidden onChange={(e) => (fontRef.current = e.target.files?.[0] ?? null)} />
         </label>
         <span style={{ fontSize: 12, color: "#6b7280" }}>업로드 → 표/문단 클릭(마킹) → 프롬프트 → 미리보기 → 적용 → PDF</span>
+        <span style={{ flex: 1 }} />
+        <button type="button" onClick={() => ws.current?.fit("width")}>폭 맞춤</button>
+        <button type="button" onClick={() => ws.current?.fit("page")}>쪽 맞춤</button>
+        <button type="button" onClick={() => void ws.current?.undo()}>되돌리기</button>
+        <span style={{ fontSize: 12, color: "#374151", minWidth: 90 }} data-testid="demo-view">{view}</span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <HwpWorkspace adapter={adapter} document={doc} onAiRequest={mockAi} requestFont={requestFont} sidePanel={chatSidePanel({ onAiRequest: mockAi, isMock: true })} />
+        <HwpWorkspace adapter={adapter} handleRef={ws} document={doc} onAiRequest={mockAi} requestFont={requestFont} sidePanel={chatSidePanel({ onAiRequest: mockAi, isMock: true })} />
       </div>
     </div>
   );

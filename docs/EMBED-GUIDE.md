@@ -235,6 +235,39 @@ sidePanel={(api) =>
 계약이 아니다** — 한국어 문구·카드 레이아웃·상호작용 모델이 전부 우리 것이다. 실제 제품은 자기 패널을
 `WorkspaceSidePanel` 에 대고 그리고, 이 패키지에서는 편집 표면만 가져가는 쪽을 권한다.
 
+### 3.2 자기 크롬 — `handleRef` · `chrome` (#482)
+
+메뉴 · 도구 막대 · 상태 막대를 직접 그리는 호스트는 **작업 공간 핸들**로 보기 상태를 읽고 명령을 보낸다. 숨은 DOM 을
+읽거나 단축키 `KeyboardEvent` 를 흉내 낼 필요가 없다. 핸들은 마운트된 동안 **같은 객체**라 상태에 들고 있어도 된다.
+명령은 내장 도구 막대 · 단축키와 **같은 레인**(같은 편집 정책 · 같은 실행취소 단위 · 같은 토스트)을 탄다.
+
+```tsx
+import { useRef } from "react";
+import { HwpWorkspace, type WorkspaceHandle } from "@auto-hwp/react";
+
+const ws = useRef<WorkspaceHandle>(null);
+
+<HwpWorkspace
+  {...props}
+  handleRef={ws}
+  chrome={{ toolbar: false, outline: false, statusBar: false }} // 자기 크롬을 그리면 내장 크롬은 그리지 않는다
+/>
+
+ws.current?.setZoom(0.75);        // 정확한 배율(1 = 100%) — 단계가 아니다
+ws.current?.fit("width");         // "width" | "page" — 쪽 맞춤은 그 쪽으로 옮긴다
+ws.current?.getPage();            // { current, count } — 상태 막대와 같은 규칙
+ws.current?.scrollToPage(3);
+await ws.current?.undo();         // true = 되돌림 · canUndo() / canRedo()
+await ws.current?.toggleStyle("underline"); // ⌘U 와 같다 — 캐럿 선택 범위가 없으면 false
+ws.current?.getSelectionFormat(); // { bold, italic, underline, highlight, mixed?, … } | null
+const off = ws.current?.subscribe((c) => c.zoom && redrawZoomLabel()); // zoom · page · history · selection
+```
+
+- `chrome` 은 **그리는 것만** 끈다. 단축키 · 맥락 메뉴 · 캔버스 · 눈금자 · 캐럿 · 사이드 패널 슬롯은 그대로다.
+- `subscribe` 는 상태가 **확정된 뒤** 한 번씩 알린다(확대 제스처 중에는 알리지 않는다 — 리렌더 0 규율).
+- 사이드 패널 안에서는 `api.handle` 이 같은 핸들이다.
+- 읽기 전용 쪽 보기(`HwpPageView`)도 `handleRef` 로 `scrollToPage(page)` · `getPageSize(page)`(배율 1 의 CSS px)를 준다.
+
 ### `styles.css` 는 수동 import
 
 `@auto-hwp/react` 는 CSS-in-JS 가 아니다. `import "@auto-hwp/react/styles.css"` 를 **한 번** 넣어야 페이지/

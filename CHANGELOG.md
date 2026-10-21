@@ -36,6 +36,22 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 추가
+
+- **작업 공간 핸들(#482)** — `HwpWorkspace` 의 `handleRef` 가 마운트된 동안 같은 객체인 `WorkspaceHandle` 을 준다:
+  `getZoom` · `setZoom`(정확한 배율) · `fit("width" | "page")` · `getPage` · `scrollToPage` · `undo` · `redo` · `canUndo` · `canRedo` ·
+  `toggleStyle`(⌘B/⌘I/⌘U 와 같은 레인) · `getSelectionFormat` · `subscribe`(zoom · page · history · selection, 확정 뒤 한 번).
+  사이드 패널 api 에도 `handle` 로 실린다. 자기 크롬을 그리는 호스트가 숨은 DOM 을 읽거나 단축키를 흉내 낼 필요가 없다.
+- **`chrome` prop(#482)** — `{ toolbar, outline, statusBar }` 를 `false` 로 주면 그 크롬을 그리지 않는다(기본 전부 켬).
+- **선택 서식(#482)** — `WorkspaceDesignSelection.format` 에 `underline` · `highlight`(글자 배경) · `mixed`(run 마다 다른 필드)가 붙는다
+  (타입은 선택 필드 — 객체를 직접 만드는 호스트 코드는 그대로 컴파일된다).
+- **`HwpPageView` 핸들(#482)** — `handleRef` 로 `scrollToPage(page)` · `getPageSize(page)`.
+
+### 고침
+
+- `jumpToPage`(문서 구조 · 사이드 패널)가 문서 전체에서 쪽을 찾아, 같은 화면에 쪽 보기가 하나 더 있으면 그쪽을 스크롤할 수 있었다 —
+  이제 그 작업 공간 캔버스 안에서만 찾는다(#482).
+
 ---
 
 ## [0.0.17] — 2026-10-14

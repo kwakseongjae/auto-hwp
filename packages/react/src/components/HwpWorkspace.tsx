@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Anchor, Box, CellAddr, CellDir, DocContext, EditTarget as PolicyTarget, EngineAdapter, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@auto-hwp/editor-core";
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize, DRAG_THRESHOLD_PX, intentGhosts } from "@auto-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
@@ -11,7 +11,7 @@ import { ZOOM_STEP, clampZoom, isEditableTarget, panBy, wheelToZoomFactor, zoomA
 import { gridToTsv, joinSelectionText } from "../clipboard";
 import { useHwpEditor } from "../useHwpEditor";
 
-import { HwpPageView, type PageClick } from "./HwpPageView";
+import { HwpPageView, type PageClick, type PageViewHandle } from "./HwpPageView";
 import { SelectionOverlay, type Mark } from "./SelectionOverlay";
 import { MarqueeLayer } from "./MarqueeLayer";
 import { CaretLayer } from "./CaretLayer";
@@ -120,6 +120,42 @@ interface EditTarget {
   curSizePt?: number;
   curColor?: string | null;
   curFont?: string | null;
+  /** #482 — first-run underline / 글자 배경(charPr shadeColor) and which character fields differ across the
+   *  target's runs, surfaced through `WorkspaceDesignSelection.format` and the workspace handle. */
+  curUnderline?: boolean;
+  curHighlight?: string | null;
+  curMixed?: WorkspaceTextFormat["mixed"];
+}
+
+/** #482 — which character fields are NOT uniform across `runs` (newline separators ignored). `undefined`
+ *  when every run agrees, so a uniform target carries no `mixed` key at all. */
+function mixedFormat(runs: readonly RunSpec[]): WorkspaceTextFormat["mixed"] {
+  const body = runs.filter((r) => r.text !== "\n");
+  if (body.length < 2) return undefined;
+  const out: NonNullable<WorkspaceTextFormat["mixed"]> = {};
+  const differs = (pick: (r: RunSpec) => unknown) => new Set(body.map(pick)).size > 1;
+  if (differs((r) => !!r.bold)) out.bold = true;
+  if (differs((r) => !!r.italic)) out.italic = true;
+  if (differs((r) => !!r.underline)) out.underline = true;
+  if (differs((r) => r.highlight ?? null)) out.highlight = true;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** #482 — the character-format fields `EditTarget` derives from a target's runs (first run + mixed). */
+function runFormat(
+  runs: RunSpec[],
+): Pick<EditTarget, "curBold" | "curItalic" | "curSizePt" | "curColor" | "curFont" | "curUnderline" | "curHighlight" | "curMixed"> {
+  const style = firstRunStyle(runs);
+  return {
+    curBold: !!style.bold,
+    curItalic: !!style.italic,
+    curSizePt: style.size_pt ?? RIBBON_DEFAULT_PT,
+    curColor: style.color ?? null,
+    curFont: style.font ?? null,
+    curUnderline: !!style.underline,
+    curHighlight: style.highlight ?? null,
+    curMixed: mixedFormat(runs),
+  };
 }
 
 /** The INLINE per-element edit target (issue 06x) — a SNAPSHOT captured when the user opens the inline
@@ -138,6 +174,9 @@ interface InlineTarget {
 // issue 048: the ribbon's size box shows an inherited (size unset) run at the doc default ~10pt — matching
 // richedit's DEFAULT_PT so the reflected size and applyLiveStyle's size wrap agree.
 const RIBBON_DEFAULT_PT = 10;
+/** #482 `fit()` — breathing room (CSS px) kept free beside the page so a fitted page never forces a
+ *  scrollbar on the axis it was fitted to. */
+const FIT_MARGIN_PX = 16;
 
 /** Apply character-only inspector fields while preserving text and every untouched run attribute. */
 function patchRuns(runs: RunSpec[], patch: FormatRibbonPatch): RunSpec[] {
@@ -205,6 +244,67 @@ export interface WorkspaceSidePanel {
   /** True while the engine glyph caret owns keyboard input. Panels can collapse frame/cell controls
    *  and keep the user focused on typography while the document itself stays visually unchanged. */
   textEditing?: boolean;
+  /** #482 — the workspace handle (same object as `handleRef` receives, identity stable across renders).
+   *  Lets a panel read zoom/page/history/format and send commands without reaching into the canvas DOM
+   *  or synthesizing keyboard shortcuts. OPTIONAL so a host that builds its own panel object compiles. */
+  handle?: WorkspaceHandle;
+}
+
+/** #482 — character format of the current selection (first run of the target), as the design inspector
+ *  and `WorkspaceHandle.getSelectionFormat()` report it. `underline` · `highlight` · `mixed` are additive:
+ *  the workspace always fills the first two; `mixed` is present only when the target's runs disagree. */
+export interface WorkspaceTextFormat {
+  font: string | null;
+  sizePt: number;
+  color: string | null;
+  bold: boolean;
+  italic: boolean;
+  underline?: boolean;
+  /** 글자 배경(charPr `shadeColor`) as `#RRGGBB`, `null` when none. */
+  highlight?: string | null;
+  /** Fields that differ across the target's runs (e.g. a paragraph that is only partly bold). */
+  mixed?: Partial<Record<"bold" | "italic" | "underline" | "highlight", true>>;
+}
+
+/** #482 — what changed, as `WorkspaceHandle.subscribe` reports it. Several flags can arrive together. */
+export interface WorkspaceHandleChange {
+  zoom?: true;
+  page?: true;
+  history?: true;
+  selection?: true;
+}
+
+/** #482 — a stable, render-independent handle on the live workspace: read the view state and send the
+ *  same commands the built-in toolbar and shortcuts send, so a host can build its own chrome (menus,
+ *  toolbars, status bar) without reading hidden DOM or synthesizing `KeyboardEvent`s. The object identity
+ *  never changes while the workspace is mounted; every method reads the live state when called. Methods
+ *  are safe without a document (reads return defaults, commands return `false`/the current value). */
+export interface WorkspaceHandle {
+  /** Committed zoom factor (1 = 100%). */
+  getZoom(): number;
+  /** Zoom to an exact factor about the viewport center (clamped to the workspace range). Returns the
+   *  clamped factor that will be committed. */
+  setZoom(zoom: number): number;
+  /** Fit the current page to the canvas width (`"width"`) or the whole page (`"page"`, then scroll to
+   *  it). Returns the factor applied, or the current one when the canvas/page size is not known yet. */
+  fit(mode: "width" | "page"): number;
+  /** The page at the reading line (the status bar's page, 0-based) and the live page count. */
+  getPage(): { current: number; count: number };
+  /** Scroll the canvas to a page (0-based) — the same lane as the outline and `jumpToPage`. */
+  scrollToPage(page: number): void;
+  /** Undo/redo one batch — the toolbar's lane (same toast). Resolves `true` when something changed. */
+  undo(): Promise<boolean>;
+  redo(): Promise<boolean>;
+  canUndo(): boolean;
+  canRedo(): boolean;
+  /** Toggle a character style on the live glyph-caret selection — the ⌘B/⌘I/⌘U lane (same edit policy,
+   *  one undo step). Resolves `false` without a caret selection, while the in-place editor or an IME
+   *  composition owns the keyboard, or when the edit is refused. */
+  toggleStyle(style: "bold" | "italic" | "underline" | "strike"): Promise<boolean>;
+  /** Character format of the current selection (`designSelection.format`), or `null` without one. */
+  getSelectionFormat(): WorkspaceTextFormat | null;
+  /** Called after zoom/page/history/selection settle (never per gesture tick). Returns an unsubscribe. */
+  subscribe(listener: (change: WorkspaceHandleChange) => void): () => void;
 }
 
 /** Stable, reader-facing selection snapshot for a host-owned design inspector. Geometry is own-render
@@ -217,13 +317,7 @@ export interface WorkspaceDesignSelection {
   block: number;
   text: string;
   box: Box;
-  format: {
-    font: string | null;
-    sizePt: number;
-    color: string | null;
-    bold: boolean;
-    italic: boolean;
-  };
+  format: WorkspaceTextFormat;
   canTextStyle: boolean;
   canCellStyle: boolean;
 }
@@ -328,6 +422,13 @@ export interface HwpWorkspaceProps {
    *  prop-drilling. Omit for the default Korean chrome (byte-identical to a workspace without this prop).
    *  Keep the object REFERENCE stable (module const / `useMemo`): a new reference re-merges the catalog. */
   messages?: DeepPartial<WorkspaceMessages>;
+  /** #482 — receives the stable `WorkspaceHandle` (null on unmount). Works with a ref object or a
+   *  callback ref; the identity never changes while mounted, so it is safe to hold in host state. */
+  handleRef?: React.Ref<WorkspaceHandle>;
+  /** #482 — turn the workspace's own chrome off when the host draws its own (additive: omitted = all
+   *  shown). Only what is DRAWN changes — shortcuts, the context menu, the canvas, ruler, caret and the
+   *  side-panel slot keep working, and every feature stays reachable through `WorkspaceHandle`. */
+  chrome?: { toolbar?: boolean; outline?: boolean; statusBar?: boolean };
   className?: string;
 }
 
@@ -885,11 +986,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
 
   // Discrete zoom about the viewport CENTER (toolbar ± and ⌘+/-/0). Reuses the SAME zoomAt math + the
   // single setZoom-then-settle path — the toolbar buttons and keys are one unified zoom state.
-  const zoomAtCenter = useCallback((factor: number) => {
+  // `exact` (#482 handle): commit this clamped factor instead of current×factor — same anchor/scroll math.
+  const zoomAtCenter = useCallback((factor: number, exact?: number) => {
     const canvas = canvasRef.current;
     const layer = zoomLayerRef.current;
     if (!canvas || !layer) {
-      setZoom((z) => clampZoom(z * factor));
+      setZoom((z) => exact ?? clampZoom(z * factor));
       return;
     }
     const cRect = canvas.getBoundingClientRect();
@@ -904,10 +1006,45 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       scrollLeft: canvas.scrollLeft,
       scrollTop: canvas.scrollTop,
     });
-    if (res.zoom === zoomRef.current) return;
+    const next = exact ?? res.zoom;
+    if (next === zoomRef.current) return;
     pendingScrollRef.current = { left: res.scrollLeft, top: res.scrollTop };
-    setZoom(res.zoom);
+    setZoom(next);
   }, []);
+
+  // #482 — an EXACT zoom about the viewport center (handle `setZoom`/`fit`). Returns the clamped factor
+  // that will commit; a no-op target returns the current one.
+  const zoomToCenter = useCallback(
+    (target: number): number => {
+      const cur = zoomRef.current;
+      if (!Number.isFinite(target) || target <= 0) return cur;
+      const next = clampZoom(target);
+      if (Math.abs(next - cur) < 1e-9) return cur;
+      zoomAtCenter(next / cur, next);
+      return next;
+    },
+    [zoomAtCenter],
+  );
+
+  // #482 — scroll THIS workspace's canvas to a page. Scoped to `canvasRef` (a second page view on the same
+  // document — e.g. a host's read-only original next to the editor — must not be the one that moves) and
+  // aimed at the page WRAPPER, which exists even while the page itself is virtualized to a placeholder.
+  const scrollPageIntoView = useCallback((page: number, behavior: ScrollBehavior = "smooth") => {
+    const canvas = canvasRef.current;
+    const el =
+      canvas?.querySelector(`.hw-sheet-wrap[data-page="${page}"]`) ?? canvas?.querySelector(`.hw-sheet[data-page="${page}"]`);
+    el?.scrollIntoView?.({ behavior, block: "start" });
+  }, []);
+
+  // #482 — fit("page") asks for the page that was current to be in view once the new zoom has laid out
+  // (scrolling before the commit would be undone by the zoom's own scroll restore above).
+  const pendingPageRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const page = pendingPageRef.current;
+    if (page == null) return;
+    pendingPageRef.current = null;
+    scrollPageIntoView(page, "auto");
+  }, [zoom, scrollPageIntoView]);
 
   const zoomReset = useCallback(() => {
     const cur = zoomRef.current;
@@ -1329,17 +1466,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             core.session.runsAt(anchor.section, anchor.block, anchor.rows?.[0], anchor.cols?.[0]),
           ]);
           if (cancelled) return;
-          const style = firstRunStyle(runs);
           setEditTarget({
             ...base,
             tableBox: tableBox as TableBox | null,
             boundaries,
             rowBoundaries,
-            curBold: !!style.bold,
-            curItalic: !!style.italic,
-            curSizePt: style.size_pt ?? RIBBON_DEFAULT_PT,
-            curColor: style.color ?? null,
-            curFont: style.font ?? null,
+            ...runFormat(runs),
           });
         } catch {
           if (!cancelled) setEditTarget(base);
@@ -1348,14 +1480,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         try {
           const runs = await core.session.runsAt(anchor.section, anchor.block);
           if (cancelled) return;
-          const style = firstRunStyle(runs);
           setEditTarget({
             ...base,
-            curBold: !!style.bold,
-            curItalic: !!style.italic,
-            curSizePt: style.size_pt ?? RIBBON_DEFAULT_PT,
-            curColor: style.color ?? null,
-            curFont: style.font ?? null,
+            ...runFormat(runs),
           });
         } catch {
           if (!cancelled) setEditTarget(base);
@@ -2623,7 +2750,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         block: b.block,
         text: "",
         box: { x: b.x, y: b.y, w: b.w, h: b.h },
-        format: { font: null, sizePt: RIBBON_DEFAULT_PT, color: null, bold: false, italic: false },
+        format: { font: null, sizePt: RIBBON_DEFAULT_PT, color: null, bold: false, italic: false, underline: false, highlight: null },
         canTextStyle: false,
         canCellStyle: false,
       };
@@ -2653,6 +2780,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         color: editTarget.curColor ?? null,
         bold: editTarget.curBold,
         italic: editTarget.curItalic,
+        underline: !!editTarget.curUnderline,
+        highlight: editTarget.curHighlight ?? null,
+        ...(editTarget.curMixed ? { mixed: editTarget.curMixed } : {}),
       },
       canTextStyle,
       canCellStyle,
@@ -2841,7 +2971,6 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (!hit || hit.kind !== "paragraph" || !hit.editable || !inBand) return;
       const runs = await core.session.runsAt(hit.section, hit.block);
       if (!isCurrent()) return;
-      const style = firstRunStyle(runs);
       setEditTarget({
         page: c.page,
         section: hit.section,
@@ -2849,11 +2978,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         kind: "paragraph",
         box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h },
         text: hit.text ?? runs.map((run) => run.text).join(""),
-        curBold: !!style.bold,
-        curItalic: !!style.italic,
-        curSizePt: style.size_pt ?? RIBBON_DEFAULT_PT,
-        curColor: style.color ?? null,
-        curFont: style.font ?? null,
+        ...runFormat(runs),
       });
     },
     [adapter, core],
@@ -3171,14 +3296,19 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // ⌘Z/↶. 되돌릴 것이 없을 때 **침묵하지 않는다**(caret-undo 증상 1 실측): 사용자가 "지웠는데 안 지워지고
   // ⌘Z 도 무반응"이라고 느낀 상황의 절반은 실은 "편집이 애초에 커밋되지 않아 되돌릴 것이 없다"였다.
   // 빈 스택을 정직하게 알려야 사용자가 '편집이 안 먹었다'는 진짜 문제를 인지한다.
-  const undo = useCallback(async () => {
+  // #482: resolves whether something was undone/redone (the handle returns it; the button ignores it).
+  const undo = useCallback(async (): Promise<boolean> => {
     await pendingBlockEditRef.current;
-    toast((await core.session.undo()) ? msg.workspace.undoToast : msg.workspace.undoEmpty);
+    const ok = await core.session.undo();
+    toast(ok ? msg.workspace.undoToast : msg.workspace.undoEmpty);
+    return ok;
   }, [core, toast, msg]);
 
-  const redo = useCallback(async () => {
+  const redo = useCallback(async (): Promise<boolean> => {
     await pendingBlockEditRef.current;
-    toast((await core.session.redo()) ? msg.workspace.redoToast : msg.workspace.redoEmpty);
+    const ok = await core.session.redo();
+    toast(ok ? msg.workspace.redoToast : msg.workspace.redoEmpty);
+    return ok;
   }, [core, toast, msg]);
 
   // ⌘C — 현재 선택(문단/표/셀)의 **평문**을 클립보드로. 읽기 전용이라 op 도 undo 단위도 없다.
@@ -3483,10 +3613,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // 문서가 바뀌거나 언마운트되면 blob 을 회수한다(미리보기는 그 문서의 산출물이다).
   useEffect(() => () => setPdfPreview((prev) => (prev ? (URL.revokeObjectURL(prev.url), null) : null)), [props.document]);
 
-  const jumpToPage = useCallback((page: number) => {
-    const el = window.document.querySelector(`.hw-sheet[data-page="${page}"]`);
-    el?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-  }, []);
+  // #482: scoped to this workspace's canvas (was a document-wide query — a second page view on the page
+  // could be scrolled instead).
+  const jumpToPage = useCallback((page: number) => scrollPageIntoView(page), [scrollPageIntoView]);
 
   // ── 072 — AI 카드 "위치 보기": 대상 (section, block)의 화면 박스를 찾아 스크롤 + 1.8s 플래시 ──────
   // 페이지를 앞에서부터 blocksInRect(전체영역)로 스캔해 매치를 찾는다 — 클릭 시 1회라 비용 무시 가능,
@@ -3673,10 +3802,126 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     return msg.workspace.selectedCount(selection.length);
   }, [selection, msg]);
 
+  // ── #482 workspace handle ─────────────────────────────────────────────────────────────────────────────
+  // One object for the workspace's lifetime (`useMemo` over stable callbacks only); every method reads the
+  // LIVE state through refs at call time, so holding the handle never costs a render and a gesture never
+  // rebuilds it (030 discipline). Commands reuse the exact lanes the toolbar/shortcuts use.
+  const currentPageRef = useRef(currentPage);
+  currentPageRef.current = currentPage;
+  const designSelectionRef = useRef(designSelection);
+  designSelectionRef.current = designSelection;
+  const handleLive = useRef({ core, undo, redo, toast, onTrap, msg });
+  handleLive.current = { core, undo, redo, toast, onTrap, msg };
+  const pageViewHandleRef = useRef<PageViewHandle | null>(null);
+  const handleListenersRef = useRef(new Set<(change: WorkspaceHandleChange) => void>());
+  const emitHandle = useCallback((change: WorkspaceHandleChange) => {
+    handleListenersRef.current.forEach((listener) => {
+      try {
+        listener(change);
+      } catch {
+        /* a host listener must not break the workspace */
+      }
+    });
+  }, []);
+  const handle = useMemo<WorkspaceHandle>(() => {
+    const history = async (isRedo: boolean): Promise<boolean> => {
+      const live = handleLive.current;
+      if (!metaRef.current) return false; // no document — same as the shortcut path
+      try {
+        return await (isRedo ? live.redo() : live.undo());
+      } catch (err) {
+        if (!live.onTrap(err, live.msg.workspace.trapRecovered)) live.toast(live.msg.workspace.undoRedoFailed(isRedo, String(err)));
+        return false;
+      }
+    };
+    return {
+      getZoom: () => zoomRef.current,
+      setZoom: (zoom) => zoomToCenter(zoom),
+      fit: (mode) => {
+        const canvas = canvasRef.current;
+        const page = currentPageRef.current;
+        const size = pageViewHandleRef.current?.getPageSize(page);
+        if (!canvas || !size || size.width <= 0) return zoomRef.current;
+        const cs = getComputedStyle(canvas);
+        const availW = canvas.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - FIT_MARGIN_PX;
+        const availH = canvas.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0) - FIT_MARGIN_PX;
+        if (availW <= 0) return zoomRef.current; // not laid out yet (hidden / jsdom) — keep the zoom
+        let target = availW / size.width;
+        if (mode === "page") {
+          if (availH <= 0 || size.height <= 0) return zoomRef.current;
+          target = Math.min(target, availH / size.height);
+        }
+        const before = zoomRef.current;
+        const next = zoomToCenter(target);
+        if (mode === "page") {
+          // Bring the page into view once the new zoom has laid out; with no zoom change, right away.
+          if (next !== before) pendingPageRef.current = page;
+          else scrollPageIntoView(page, "auto");
+        }
+        return next;
+      },
+      getPage: () => ({ current: currentPageRef.current, count: metaRef.current?.pages ?? 0 }),
+      scrollToPage: (page) => scrollPageIntoView(page),
+      undo: () => history(false),
+      redo: () => history(true),
+      canUndo: () => handleLive.current.core.session.canUndo(),
+      canRedo: () => handleLive.current.core.session.canRedo(),
+      toggleStyle: async (style) => {
+        const live = handleLive.current;
+        // The ⌘B/⌘I/⌘U guards, verbatim: a live glyph caret, no in-place editor, no IME composition.
+        if (!caretActiveRef.current || editorRef.current || compositionStore.get() != null) return false;
+        try {
+          return await live.core.caret.toggleStyle(style);
+        } catch (err) {
+          if (!live.onTrap(err, live.msg.workspace.trapRecovered)) live.toast(live.msg.workspace.formatFailed(String(err)));
+          return false;
+        }
+      },
+      getSelectionFormat: () => designSelectionRef.current?.format ?? null,
+      subscribe: (listener) => {
+        handleListenersRef.current.add(listener);
+        return () => {
+          handleListenersRef.current.delete(listener);
+        };
+      },
+    };
+  }, [zoomToCenter, scrollPageIntoView, compositionStore]);
+  useImperativeHandle(props.handleRef, () => handle, [handle]);
+  // Notify after state SETTLES (effects run post-commit): zoom commits once per gesture, the page once per
+  // change, the selection when the design target changes, history when the undo/redo stacks move.
+  const handleMountedRef = useRef(false);
+  useEffect(() => {
+    if (handleMountedRef.current) emitHandle({ zoom: true });
+  }, [zoom, emitHandle]);
+  useEffect(() => {
+    if (handleMountedRef.current) emitHandle({ page: true });
+  }, [currentPage, meta?.pages, emitHandle]);
+  useEffect(() => {
+    if (handleMountedRef.current) emitHandle({ selection: true });
+  }, [designSelection, emitHandle]);
+  useEffect(() => {
+    handleMountedRef.current = true;
+  }, []);
+  useEffect(() => {
+    const key = () => `${core.session.undoDepth()}:${core.session.canRedo()}`;
+    let last = key();
+    return core.session.onLayoutInvalidated(() => {
+      const now = key();
+      if (now === last) return; // open / font registration / a coalesced keystroke: the stacks did not move
+      last = now;
+      emitHandle({ history: true });
+    });
+  }, [core, emitHandle]);
+
   // 툴바 노출 필터(additive): `toolbarItems` 를 넘기지 않으면 **전부 노출**이라 기존 소비자는 무영향.
   // 숨김은 표시 계약일 뿐 기능 제거가 아니다 — 컨텍스트 메뉴/단축키/ops 는 그대로 동작한다.
   const toolbarItems = props.toolbarItems;
   const showTool = (key: WorkspaceToolbarItem): boolean => !toolbarItems || toolbarItems.includes(key);
+  // #482 — chrome the host draws itself is not rendered at all (omitted keys / no prop = shown). Only the
+  // DRAWING goes: shortcuts, the context menu, the canvas and the side-panel slot are untouched.
+  const chromeToolbar = props.chrome?.toolbar !== false;
+  const chromeOutline = props.chrome?.outline !== false;
+  const chromeStatusBar = props.chrome?.statusBar !== false;
 
   // issue 077: the tree is built first and PUBLISHED through the messages provider below — a wrapper that
   // renders no DOM, so the markup (and every existing snapshot) is unchanged.
@@ -3694,7 +3939,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           {extraFonts.map((f) => `@font-face{font-family:"${f.family}";src:url("${f.url}");font-display:swap;}`).join("\n")}
         </style>
       )}
-      <div className="hw-toolbar">
+      {chromeToolbar && <div className="hw-toolbar">
         <span className="hw-brand">{props.brand ?? "auto-hwp"}</span>
         <span className="hw-doc-meta">{meta ? msg.workspace.docMeta(meta.format.toUpperCase(), meta.pages) : msg.workspace.noDocument}</span>
         <span className="hw-spacer" />
@@ -3793,7 +4038,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             {pdfBusy ? msg.workspace.pdfGenerating : "PDF"}
           </button>
         )}
-      </div>
+      </div>}
 
       {/* issue 048 → 06x: the PERSISTENT format ribbon is now the SOLE format surface (the 028 per-selection
           floating toolbar was removed — 피그마식 상시 리본). Shown whenever the editing chrome is on and a
@@ -3857,7 +4102,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         {/* issue 046: the left, collapsible outline nav. Only the hw-body LEFT slot (045 owns keydown /
             top bar). Clicking an item reuses `jumpToPage` (the EXISTING scroll source — 035 줌 정합), and
             the current-page highlight rides the scroll-position `currentPage` (037 무관). */}
-        {meta && (
+        {meta && chromeOutline && (
           <OutlinePanel
             items={outline}
             pageCount={meta.pages}
@@ -3922,6 +4167,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
               <div className="hw-zoom-layer" ref={zoomLayerRef} onPointerMove={hover.onPointerMove} onPointerLeave={hover.onPointerLeave}>
               <HwpPageView
                 adapter={adapter}
+                handleRef={pageViewHandleRef}
                 pageCount={meta.pages}
                 zoom={zoom}
                 refreshToken={refreshToken}
@@ -4132,13 +4378,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           applyDesign,
           designFonts: fontFamilies,
           textEditing,
+          handle,
         })}
       </div>
 
       {/* issue 046: the thin bottom status bar (hw-body BOTTOM slot). Current page/total = the scroll
           -position `currentPage`; the selection summary reuses the anchor label; the edit badge tracks
           `enableEditing`. Zoom % is intentionally omitted (owned by the top toolbar — 중복 금지). */}
-      {meta && (
+      {meta && chromeStatusBar && (
         <StatusBar
           currentPage={currentPage}
           pageCount={meta.pages}
