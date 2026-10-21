@@ -20,6 +20,8 @@
 2. [docs/EMBED-GUIDE.md](docs/EMBED-GUIDE.md) — 웹 임베드 정본. wasm/워커 로딩, CSP, sidePanel 계약, 폰트 주입.
    (영문 임계경로: [docs/EMBED-GUIDE.en.md](docs/EMBED-GUIDE.en.md))
 3. [docs/INTENT-SCHEMA.md](docs/INTENT-SCHEMA.md) — 편집 명령 JSON(Intent v0) 동결 스펙. 편집을 만든다면 필독.
+   쪽 배치 속성(다음 문단과 함께 · 외톨이줄 보호 · 쪽 나눔 · 기존 문단 모양 그대로 쓰기 · 표 글자처럼 취급/쪽 나눔/
+   제목 행 반복)도 Intent 다(§6.12, #483) — 내보낸 XML 을 직접 고치지 말 것.
 4. [docs/SELF-HOST.md](docs/SELF-HOST.md) — Docker 헤드리스 서비스 + Node/Bun에서 엔진 돌리기 + wasm 자기 호스팅.
 5. [docs/CLI-GUIDE.md](docs/CLI-GUIDE.md) / [docs/MCP-GUIDE.md](docs/MCP-GUIDE.md) — 터미널 바이너리 / 로컬 MCP 서버.
 6. [docs/BULK-GUIDE.md](docs/BULK-GUIDE.md) — 양식 1개 + 명단 N행 → 완성본 N부(규칙 기반, LLM 호출 0회).
