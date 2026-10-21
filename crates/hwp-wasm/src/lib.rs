@@ -69,7 +69,14 @@ fn doc_paragraph_count(doc: &hwp_model::prelude::SemanticDoc) -> usize {
 /// coarse `code` so the JS side can distinguish "re-open needed" from "bad request" without string
 /// matching. The raw message is preserved verbatim as `.message`.
 fn engine_err(message: String) -> JsValue {
-    let code = if message.contains("no document open") {
+    let code = error_code(&message);
+    js_err(code, &message)
+}
+
+/// The coarse `code` for an engine error message (see [`engine_err`]). Pure, so the mapping is unit-tested
+/// natively.
+fn error_code(message: &str) -> &'static str {
+    if message.contains("no document open") {
         "no_document"
     } else if message.contains("intent_version") {
         "bad_intent_version"
@@ -77,16 +84,51 @@ fn engine_err(message: String) -> JsValue {
         || message.starts_with("unknown field")
         || message.contains("missing field")
         || message.contains("intent envelope must be")
+        // #483 — a well-formed envelope whose VALUES the op refuses (empty patch, exclusive fields).
+        || message.starts_with("invalid intent:")
     {
         "bad_intent"
+    } else if message.starts_with("invalid target:") {
+        // #483 — the address resolves, but to the wrong kind of block (not a paragraph / not a table).
+        "invalid_target"
     } else if message.contains("needs a build with --features rhwp") {
         "needs_rhwp"
     } else if message.contains("out of range") {
         "out_of_range"
     } else {
         "engine"
-    };
-    js_err(code, &message)
+    }
+}
+
+#[cfg(test)]
+mod error_code_tests {
+    use super::error_code;
+
+    /// #483 — the new refusals map to codes a host can branch on; the existing mapping is unchanged.
+    #[test]
+    fn op_refusal_prefixes_map_to_codes() {
+        assert_eq!(
+            error_code("invalid target: SetTableProps: block 3 is not a table"),
+            "invalid_target"
+        );
+        assert_eq!(
+            error_code("invalid intent: SetParagraphShape needs at least one field to change"),
+            "bad_intent"
+        );
+        assert_eq!(
+            error_code("SetParagraphShape: block 99 out of range (section 0 has 9 blocks)"),
+            "out_of_range"
+        );
+        assert_eq!(
+            error_code("unknown variant `row`, expected one of `none`, `table`, `cell`"),
+            "bad_intent"
+        );
+        assert_eq!(
+            error_code("no document open (call open_document first)"),
+            "no_document"
+        );
+        assert_eq!(error_code("something else"), "engine");
+    }
 }
 
 /// One open document + its edit history — the wasm handle the host holds. Wraps a single

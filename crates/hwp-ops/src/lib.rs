@@ -142,6 +142,28 @@ pub enum Op {
         index: usize,
         runs: Vec<RunSpec>,
         para: ParaSpec,
+        /// #483 — reuse this top-level paragraph's shape reference EXACTLY (the HWPX writer then emits
+        /// its `paraPrIDRef`, no new paraPr). Resolved against the document BEFORE the insert;
+        /// exclusive with a non-empty `para`.
+        para_like: Option<BlockRef>,
+    },
+    /// #483 — patch the paragraph shape of the top-level paragraph `(section, block)`; only the `Some`
+    /// fields of `patch` change. Paragraphs sharing its shape keep theirs: this one moves to a DERIVED
+    /// shape ([`SemanticDoc::para_shape_derived`]) the HWPX writer clones from the original paraPr.
+    SetParagraphShape {
+        section: usize,
+        block: usize,
+        patch: ParaShapePatch,
+    },
+    /// #483 — set placement attributes (`treatAsChar` · `pageBreak` · `repeatHeader`) of the table at
+    /// `index`: top-level when `path` is `None`/empty, else the `index`-th block of the parent cell
+    /// `path` reaches (the `DeleteNestedBlock` address). The ADDRESSED table — a 1×1 frame wrapper keeps
+    /// the attributes on itself (its inner table is addressed with `path`).
+    SetTableProps {
+        section: usize,
+        index: usize,
+        path: Option<Vec<CellStep>>,
+        props: TablePropsPatch,
     },
     /// Insert a rich table at block `index` (same coverage semantics as `AppendRichTable`).
     ///
@@ -421,6 +443,15 @@ pub struct CellStep {
     pub block: usize,
     pub row: usize,
     pub col: usize,
+}
+
+/// #483 — a top-level block address `(section, block)` on the wire (`InsertParagraphAt.para_like`).
+/// `deny_unknown_fields` like every other nested wire spec.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlockRef {
+    pub section: usize,
+    pub block: usize,
 }
 
 /// Which cells of an existing table a [`Op::SetTableCellShade`] targets.
@@ -859,13 +890,81 @@ fn intern_para_shape(doc: &mut SemanticDoc, shape: ParaShape) -> usize {
         .para_shapes
         .iter()
         .enumerate()
-        .find(|(i, s)| **s == shape && !doc.hwpx_pool_para_shapes.contains(i))
+        .find(|(i, s)| {
+            **s == shape
+                && !doc.hwpx_pool_para_shapes.contains(i)
+                // #483: a derived shape is "base + patch" on export, not this value — never share it.
+                && !doc.para_shape_derived.contains_key(i)
+        })
         .map(|(i, _)| i)
     {
         return i;
     }
     doc.para_shapes.push(shape);
     doc.para_shapes.len() - 1
+}
+
+/// #483 — the `para_shapes` index for `base` + `patch`, reused when the same derivation exists so
+/// paragraphs that got the same change from the same original share ONE paraPr on export.
+fn intern_derived_para_shape(doc: &mut SemanticDoc, base: usize, patch: ParaShapePatch) -> usize {
+    if let Some((&i, _)) = doc
+        .para_shape_derived
+        .iter()
+        .find(|(_, d)| d.base == base && d.patch == patch)
+    {
+        return i;
+    }
+    let value = patch.apply(&doc.para_shapes.get(base).cloned().unwrap_or_default());
+    doc.para_shapes.push(value);
+    let i = doc.para_shapes.len() - 1;
+    doc.para_shape_derived
+        .insert(i, ParaShapeDerivation { base, patch });
+    i
+}
+
+/// #483 — the `para_shapes` index of the top-level paragraph `(section, block)`. A block that is not
+/// a paragraph is an `invalid target` (the wasm lane maps the prefix to its error code).
+fn para_shape_of(doc: &SemanticDoc, section: usize, block: usize, verb: &str) -> Result<usize> {
+    let sec = section_ref(doc, section)?;
+    match sec.blocks.get(block) {
+        Some(Block::Paragraph(p)) => Ok(p.para_shape),
+        Some(_) => Err(Error::Other(format!(
+            "invalid target: {verb}: block {block} of section {section} is not a paragraph"
+        ))),
+        None => Err(Error::Other(format!(
+            "{verb}: block {block} out of range (section {section} has {} blocks)",
+            sec.blocks.len()
+        ))),
+    }
+}
+
+/// #483 — the table at `index` (top-level when `path` is empty, else the `index`-th block of the
+/// parent cell `path` reaches) WITHOUT frame-wrapper resolution: placement attributes belong to the
+/// object anchored at that address.
+fn table_at_mut<'a>(
+    doc: &'a mut SemanticDoc,
+    section: usize,
+    path: &[CellStep],
+    index: usize,
+    verb: &str,
+) -> Result<&'a mut Table> {
+    let blocks = if path.is_empty() {
+        &mut section_mut(doc, section)?.blocks
+    } else {
+        &mut resolve_cell_mut(doc, section, path)
+            .ok_or_else(|| Error::Other(format!("{verb}: parent cell path out of range")))?
+            .blocks
+    };
+    let len = blocks.len();
+    match blocks.get_mut(index) {
+        Some(Block::Table(t)) => Ok(t),
+        Some(_) => Err(Error::Other(format!(
+            "invalid target: {verb}: block {index} is not a table"
+        ))),
+        None => Err(Error::Other(format!(
+            "{verb}: block {index} out of range ({len} blocks)"
+        ))),
+    }
 }
 
 fn section_mut(doc: &mut SemanticDoc, section: usize) -> Result<&mut Section> {
@@ -2365,7 +2464,68 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 p.style_name = Some(name.clone());
             })
         }
-        Op::InsertParagraphAt { section, index, runs, para } => {
+        Op::SetParagraphShape { section, block, patch } => {
+            // Validate everything BEFORE touching the doc (an empty/zero patch is an honest refusal).
+            if patch.is_empty() {
+                return Err(Error::Other(
+                    "invalid intent: SetParagraphShape needs at least one field to change".into(),
+                ));
+            }
+            if patch.line_spacing_pct == Some(0) {
+                return Err(Error::Other(
+                    "invalid intent: SetParagraphShape line_spacing_pct must be ≥ 1".into(),
+                ));
+            }
+            let cur = para_shape_of(doc, *section, *block, "SetParagraphShape")?;
+            // A second edit of an already-derived paragraph overlays onto the SAME original base.
+            let (base, patch) = match doc.para_shape_derived.get(&cur) {
+                Some(d) => (d.base, d.patch.overlay(patch)),
+                None => (cur, patch.clone()),
+            };
+            let idx = intern_derived_para_shape(doc, base, patch);
+            let sec = section_mut(doc, *section)?;
+            if let Some(Block::Paragraph(p)) = sec.blocks.get_mut(*block) {
+                // An untouched paragraph: record that only its open tag changes, so export keeps the
+                // body byte-verbatim. Already dirty: keep whatever an earlier edit recorded (a body
+                // edit leaves `None` → rebuild; an earlier shape edit keeps its fingerprint).
+                if !p.dirty.is_dirty() {
+                    let fp = p.runs_fingerprint();
+                    if let Some(src) = p.source.as_mut() {
+                        src.shape_edit_runs = Some(fp);
+                    }
+                }
+                p.para_shape = idx;
+                p.dirty.mark();
+            }
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::SetTableProps { section, index, path, props } => {
+            if props.is_empty() {
+                return Err(Error::Other(
+                    "invalid intent: SetTableProps needs at least one field to change".into(),
+                ));
+            }
+            let path = path.as_deref().unwrap_or(&[]);
+            {
+                let t = table_at_mut(doc, *section, path, *index, "SetTableProps")?;
+                t.props_override = t.props_override.overlay(props);
+            }
+            // Export-only: the cells stay byte-verbatim; the writer patches the table's own attributes.
+            section_mut(doc, *section)?.dirty.mark();
+            Ok(())
+        }
+        Op::InsertParagraphAt { section, index, runs, para, para_like } => {
+            if para_like.is_some() && !para.is_empty() {
+                return Err(Error::Other(
+                    "invalid intent: InsertParagraphAt takes `para` or `para_like`, not both".into(),
+                ));
+            }
+            // #483 — resolve the reference against the PRE-insert document, before any mutation.
+            let like = match para_like {
+                Some(r) => Some(para_shape_of(doc, r.section, r.block, "InsertParagraphAt.para_like")?),
+                None => None,
+            };
             // 서식 상속 규칙 (빈 문단/합성 문단 채움): a `RunSpec`/`ParaSpec` that names NO formatting
             // used to synthesize `CharShape::default()` (height 0 → the typesetter's 10pt fallback) and
             // `ParaShape::default()` (indent 0). Inserted into a bulleted 개요 list — where the form's
@@ -2386,8 +2546,9 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 })
                 .collect();
             let para_spec = para.to_para_shape();
-            let para_shape = match nb_para {
-                Some(prev) if para_spec == ParaShape::default() && para.style.is_none() => prev,
+            let para_shape = match (like, nb_para) {
+                (Some(idx), _) => idx,
+                (None, Some(prev)) if para_spec == ParaShape::default() && para.style.is_none() => prev,
                 _ => intern_para_shape(doc, para_spec),
             };
             let style_name = para.style.clone().filter(|s| !s.trim().is_empty());
@@ -4773,6 +4934,7 @@ mod tests {
                 index: 1,
                 runs: vec![run_spec("목차")],
                 para: ParaSpec::default(),
+                para_like: None,
             },
         )
         .unwrap();
@@ -4788,6 +4950,7 @@ mod tests {
                 index: n,
                 runs: vec![run_spec("맨끝")],
                 para: ParaSpec::default(),
+                para_like: None,
             },
         )
         .unwrap();
@@ -4800,6 +4963,7 @@ mod tests {
                 index: 999,
                 runs: vec![run_spec("x")],
                 para: ParaSpec::default(),
+                para_like: None,
             }
         )
         .is_err());
@@ -4868,6 +5032,7 @@ mod tests {
                 index: 2, // right after the "◦" line (b1), before the 6pt spacer
                 runs: vec![run_spec("오또케는 반려동물 응급 대응 공백을 해소한다")],
                 para: ParaSpec::default(),
+                para_like: None,
             },
         )
         .unwrap();
@@ -4896,6 +5061,7 @@ mod tests {
                 index: 5, // append at the end — the block before it (b4) is a 6pt EMPTY spacer
                 runs: vec![run_spec("추가 항목")],
                 para: ParaSpec::default(),
+                para_like: None,
             },
         )
         .unwrap();
@@ -4926,6 +5092,7 @@ mod tests {
                     align: Some("center".into()),
                     ..Default::default()
                 },
+                para_like: None,
             },
         )
         .unwrap();

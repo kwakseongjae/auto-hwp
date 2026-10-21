@@ -24,6 +24,9 @@ struct SynthPlan {
     char_ref: BTreeMap<usize, String>,
     /// para_shape index → synthesized `paraPrIDRef` (only NON-default shapes; default → base ref).
     para_ref: BTreeMap<usize, String>,
+    /// #483 — derived para_shape indices whose patch changes line layout (align · line spacing): an
+    /// open-tag-only re-emit that moves to a NEW id drops the paragraph's stale `<hp:linesegarray>`.
+    relayout_para: std::collections::BTreeSet<usize>,
     /// #356: POOL-resolved char_shape index (from the original header pool, [`SemanticDoc::
     /// hwpx_pool_char_shapes`]) → an ORIGINAL `charPrIDRef` with that exact value. Pool shapes are
     /// never synthesized (an unedited run keeps its own original ref), so a run WITHOUT an original
@@ -653,10 +656,48 @@ fn build_synth_plan(
     let mut para_count = 0;
     if let Some(base) = &base_para {
         let mut next_id = synth::max_pool_id(header0, "paraProperties") + 1;
+        // #483: derived fragments emitted in THIS pass, id-blanked → id (two derivations that come out
+        // identical share one paraPr).
+        let mut derived_seen: BTreeMap<String, String> = BTreeMap::new();
         for idx in paras {
             // Pool-resolved (HWPX #196): keep the paragraph's byte-verbatim `<hp:p>` open tag (its
             // original `paraPrIDRef`) instead of patching in a lossy re-synthesized paraPr.
             if doc.hwpx_pool_para_shapes.contains(&idx) {
+                continue;
+            }
+            // #483 — `SetParagraphShape`: clone the BASE shape's own paraPr element and patch only the
+            // requested attributes (numbering/tabs/borders/other break settings stay).
+            if let Some(d) = doc.para_shape_derived.get(&idx) {
+                if d.patch.align.is_some() || d.patch.line_spacing_pct.is_some() {
+                    plan.relayout_para.insert(idx);
+                }
+                let orig_id = doc.hwpx_pool_para_ids.get(&d.base).map(u64::to_string);
+                let base_xml = orig_id
+                    .as_deref()
+                    .and_then(|id| synth::para_pr_by_id(header0, id))
+                    .or_else(|| match doc.para_shapes.get(d.base) {
+                        Some(s) if !s.is_default() => Some(synth::synthesize_para_pr(base, 0, s)),
+                        _ => Some(base.clone()),
+                    });
+                let Some(base_xml) = base_xml else { continue };
+                let frag = synth::derive_para_pr(&base_xml, next_id, &d.patch);
+                let blank = synth::set_attr(&frag, "id", "");
+                let id = if orig_id.is_some() && blank == synth::set_attr(&base_xml, "id", "") {
+                    // The patch restates the current values: keep the ORIGINAL id (byte-identical).
+                    orig_id
+                } else {
+                    synth::existing_equivalent_id(header0, "<hh:paraPr ", "</hh:paraPr>", &frag)
+                        .or_else(|| derived_seen.get(&blank).cloned())
+                };
+                let id = id.unwrap_or_else(|| {
+                    para_fragments.push_str(&frag);
+                    let id = next_id.to_string();
+                    derived_seen.insert(blank, id.clone());
+                    para_count += 1;
+                    next_id += 1;
+                    id
+                });
+                plan.para_ref.insert(idx, id);
                 continue;
             }
             match doc.para_shapes.get(idx) {
@@ -974,7 +1015,11 @@ fn patch_section_xml(
                             | Inline::Bookmark(_)
                     )
                 });
-                let xml = if src.simple && !has_object {
+                // #483 — only the open tag changed (`SetParagraphShape` on an untouched body).
+                let shape_only = src.shape_edit_runs == Some(p.runs_fingerprint());
+                let xml = if shape_only {
+                    reemit_paragraph_shape_only(orig, p, plan)
+                } else if src.simple && !has_object {
                     reemit_paragraph(orig, p, plan)
                 } else if let Some(xml) = reemit_paragraph_text_zone(orig, src, p, plan) {
                     // W4.2: structural paragraph (secPr 호스트/개체 문단) — splice ONLY its text-run
@@ -999,6 +1044,9 @@ fn patch_section_xml(
     // Runs after the in-place lanes (it may fold a deleted table into its host paragraph's edit) and
     // BEFORE the anchor plan (an insertion must never land inside a deleted span).
     apply_removed_spans(&original, sec, &mut edits);
+
+    // (1e) #483 TABLE PLACEMENT (`SetTableProps`) on PARSED tables — see `apply_table_props`.
+    apply_table_props(&original, sec, &mut edits);
 
     // (3) APPENDED blocks (dirty, source=None) → emit + inject. Tables already re-emitted in place
     // (1b) are excluded — appending them too would duplicate (issue 057). Sequence-aware (like
@@ -1596,6 +1644,102 @@ enum TablePatch {
 /// Returns the splice list plus the block indices handled here (the append lane skips them).
 /// A table whose span is missing/stale, or which collides with a paragraph edit's span (the table
 /// XML lives INSIDE its wrapper `<hp:p>`), falls back to the legacy append — never a bad splice.
+/// #483 — patch the placement attributes `SetTableProps` set (`Table::props_override`) onto every
+/// PARSED table of the section (top-level and nested): `<hp:tbl pageBreak repeatHeader>` and the
+/// table's OWN `<hp:pos treatAsChar>` (the first `<hp:pos>` before its first `<hp:tr>`). Nothing else
+/// in the table changes.
+///
+/// When no other edit rewrites those bytes, one splice. When an edit CONTAINS them verbatim (a wrapper
+/// paragraph re-emitted open-tag-only, a parent cell kept verbatim), the same bytes are replaced
+/// inside that edit. A table another lane REGENERATED (whole re-emit) no longer has its original bytes
+/// there — it took the override at emission ([`table_emit_props`]). A synthesized table has no span
+/// and is emitted the same way.
+fn apply_table_props(original: &str, sec: &Section, edits: &mut Vec<(usize, usize, String)>) {
+    fn walk<'a>(blocks: &'a [Block], out: &mut Vec<&'a Table>) {
+        for b in blocks {
+            if let Block::Table(t) = b {
+                if !t.props_override.is_empty() {
+                    out.push(t);
+                }
+                for c in &t.cells {
+                    walk(&c.blocks, out);
+                }
+            }
+        }
+    }
+    let mut tables = Vec::new();
+    walk(&sec.blocks, &mut tables);
+    let bit = |v: bool| if v { "1" } else { "0" };
+    let mut splices = Vec::new();
+    for t in tables {
+        let Some((s0, e0)) = t.src_span else { continue };
+        if e0 > original.len()
+            || s0 >= e0
+            || !original.is_char_boundary(s0)
+            || !original.is_char_boundary(e0)
+            || !original[s0..].starts_with("<hp:tbl")
+        {
+            continue;
+        }
+        let Some(open_end) = original[s0..e0].find('>').map(|i| s0 + i + 1) else {
+            continue;
+        };
+        let first_tr = original[open_end..e0]
+            .find("<hp:tr")
+            .map_or(e0, |i| open_end + i);
+        let pos = original[open_end..first_tr]
+            .find("<hp:pos ")
+            .map(|i| open_end + i)
+            .and_then(|p| original[p..first_tr].find('>').map(|i| (p, p + i + 1)));
+        let o = &t.props_override;
+        let mut open = original[s0..open_end].to_string();
+        if let Some(pb) = o.page_break {
+            open = synth::set_tag_attr(&open, "pageBreak", pb.token());
+        }
+        if let Some(rh) = o.repeat_header {
+            open = synth::set_tag_attr(&open, "repeatHeader", bit(rh));
+        }
+        let (end, patched) = match pos {
+            Some((p0, p1)) => {
+                let mut pos_tag = original[p0..p1].to_string();
+                if let Some(tac) = o.treat_as_char {
+                    pos_tag = synth::set_tag_attr(&pos_tag, "treatAsChar", bit(tac));
+                }
+                (p1, format!("{open}{}{pos_tag}", &original[open_end..p0]))
+            }
+            None => (open_end, open),
+        };
+        let old = &original[s0..end];
+        if patched == old {
+            continue; // the override restates the current values
+        }
+        let touching: Vec<usize> = edits
+            .iter()
+            .enumerate()
+            .filter(|(_, (a, b, _))| {
+                if a == b {
+                    s0 < *a && *a < end
+                } else {
+                    *a < end && s0 < *b
+                }
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if touching.is_empty() {
+            splices.push((s0, end, patched));
+            continue;
+        }
+        for i in touching {
+            let (a, b, xml) = &mut edits[i];
+            if *a <= s0 && end <= *b && xml.matches(old).count() == 1 {
+                *xml = xml.replacen(old, &patched, 1);
+            }
+        }
+    }
+    // Appended after the scan, so one table's splice is never taken for an edit carrying another.
+    edits.extend(splices);
+}
+
 fn table_inplace_edits(
     original: &str,
     sec: &Section,
@@ -1792,10 +1936,11 @@ fn build_table_patch(
         bf_key: bf_spec(&t.borders, None).map(|s| bf_key(&s)),
         page_break: false, // in-place re-emit stays inside the original wrapper <hp:p>
         fixed_row_heights: t.fixed_row_heights,
-        header_off: t.repeat_header_off,
+        header_off: table_emit_props(t).1,
         holder_para: None, // in-place re-emit stays inside the original holder <hp:p>
-        treat_as_char: t.treat_as_char.unwrap_or(true),
+        treat_as_char: table_emit_props(t).0,
         float: t.float_placement.clone(),
+        tbl_page_break: table_emit_props(t).2,
     };
     let tid = *next_id;
     *next_id += 1;
@@ -2242,6 +2387,21 @@ fn reemit_paragraph_open_only(orig_para: &str, p: &Paragraph, plan: &SynthPlan) 
     format!("{open}{}", &orig_para[open_end..])
 }
 
+/// #483 — re-emit a paragraph whose BODY is untouched since parse and whose shape changed: the open
+/// tag gets the new `paraPrIDRef`, the body rides byte-verbatim. When the new shape changes line
+/// layout (align · line spacing) and the id really changed, the stale `<hp:linesegarray>` layout cache
+/// is dropped (한/글 recomputes it — the same rule the simple lane follows).
+fn reemit_paragraph_shape_only(orig_para: &str, p: &Paragraph, plan: &SynthPlan) -> String {
+    let open_end = orig_para.find('>').map(|i| i + 1).unwrap_or(0);
+    let open = patch_para_open_tag(&orig_para[..open_end], p, plan);
+    let body = &orig_para[open_end..];
+    if open != orig_para[..open_end] && plan.relayout_para.contains(&p.para_shape) {
+        format!("{open}{}", strip_linesegarray(body))
+    } else {
+        format!("{open}{body}")
+    }
+}
+
 fn reemit_paragraph(orig_para: &str, p: &Paragraph, plan: &SynthPlan) -> String {
     let open_end = orig_para.find('>').map(|i| i + 1).unwrap_or(0);
     let mut out = String::with_capacity(orig_para.len() + 32);
@@ -2462,6 +2622,19 @@ struct EmitTable {
     treat_as_char: bool,
     /// #467 — floating placement (`Table::float_placement`); `None` = the legacy inline `<hp:pos>`.
     float: Option<TableFloat>,
+    /// #483 — `<hp:tbl pageBreak>` token (`CELL` unless `SetTableProps` set it).
+    tbl_page_break: &'static str,
+}
+
+/// #483 — the placement an emitted table writes: `SetTableProps` (`Table::props_override`) over the
+/// table's own fields. Returns `(treat_as_char, header_off, pageBreak token)`.
+fn table_emit_props(t: &Table) -> (bool, bool, &'static str) {
+    let o = &t.props_override;
+    (
+        o.treat_as_char.or(t.treat_as_char).unwrap_or(true),
+        o.repeat_header.map(|on| !on).unwrap_or(t.repeat_header_off),
+        o.page_break.map(TablePageBreak::token).unwrap_or("CELL"),
+    )
 }
 
 /// A dirty block ready to serialize: a paragraph, a table, or an embedded image.
@@ -2592,10 +2765,11 @@ fn project_block(b: &Block) -> EmitBlock {
             bf_key: bf_spec(&t.borders, None).map(|s| bf_key(&s)),
             page_break: false, // set by emit_blocks when an elided anchor carried a break
             fixed_row_heights: t.fixed_row_heights,
-            header_off: t.repeat_header_off,
+            header_off: table_emit_props(t).1,
             holder_para: t.holder_para_shape,
-            treat_as_char: t.treat_as_char.unwrap_or(true),
+            treat_as_char: table_emit_props(t).0,
             float: t.float_placement.clone(),
+            tbl_page_break: table_emit_props(t).2,
         }),
     }
 }
@@ -3105,6 +3279,7 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
     let no_adjust = u8::from(t.fixed_row_heights);
     let repeat = u8::from(!t.header_off);
     let tac = u8::from(t.treat_as_char);
+    let tpb = t.tbl_page_break;
     // #467: a floating table keeps its wrap, z-order and anchor offsets; everything else stays the
     // legacy inline placement (byte-stable with earlier output).
     let (wrap, z, vrel, hrel, valign, halign, voff, hoff) = match &t.float {
@@ -3127,7 +3302,7 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
         .map(String::as_str)
         .unwrap_or(bf);
     out.push_str(&format!(
-        "<hp:tbl id=\"{tid}\" zOrder=\"{z}\" numberingType=\"TABLE\" textWrap=\"{wrap}\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"{repeat}\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{tbl_bf}\" noAdjust=\"{no_adjust}\">\
+        "<hp:tbl id=\"{tid}\" zOrder=\"{z}\" numberingType=\"TABLE\" textWrap=\"{wrap}\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"{tpb}\" repeatHeader=\"{repeat}\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{tbl_bf}\" noAdjust=\"{no_adjust}\">\
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{height}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
 <hp:pos treatAsChar=\"{tac}\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"{vrel}\" horzRelTo=\"{hrel}\" vertAlign=\"{valign}\" horzAlign=\"{halign}\" vertOffset=\"{voff}\" horzOffset=\"{hoff}\"/>\
 <hp:outMargin left=\"{oml}\" right=\"{omr}\" top=\"{omt}\" bottom=\"{omb}\"/>\
