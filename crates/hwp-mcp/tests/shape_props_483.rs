@@ -566,6 +566,48 @@ fn nested_table_props_through_path() {
     assert!(e.contains("out of range"), "{e}");
 }
 
+/// 표를 담은 문단(블록 7, 표 앵커)의 모양을 같은 세션에서 바꾸면 그 문단의 다시 쓰기가 표 바이트를 그대로
+/// 싣는다 — 표 속성은 그 편집 **안에서** 바뀌어야 한다(따로 splice 하면 겹친다).
+#[test]
+fn table_props_ride_inside_a_reemitted_host_paragraph() {
+    const TID: &str = "1137126797";
+    let src = showcase();
+    let sec0 = part(&src, SEC);
+    let mut s = open(&src);
+    {
+        let doc = s.doc.as_ref().unwrap().doc();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[7] else {
+            panic!("block 7")
+        };
+        assert!(p.is_table_anchor, "block 7 hosts the table");
+    }
+    apply(&mut s, sp(7, json!({"keep_with_next": true}))).unwrap();
+    apply(
+        &mut s,
+        json!({"intent": "SetTableProps", "section": 0, "index": 6, "repeat_header": false}),
+    )
+    .unwrap();
+    let sec1 = part(&export(&s), SEC);
+    let host_open = |sec: &str| {
+        let t = sec.find(&format!("<hp:tbl id=\"{TID}\"")).unwrap();
+        let p = sec[..t].rfind("<hp:p ").unwrap();
+        sec[p..p + sec[p..].find('>').unwrap() + 1].to_string()
+    };
+    assert_ne!(
+        attr(&host_open(&sec1), "paraPrIDRef"),
+        attr(&host_open(&sec0), "paraPrIDRef"),
+        "the host paragraph moved to a derived paraPr"
+    );
+    assert_eq!(
+        attr(&tbl_open(&sec1, TID), "repeatHeader").as_deref(),
+        Some("0")
+    );
+    let back = sec1
+        .replacen(&host_open(&sec1), &host_open(&sec0), 1)
+        .replacen(&tbl_open(&sec1, TID), &tbl_open(&sec0, TID), 1);
+    assert_eq!(back, sec0, "only those two tags changed");
+}
+
 /// 바깥 표의 칸을 고친(칸 단위 다시 쓰기) 뒤에도 그 표의 배치 속성이 같이 나간다.
 #[test]
 fn table_props_survive_a_cell_edit_of_the_same_table() {
