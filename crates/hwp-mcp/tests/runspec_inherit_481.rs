@@ -452,6 +452,31 @@ fn highlight_is_inherited_when_omitted_and_cleared_by_null() {
     assert_eq!(mem[0]["bold"], true, "the rest still inherited");
 }
 
+/// The base is the first run that shows TEXT — not a leading blank run. Block 1 is bold; after an edit
+/// that leaves a NON-bold blank run in front of a bold one, a "크기만" edit still inherits the bold.
+#[test]
+fn the_base_is_the_first_run_that_shows_text_not_a_leading_blank() {
+    let mut s = open(SHOWCASE);
+    let t = Target::Para(1);
+    edit(
+        &mut s,
+        t,
+        specs(r#"[{"text":"  ","bold":false},{"text":"본문"}]"#),
+    );
+    let mem = read(&s, t);
+    assert_eq!(
+        (mem[0]["bold"].clone(), mem[1]["bold"].clone()),
+        (json!(false), json!(true))
+    );
+    edit(&mut s, t, specs(r#"[{"text":"x","size_pt":12}]"#));
+    let mem = read(&s, t);
+    assert_eq!(mem, read(&reopen(&s), t), "memory = reopened file");
+    assert_eq!(
+        mem[0]["bold"], true,
+        "inherited from the first TEXT run, not the blank one"
+    );
+}
+
 /// A run that names nothing keeps the base look (color: black) — and now reads the same from memory
 /// as from the file.
 #[test]
