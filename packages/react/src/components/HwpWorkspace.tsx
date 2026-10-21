@@ -3779,8 +3779,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     };
     compute(); // seed immediately (before the first scroll)
     canvas.addEventListener("scroll", onScroll, { passive: true });
+    // #482 — the pages lay out AFTER this seed (SVGs arrive async): until then every wrapper sits at the
+    // top, so the seed picked the LAST page (status bar read "8 / 8쪽" on open until the first scroll).
+    // Re-run when the page column's size changes too. Layout-only: a zoom gesture is a transform (no
+    // resize) and `setCurrentPage` dedups, so this adds no render per tick (030).
+    const column = canvas.querySelector(".hw-pages");
+    const resize = typeof ResizeObserver !== "undefined" && column ? new ResizeObserver(onScroll) : null;
+    if (resize && column) resize.observe(column);
     return () => {
       canvas.removeEventListener("scroll", onScroll);
+      resize?.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
   }, [meta, refreshToken, zoom]);

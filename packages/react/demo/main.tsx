@@ -33,6 +33,7 @@ function App() {
   // #482 — host chrome through the workspace handle (no DOM reads, no synthesized shortcuts).
   const ws = useRef<WorkspaceHandle>(null);
   const [view, setView] = useState("");
+  const [builtInChrome, setBuiltInChrome] = useState(true);
   useEffect(() => {
     const show = () => {
       const h = ws.current;
@@ -79,9 +80,16 @@ function App() {
         <button type="button" onClick={() => ws.current?.fit("page")}>쪽 맞춤</button>
         <button type="button" onClick={() => void ws.current?.undo()}>되돌리기</button>
         <span style={{ fontSize: 12, color: "#374151", minWidth: 90 }} data-testid="demo-view">{view}</span>
+        <label style={{ fontSize: 12 }}>
+          <input type="checkbox" checked={builtInChrome} onChange={(e) => setBuiltInChrome(e.target.checked)} /> 내장 크롬
+        </label>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <HwpWorkspace adapter={adapter} handleRef={ws} document={doc} onAiRequest={mockAi} requestFont={requestFont} sidePanel={chatSidePanel({ onAiRequest: mockAi, isMock: true })} />
+        <HwpWorkspace
+          adapter={adapter}
+          handleRef={ws}
+          chrome={builtInChrome ? undefined : { toolbar: false, outline: false, statusBar: false }}
+          document={doc} onAiRequest={mockAi} requestFont={requestFont} sidePanel={chatSidePanel({ onAiRequest: mockAi, isMock: true })} />
       </div>
     </div>
   );
