@@ -218,3 +218,62 @@ impl ParaShape {
         *self == ParaShape::default()
     }
 }
+
+/// #483 — a PARTIAL paragraph-shape edit (`SetParagraphShape`): only the `Some` fields change.
+///
+/// Lives next to the shape it patches so the op (the value layout reads) and the HWPX writer (the
+/// attributes it patches on a clone of the paragraph's ORIGINAL `<hh:paraPr>`) apply the same change.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ParaShapePatch {
+    /// 다음 문단과 함께 (`hh:breakSetting keepWithNext`).
+    pub keep_with_next: Option<bool>,
+    /// 외톨이줄 보호 (`hh:breakSetting widowOrphan`).
+    pub widow_orphan: Option<bool>,
+    /// 문단 앞에서 항상 쪽 나눔 (`hh:breakSetting pageBreakBefore`) — the SHARED paraPr flag, not the
+    /// per-instance `<hp:p pageBreak>` hard break ([`crate::document::Paragraph::page_break_before`]).
+    pub page_break_before: Option<bool>,
+    pub align: Option<HorizontalAlign>,
+    /// Line spacing in percent (sets `LineSpacingType::Percent`).
+    pub line_spacing_pct: Option<u32>,
+}
+
+impl ParaShapePatch {
+    /// True when the patch changes nothing.
+    pub fn is_empty(&self) -> bool {
+        *self == ParaShapePatch::default()
+    }
+
+    /// `self` with every `Some` field of `later` laid over it — a second edit of the same paragraph
+    /// keeps ONE derivation from the original shape instead of a chain.
+    pub fn overlay(&self, later: &ParaShapePatch) -> ParaShapePatch {
+        ParaShapePatch {
+            keep_with_next: later.keep_with_next.or(self.keep_with_next),
+            widow_orphan: later.widow_orphan.or(self.widow_orphan),
+            page_break_before: later.page_break_before.or(self.page_break_before),
+            align: later.align.or(self.align),
+            line_spacing_pct: later.line_spacing_pct.or(self.line_spacing_pct),
+        }
+    }
+
+    /// The shape `base` becomes under this patch.
+    pub fn apply(&self, base: &ParaShape) -> ParaShape {
+        let mut p = base.clone();
+        if let Some(v) = self.keep_with_next {
+            p.keep_with_next = v;
+        }
+        if let Some(v) = self.widow_orphan {
+            p.widow_orphan = v;
+        }
+        if let Some(v) = self.page_break_before {
+            p.page_break_before = v;
+        }
+        if let Some(a) = self.align {
+            p.align = a;
+        }
+        if let Some(pct) = self.line_spacing_pct {
+            p.line_spacing_type = LineSpacingType::Percent;
+            p.line_spacing_value = pct as i32;
+        }
+        p
+    }
+}

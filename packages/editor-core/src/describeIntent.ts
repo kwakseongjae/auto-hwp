@@ -19,6 +19,8 @@ const OP_ICON: Record<string, string> = {
   ApplyContent: "¶",
   InsertTableAt: "▦",
   InsertParagraphAt: "¶",
+  SetParagraphShape: "¶",
+  SetTableProps: "▦",
   InsertChartAt: "📊",
   MoveBlock: "↕",
   DeleteBlock: "－",

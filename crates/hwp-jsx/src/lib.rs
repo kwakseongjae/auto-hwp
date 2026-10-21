@@ -634,6 +634,7 @@ fn decode_para_source(s: &str) -> Option<ParaSource> {
             span: (z[2], z[3]),
             text_edited: z[4] != 0,
         }),
+        shape_edit_runs: None,
     })
 }
 
@@ -1180,6 +1181,7 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         holder_para_shape: None,
         treat_as_char: None,
         float_placement: None,
+        props_override: Default::default(),
         col_widths,
         row_heights,
         // Render-IR only (HWPX auto-fit floor) — the JSX surface never carries it (defaults empty).

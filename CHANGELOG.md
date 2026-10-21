@@ -36,6 +36,21 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 추가
+
+- **배치 속성 Intent(#483)** — 양식을 채운 뒤 쪽 배치를 맞추려고 내보낸 XML 을 고칠 필요가 없다.
+  - `SetParagraphShape` — 본문 문단 하나의 다음 문단과 함께 · 외톨이줄 보호 · 문단 앞에서 쪽 나눔 · 정렬 · 줄 간격.
+    그 문단이 쓰던 문단 모양을 통째로 복제해 요청한 속성만 바꾼다(번호 · 탭 · 테두리 그대로, 같은 모양을 쓰던 다른 문단은 그대로).
+  - `InsertParagraphAt.para_like` — 새 문단이 기존 본문 문단의 문단 모양 참조를 그대로 쓴다(새 paraPr 없음).
+  - `SetTableProps` — 이미 있는 표(칸 안 표는 `path`)의 글자처럼 취급 · 쪽 경계 나눔(`none`/`table`/`cell`) · 제목 행 반복.
+    그 세 속성만 바뀐다.
+  - 편집기 레인(제안 → 커밋)과 일괄 레인(`applyIntents`, 원자 묶음 포함)이 같은 XML 을 낸다. 엔진 오류 코드에 `invalid_target` 이
+    더해졌다(주소는 맞는데 문단 · 표가 아닌 대상). 조판은 아직 `keep_with_next` · `widow_orphan` 을 읽지 않는다.
+  *(EN — Placement Intents: `SetParagraphShape` (keep-with-next, widow/orphan control, page break before, align, line
+  spacing — on one body paragraph, cloning its original paraPr), `InsertParagraphAt.para_like` (reuse an existing
+  paragraph's shape reference) and `SetTableProps` (treat-as-char, page-break `none`/`table`/`cell`, repeat header; nested
+  tables via `path`). The editor and batch lanes export identical XML. New engine error code `invalid_target`.)*
+
 ---
 
 ## [0.0.17] — 2026-10-14
