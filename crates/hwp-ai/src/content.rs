@@ -398,6 +398,16 @@ mod tests {
         assert_eq!(r.bold, Some(true));
         assert_eq!((r.italic, r.underline, r.strike), (None, None, None));
         assert_eq!(r.highlight, None);
+        // A `false` is NOT named — it inherits (the template cell's bold stays), as a plain AI run did.
+        let r = AiRun {
+            text: "a".into(),
+            ..Default::default()
+        }
+        .to_run_spec();
+        assert_eq!(
+            (r.bold, r.italic, r.underline, r.strike),
+            (None, None, None, None)
+        );
         let r = AiRun {
             text: "a".into(),
             highlight: Some("#FFF2CC".into()),

@@ -561,9 +561,6 @@ fn build_synth_plan(
     let mut char_count = 0;
     if let Some(base) = &base_char {
         let mut next_id = synth::max_pool_id(header0, "charProperties") + 1;
-        // #481: derived fragments already emitted in THIS pass (keyed modulo id) — two edits that
-        // derive the same charPr from one root share it (header0 dedup cannot see them).
-        let mut derived_seen: BTreeMap<String, String> = BTreeMap::new();
         for idx in chars {
             // Pool-resolved (HWPX #196): this shape came from the ORIGINAL header pool, not an edit.
             // Skip synthesis — the unedited run re-emits its original `charPrIDRef` (via
@@ -602,16 +599,14 @@ fn build_synth_plan(
                 };
                 let frag =
                     synth::derive_char_pr(root_xml, next_id, root_shape, shape, fontref.as_deref());
-                let key = synth::set_attr(&frag, "id", "");
+                // One index per (root, value) already (the model interns derivations), so the only
+                // reuse left is an equal existing pool entry — the root itself when nothing differs.
                 if let Some(existing) =
                     synth::existing_equivalent_id(header0, "<hh:charPr ", "</hh:charPr>", &frag)
                 {
                     plan.char_ref.insert(idx, existing);
-                } else if let Some(id) = derived_seen.get(&key) {
-                    plan.char_ref.insert(idx, id.clone());
                 } else {
                     char_fragments.push_str(&frag);
-                    derived_seen.insert(key, next_id.to_string());
                     plan.char_ref.insert(idx, next_id.to_string());
                     char_count += 1;
                     next_id += 1;

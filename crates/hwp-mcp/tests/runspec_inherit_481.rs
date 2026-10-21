@@ -381,6 +381,58 @@ fn the_derived_charpr_is_the_base_element_with_only_the_changed_attributes() {
     assert_eq!(char_pr(&part(&out, "Contents/header.xml"), &id), expected);
 }
 
+/// The file side is a CLONE of the base's own charPr, not a re-synthesis from the header's first charPr:
+/// `form-01.hwpx` block 10's text run uses a charPr whose `borderFillIDRef` differs from charPr 0's — an
+/// attribute the model does not read, so only cloning keeps it.
+#[test]
+fn a_derived_charpr_keeps_what_the_headers_first_charpr_does_not_have() {
+    let src = corpus("hwpx/form-01.hwpx");
+    let header0 = part(&src, "Contents/header.xml");
+    let mut s = open_src(&src);
+    let t = Target::Para(10);
+    let base_id = {
+        let doc = s.doc.as_ref().unwrap().doc();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[10] else {
+            panic!("block 10 is a paragraph")
+        };
+        let r = p
+            .runs
+            .iter()
+            .find(|r| !run_text(r).trim().is_empty())
+            .expect("a text run");
+        doc.hwpx_pool_char_ids[&r.char_shape].to_string()
+    };
+    let base = char_pr(&header0, &base_id);
+    let first = header0[header0.find("<hh:charPr ").unwrap()..].to_string();
+    let bf = |e: &str| {
+        e[e.find("borderFillIDRef=\"").unwrap()..]
+            .split('"')
+            .nth(1)
+            .unwrap()
+            .to_string()
+    };
+    assert_ne!(
+        bf(&base),
+        bf(&first),
+        "precondition: the base differs from charPr 0 in borderFillIDRef"
+    );
+    let pt = first_text(&read(&s, t))["size_pt"].as_f64().unwrap() + 2.0;
+    edit(
+        &mut s,
+        t,
+        specs(&format!(r#"[{{"text":"derived","size_pt":{pt}}}]"#)),
+    );
+    let out = export_bytes(&s).unwrap();
+    let id = run_char_ref(&part(&out, "Contents/section0.xml"), "derived");
+    let height = ((pt * 100.0).round() as i64).to_string();
+    let expected = with_attr(
+        &with_attr(&with_attr(&base, "id", &id), "height", &height),
+        "textColor",
+        "#000000",
+    );
+    assert_eq!(char_pr(&part(&out, "Contents/header.xml"), &id), expected);
+}
+
 /// A run whose derived shape equals its base writes the base's ORIGINAL id — no new charPr.
 #[test]
 fn a_run_that_changes_nothing_keeps_the_original_charpr_id() {
