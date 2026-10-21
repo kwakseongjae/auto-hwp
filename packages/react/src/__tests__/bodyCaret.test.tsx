@@ -166,7 +166,8 @@ describe("body paragraph caret", () => {
           intent: "SetParagraphRuns",
           section: 0,
           block: 3,
-          runs: [{ text: "가", bold: true }, { text: "나 다" }],
+          // #481 — "나" turning off is named (bold: false); " 다" keeps the fixture's own (flag-less) run.
+          runs: [{ text: "가", bold: true }, { text: "나", bold: false }, { text: " 다" }],
         },
       ]);
     });

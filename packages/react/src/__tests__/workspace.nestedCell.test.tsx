@@ -77,7 +77,8 @@ describe("HwpWorkspace nested-table cell (issue 064 Tier-2 — editable via Cell
       expect(cellOps.length).toBeGreaterThan(0);
       const last = cellOps[cellOps.length - 1];
       expect(last.path).toEqual(nestedLeaf.path);
-      expect(last.runs).toEqual([{ text: "수정" }]);
+      // #481 — the serialized run names its whole look (an omitted "off" would keep the replaced text's).
+      expect(last.runs).toEqual([{ text: "수정", bold: false, italic: false, underline: false, strike: false, highlight: null }]);
     });
   });
 });

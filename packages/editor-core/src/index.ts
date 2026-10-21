@@ -73,7 +73,7 @@ export {
 export type { XYWH, ImageHandle } from "./units";
 
 // Run-format preservation (issue 027) — the pure text-edit inheritance rule.
-export { inheritRuns, firstRunStyle } from "./runs";
+export { inheritRuns, firstRunStyle, explicitStyle } from "./runs";
 export type { RunStyle } from "./runs";
 
 // Find/Replace controller (issue 045) — search/next/prev/replaceCurrent/replaceAll + caretRect-derived

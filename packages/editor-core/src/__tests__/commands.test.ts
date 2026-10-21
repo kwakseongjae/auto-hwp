@@ -20,7 +20,7 @@ import {
   setColumnWidthMm,
   widthsToRatios,
 } from "../units";
-import { firstRunStyle, inheritRuns } from "../runs";
+import { explicitStyle, firstRunStyle, inheritRuns } from "../runs";
 import type { Intent, RunSpec } from "../types";
 import { MockAdapter } from "./mockAdapter";
 
@@ -234,19 +234,35 @@ describe("runs — run-format preservation (issue 027 §함정)", () => {
 
   it("inheritRuns keeps the first run's style on the new text (bold cell stays bold)", () => {
     const current: RunSpec[] = [{ text: "강조", bold: true, color: "#FF0000" }];
-    expect(inheritRuns(current, "바뀐 값")).toEqual([{ text: "바뀐 값", bold: true, color: "#FF0000" }]);
+    // #481 — the first run's look is copied WHOLE: its "off" attributes are named (`false` / `highlight: null`).
+    expect(inheritRuns(current, "바뀐 값")).toEqual([
+      { text: "바뀐 값", bold: true, color: "#FF0000", italic: false, underline: false, strike: false, highlight: null },
+    ]);
   });
 
   it("inheritRuns splits multi-line text into per-paragraph runs joined by a \\n run", () => {
     expect(inheritRuns([{ text: "a", bold: true }], "가\n나")).toEqual([
-      { text: "가", bold: true },
+      { text: "가", bold: true, italic: false, underline: false, strike: false, highlight: null },
       { text: "\n" },
-      { text: "나", bold: true },
+      { text: "나", bold: true, italic: false, underline: false, strike: false, highlight: null },
     ]);
   });
 
   it("inheritRuns on unstyled/empty current yields a plain run (no crash)", () => {
     expect(inheritRuns([], "새 텍스트")).toEqual([{ text: "새 텍스트" }]);
+  });
+
+  it("explicitStyle names every on/off attribute and passes size/color/font through (#481)", () => {
+    expect(explicitStyle({})).toEqual({ bold: false, italic: false, underline: false, strike: false, highlight: null });
+    expect(explicitStyle({ bold: true, size_pt: 12, font: "맑은 고딕", highlight: "#FFF2CC" })).toEqual({
+      bold: true,
+      italic: false,
+      underline: false,
+      strike: false,
+      size_pt: 12,
+      font: "맑은 고딕",
+      highlight: "#FFF2CC",
+    });
   });
 });
 
@@ -362,7 +378,7 @@ describe("EditController manual commands (issue 027) — each = ONE Intent = ONE
     await core.edit.editCellText(0, 1, 0, 0, "새 값");
     const intent = adapter.applied[0] as Intent & { runs: RunSpec[] };
     expect(intent.intent).toBe("SetTableCellRuns"); // run-preserving variant, NOT SetTableCell
-    expect(intent.runs).toEqual([{ text: "새 값", bold: true }]); // bold inherited
+    expect(intent.runs).toEqual([{ text: "새 값", bold: true, italic: false, underline: false, strike: false, highlight: null }]); // bold inherited
     // undo restores in one step.
     await core.session.undo();
     expect(adapter.undos).toBe(1);
@@ -373,7 +389,9 @@ describe("EditController manual commands (issue 027) — each = ONE Intent = ONE
     await core.edit.editParagraphText(0, 2, "바뀐 문단");
     const intent = adapter.applied[0] as Intent & { runs: RunSpec[] };
     expect(intent.intent).toBe("SetParagraphRuns");
-    expect(intent.runs).toEqual([{ text: "바뀐 문단", italic: true }]);
+    expect(intent.runs).toEqual([
+      { text: "바뀐 문단", italic: true, bold: false, underline: false, strike: false, highlight: null },
+    ]);
   });
 
   it("step4 with a backend that OMITS blockRuns falls back to a plain run (still SetTableCellRuns)", async () => {

@@ -178,16 +178,18 @@ const RIBBON_DEFAULT_PT = 10;
  *  scrollbar on the axis it was fitted to. */
 const FIT_MARGIN_PX = 16;
 
-/** Apply character-only inspector fields while preserving text and every untouched run attribute. */
-function patchRuns(runs: RunSpec[], patch: FormatRibbonPatch): RunSpec[] {
+/** Apply character-only inspector fields while preserving text and every untouched run attribute. An "off"
+ *  is sent as `false` (#481 — an omitted flag keeps the replaced text's, so dropping the key would not turn
+ *  it off). Exported for its unit test. */
+export function patchRuns(runs: RunSpec[], patch: FormatRibbonPatch): RunSpec[] {
   return runs.map((run) => {
     if (run.text === "\n") return run;
     return {
       ...run,
-      ...(patch.bold !== undefined ? { bold: patch.bold || undefined } : {}),
-      ...(patch.italic !== undefined ? { italic: patch.italic || undefined } : {}),
-      ...(patch.underline !== undefined ? { underline: patch.underline || undefined } : {}),
-      ...(patch.strike !== undefined ? { strike: patch.strike || undefined } : {}),
+      ...(patch.bold !== undefined ? { bold: patch.bold } : {}),
+      ...(patch.italic !== undefined ? { italic: patch.italic } : {}),
+      ...(patch.underline !== undefined ? { underline: patch.underline } : {}),
+      ...(patch.strike !== undefined ? { strike: patch.strike } : {}),
       ...(patch.sizePt !== undefined ? { size_pt: patch.sizePt } : {}),
       ...(patch.font !== undefined ? { font: patch.font } : {}),
       ...(patch.color !== undefined ? { color: patch.color } : {}),

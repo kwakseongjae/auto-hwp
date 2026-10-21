@@ -120,11 +120,15 @@ export function cellParaOffsetAt(joined: string, global: number): { para: number
 
 const STYLE_KEYS = ["bold", "italic", "underline", "strike", "size_pt", "color", "highlight", "font"] as const;
 
+/** A run's style as the edit carries it. A KNOWN off (`false`, from `blockRuns`) is kept: on
+ *  `SetParagraphRuns`/`SetTableCellRuns` an omitted field keeps the replaced text's value (#481), so dropping
+ *  `bold: false` would turn "not bold" into "whatever the cell's first text is". An absent key stays absent
+ *  — "unknown" (e.g. the first char typed into an empty cell), which the engine fills from the cell. */
 function styleOf(r: RunSpec): RunStyle {
   const out: RunStyle = {};
   for (const k of STYLE_KEYS) {
     const v = r[k];
-    if (v !== undefined && v !== false) (out as Record<string, unknown>)[k] = v;
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v;
   }
   return out;
 }
@@ -232,8 +236,8 @@ export function styleRunRange(runs: RunSpec[], start: number, end: number, key: 
   const next = chars.map((c, i) => {
     if (i < s || i >= e || c.ch === "\n") return c;
     const style: RunStyle = { ...c.style };
-    if (on) style[key] = true;
-    else delete style[key];
+    // Off is said out loud (#481) — a dropped key would keep the replaced text's value.
+    style[key] = on;
     return { ch: c.ch, style };
   });
   return regroupRuns(next);

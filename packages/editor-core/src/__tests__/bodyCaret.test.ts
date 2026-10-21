@@ -373,13 +373,14 @@ describe("BodyCaretController — 클릭/이동/커밋", () => {
     expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "가나", bold: true }, { text: " 다" }]);
     // 선택은 유지된다(연속 토글이 가능해야 한다)
     expect(core.bodyCaret.get()!.anchor).toMatchObject({ selAnchor: 0, offset: 2 });
-    // 이미 전부 굵으면 끈다
-    const adapter2 = bodyAdapter({ runs: () => [{ text: "가나", bold: true }, { text: " 다" }] });
+    // 이미 전부 굵으면 끈다 — 끔은 `bold: false` 로 보낸다(#481: 생략은 「바꾸는 자리의 값 그대로」라 굵게가 남는다).
+    // 입력은 blockRuns 가 실제로 주는 모양(굵지 않은 run 도 `bold: false` 를 가진다).
+    const adapter2 = bodyAdapter({ runs: () => [{ text: "가나", bold: true }, { text: " 다", bold: false }] });
     const core2 = await coreWith(adapter2);
     await core2.bodyCaret.clickAt(0, 100.1, 45);
     await core2.bodyCaret.extend(2);
     await core2.bodyCaret.toggleStyle("bold");
-    expect((adapter2.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "가나 다" }]);
+    expect((adapter2.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "가나 다", bold: false }]);
   });
 
   it("범위가 없으면 ⌘B는 조용한 false — 문단 전체를 잘못 굵게 만들지 않는다", async () => {

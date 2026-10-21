@@ -81,7 +81,8 @@ describe("InPlaceCellEditor (issues 032 + 040) — chrome-less contentEditable r
     setContent(`<div><span style="font-weight:700">바뀐값</span></div>`);
     fireEvent.keyDown(editorEl(), { key: "Enter" });
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit.mock.calls[0][0]).toEqual([{ text: "바뀐값", bold: true }]);
+    // #481 — the computed style is the whole look: the "off" attributes are named too.
+    expect(onCommit.mock.calls[0][0]).toEqual([{ text: "바뀐값", bold: true, italic: false, underline: false, strike: false, highlight: null }]);
   });
 
   it("Shift+Enter=개행 (does NOT commit — a newline)", () => {
@@ -131,7 +132,7 @@ describe("InPlaceCellEditor (issues 032 + 040) — chrome-less contentEditable r
     fireEvent.compositionEnd(el);
     fireEvent.keyDown(el, { key: "Enter" });
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit.mock.calls[0][0]).toEqual([{ text: "한" }]);
+    expect(onCommit.mock.calls[0][0]).toEqual([{ text: "한", bold: false, italic: false, underline: false, strike: false, highlight: null }]);
   });
 
   it("a FAILED commit un-latches so the user can retry (issue 032 step 2 — 저장 실패 시 에디터 유지)", async () => {
@@ -167,6 +168,6 @@ describe("InPlaceCellEditor (issues 032 + 040) — chrome-less contentEditable r
     fireEvent.keyDown(editorEl(), { key: "Tab" });
     expect(onCommitMove).toHaveBeenCalledTimes(1);
     expect(onCommitMove.mock.calls[0][0]).toBe("right");
-    expect(onCommitMove.mock.calls[0][1]).toEqual([{ text: "다음" }]);
+    expect(onCommitMove.mock.calls[0][1]).toEqual([{ text: "다음", bold: false, italic: false, underline: false, strike: false, highlight: null }]);
   });
 });

@@ -19,7 +19,7 @@
 //   6. The commit is a run-preserving SetTableCellRuns/SetParagraphRuns path (wired in HwpWorkspace) — never
 //      a plain-text variant.
 
-import type { RunSpec } from "@auto-hwp/editor-core";
+import { explicitStyle, type RunSpec } from "@auto-hwp/editor-core";
 
 const NANUM = "NanumGothic, sans-serif";
 const HWPUNIT_PER_PX = 7200 / 96; // 75 — matches the Rust HWPUNIT_PER_PX
@@ -172,7 +172,9 @@ export function serializeEditor(root: HTMLElement, scale: number): RunSpec[] {
     if (!text) return;
     const last = runs[runs.length - 1];
     if (last && eqStyle(last, st)) last.text += text;
-    else runs.push({ text, ...st });
+    // #481 — the computed style is the run's whole look: name every on/off attribute (an omitted one would
+    // keep the replaced text's). No shade is drawn here, so none is read back — `highlight: null`, as before.
+    else runs.push({ text, ...explicitStyle(st) });
   };
   const addBreak = () => {
     if (runs.length) runs[runs.length - 1].text += "\n";

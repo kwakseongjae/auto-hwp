@@ -446,6 +446,12 @@ describe("buildSystemPrompt (INTENT-SCHEMA excerpt, allowed-intent subset)", () 
     expect(p).not.toContain("# DeleteBlock —");
   });
 
+  it("states the RunSpec omission rule (#481 — omitted keeps the replaced look; off is said out loud)", () => {
+    const p = buildSystemPrompt();
+    expect(p).toContain("RUNSPEC: a field a run leaves out KEEPS the replaced text's look");
+    expect(p).toContain('"bold": false, "highlight": null');
+  });
+
   it("the original 5 fill/format excerpts stay VERBATIM (051 adds; it never rewords the promoted vocabulary)", () => {
     // The five pre-051 Intent blocks from the reference proxy's original SYSTEM_PROMPT — these lines must
     // survive the whitelist expansion byte-identically (발췌 규율: the doc excerpt is the vocabulary; only
