@@ -91,7 +91,9 @@ Intent 표면은 하나지만 이를 나르는 전송은 둘이다. 이 문서�
 | (B) MCP `tools/call` 실패 | `result{ content:[{text}], isError:true }` (평문) | 없음 |
 | (B) MCP 프로토콜 에러 | JSON-RPC `error{ code, message }` | 실방출 `-32601`(method not found)뿐 |
 
-즉 **대부분의 실패는 "코드 없는 평문 문자열"**이다. 대표 에러 문자열:
+즉 **대부분의 실패는 "코드 없는 평문 문자열"**이다. wasm `HwpDoc` 레인은 이 문자열로 `code` 를 붙인다 —
+`invalid target:` 머리말 → `invalid_target`, `invalid intent:` 머리말 · serde 의 `unknown variant`/`unknown field` →
+`bad_intent`, `… out of range` → `out_of_range`. 대표 에러 문자열:
 
 | 상황 | 대표 문자열(부분 일치) |
 |------|------------------------|
@@ -104,6 +106,8 @@ Intent 표면은 하나지만 이를 나르는 전송은 둘이다. 이 문서�
 | 필수 필드 누락 | `missing field \`section\`` (serde) |
 | 문서 미개봉 상태에서 편집/조회 | `no document open (call open_document first)` |
 | 블록 인덱스 범위 밖 | `SetTableCell: block index {i} out of range` 등 op별 |
+| 주소는 맞는데 대상 종류가 다름(#483) | `invalid target: SetTableProps: block {i} is not a table` 등 |
+| 바꿀 값이 없음 · 허용 밖 값 · 함께 줄 수 없는 필드(#483) | `invalid intent: …` |
 | 구조 문단 in-place 편집 | `paragraph N has structural content and cannot be edited in place` |
 | 대기 제안 없이 Commit | `대기 중인 제안이 없습니다 (propose first)` |
 | 오래된/다른 Proposal v1 커밋 | `stale Proposal v1 (...)` |
@@ -809,6 +813,7 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 | `index` | integer\|null | 블록 인덱스(`==len`=끝-append, 범위 밖=에러), `null`/생략=구역 끝 | ○(없으면 구역 끝) |
 | `runs` | RunSpec[] | 스타일 run 배열(§6.7 RunSpec와 동일 wire) | ● |
 | `para` | ParaSpec | 문단 모양 오버라이드(아래; 생략=`{}`=전부 상속) | ○(생략 시 상속) |
+| `para_like` | `{section, block}` | 이 **본문 문단**의 문단 모양 참조를 그대로 쓴다 — 내보내면 그 `paraPrIDRef`(새 `hh:paraPr` 없음, 번호 · 탭 · 테두리 포함). 기준은 넣기 **전** 문서의 블록. `para` 와 함께 주면 거부(#483) | ○ |
 
 **서식 상속(불릿 채움 수리)** — `runs`가 서식을 **하나도 지정하지 않으면**(기본 `RunSpec`) 새 문단의
 글자 모양은 **삽입 지점의 이웃 본문 문단**에서 물려받는다. `para`도 비어 있으면 문단 모양(들여쓰기·
@@ -911,12 +916,66 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 필드 없음. 결과 `{kind:"docProfile", profile}` — `title` + 구조 카운트 + headings + table inventory
 + excerpt. 조판 없음, LLM 호출 0.
 
+### 6.12 배치 속성 (#483; additive)
+
+> 양식을 채운 뒤 쪽 배치를 맞추는 속성. 내보낸 XML 을 직접 고치는 대신 Intent 로 — 편집기 레인(제안 → 커밋)과
+> 일괄 레인(`apply_intents`, 원자 묶음 포함)이 같은 연산을 써서 같은 `section*.xml` · `header.xml` 이 나온다.
+> 1 undo 단위. AI 편집 화이트리스트에는 넣지 않는다(호스트 경로 전용).
+
+#### `SetParagraphShape` — 본문 문단의 배치 · 모양 패치(그 문단만, 1 undo 단위)
+```json
+{"intent":"SetParagraphShape","section":0,"block":0,"keep_with_next":true,"widow_orphan":true,"page_break_before":false,"align":"justify","line_spacing_pct":160}
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `section` | integer | 구역 인덱스 | ● |
+| `block` | integer | **본문(최상위) 문단** 블록 인덱스 — 문단이 아니면 `invalid target` | ● |
+| `keep_with_next` | boolean | 다음 문단과 함께(`hh:breakSetting keepWithNext`) | ○ |
+| `widow_orphan` | boolean | 외톨이줄 보호(`widowOrphan`) | ○ |
+| `page_break_before` | boolean | 문단 앞에서 항상 쪽 나눔(문단 모양 `pageBreakBefore`). 문단 하나에만 붙는 강제 쪽 나누기(`<hp:p pageBreak>`)와는 다르다 | ○ |
+| `align` | string | `left`\|`center`\|`right`\|`justify`\|`distribute`\|`distribute_space` | ○ |
+| `line_spacing_pct` | integer | 줄 간격 %(≥ 1, PERCENT) | ○ |
+
+필드는 모두 선택이고 **하나 이상** 있어야 한다(없으면 `invalid intent`).
+
+- **그 문단만** 바뀐다. 내보내기는 그 문단이 쓰던 원래 `hh:paraPr` 를 **통째로 복제**하고 요청한 속성만 바꾼다 —
+  번호 · 글머리표(`hh:heading`) · 탭 · 테두리 · 여백 · 다른 나눔 설정은 그대로다. 같은 모양을 쓰던 다른 문단의
+  `paraPrIDRef` 는 바뀌지 않는다.
+- 같은 원본에 같은 변경을 받은 문단은 paraPr 하나를 같이 쓴다. 지금 값과 같은 패치는 원래 id 를 다시 써서 내보낸
+  결과가 편집 전과 같다. 같은 문단을 다시 고치면 원본에서 한 번에 만든 모양 하나가 된다.
+- 문단 본문(run · 줄 배치 캐시 `linesegarray`)은 바이트 그대로다. 단 `align` · `line_spacing_pct` 로 새 모양이 되면
+  그 문단의 `linesegarray` 는 버린다(한/글이 다시 잰다).
+- 조판: `page_break_before` 는 조판이 이미 읽는 값이라 열린 문서의 쪽이 바로 나뉜다. `keep_with_next` ·
+  `widow_orphan` 은 아직 조판이 읽지 않는다(값을 쓰고 내보내기까지 — 쪽 수 게이트에 영향이 있어 따로 연다).
+  칸 안 문단은 아직 대상이 아니다.
+
+#### `SetTableProps` — 이미 있는 표의 배치 속성(1 undo 단위)
+```json
+{"intent":"SetTableProps","section":0,"index":1,"treat_as_char":false,"page_break":"cell","repeat_header":false}
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `section` | integer | 구역 인덱스 | ● |
+| `index` | integer | 표 블록 인덱스 — 최상위, 또는 `path` 가 있으면 그 부모 칸 안의 블록 인덱스 | ● |
+| `path` | CellStep[] | 칸 안 표: 부모 칸까지 내려가는 CellPath(`DeleteNestedBlock` 과 같은 주소). 생략 = 최상위 | ○ |
+| `treat_as_char` | boolean | 글자처럼 취급(`<hp:pos treatAsChar>`). `false` 면 문단 사이에 놓인 표라 쪽 경계에서 나뉜다 | ○ |
+| `page_break` | string | 쪽 경계 나눔(`<hp:tbl pageBreak>`): `none`(나누지 않음) \| `table`(행 경계) \| `cell`(행 안에서도) | ○ |
+| `repeat_header` | boolean | 제목 행 반복(`<hp:tbl repeatHeader>`) | ○ |
+
+- 하나 이상 있어야 한다. 표가 아닌 블록은 `invalid target`.
+- 내보내기는 그 표의 여는 태그 `pageBreak` · `repeatHeader` 와 표 자신의 `<hp:pos treatAsChar>` **만** 바꾼다 —
+  칸 · 크기 · 위치 기준은 바이트 그대로다. 1×1 틀 표는 **주소가 가리키는 표**(틀)에 붙는다 — 안쪽 표는 `path` 로.
+- `repeat_header: true` 는 표의 반복 설정을 켠다. 어느 행이 반복되는지는 문서의 제목 셀 표시를 따른다(새로 넣은
+  표는 첫 행).
+- 조판: 다시 열면 파서가 `pageBreak` · `repeatHeader` 를 읽는다. 열린 세션의 화면에는 아직 반영하지 않는다(쓰기 ·
+  내보내기까지).
+
 ---
 
 ## 7. 드리프트 방지
 
 - 정본 테스트: `crates/hwp-mcp/tests/schema_v0.rs`.
-  - 위 52개 예제가 실제로 `deserialize_intent`로 파싱됨(문서↔코드 필드명/타입 일치 보증).
+  - 위 57개 예제가 실제로 `deserialize_intent`로 파싱됨(문서↔코드 필드명/타입 일치 보증).
   - `Synthetic` 대상은 결정적 3×2 표 문서에 op-bus로 디스패치되어 편집을 만든다(리비전 범프).
   - `Showcase` 대상은 실제 HWPX를 열어 엔드투엔드로 디스패치된다.
   - unknown 태그/필드, 태그·필수 필드 누락, `intent_version`(없음/0/범위밖/비정수)를 고정.
