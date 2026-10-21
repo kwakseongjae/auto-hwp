@@ -1686,6 +1686,13 @@ fn apply_table_props(original: &str, sec: &Section, edits: &mut Vec<(usize, usiz
         }
         for i in touching {
             let (a, b, xml) = &mut edits[i];
+            // Edits are element-aligned (a paragraph, a cell, a whole table), so an edit touching the
+            // table's open tag + `<hp:pos>` contains them entirely. One that REGENERATED the table no
+            // longer carries `old` (it took the override at emission) — nothing to do there.
+            debug_assert!(
+                *a <= s0 && end <= *b,
+                "an edit partially overlaps a table's open tag"
+            );
             if *a <= s0 && end <= *b && xml.matches(old).count() == 1 {
                 *xml = xml.replacen(old, &patched, 1);
             }
