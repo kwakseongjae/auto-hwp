@@ -40,6 +40,7 @@ fn synthetic_session() -> Session {
             ..Default::default()
         }],
         para: ParaSpec::default(),
+        para_like: None,
     })
     .expect("insert paragraph @0");
     let cell = |t: &str| CellSpec {
@@ -318,6 +319,17 @@ fn examples() -> Vec<Example> {
             r#"{"intent":"InsertParagraphAt","section":0,"index":0,"runs":[{"text":"새 문단","bold":true}],"para":{"align":"center"}}"#,
             Synthetic,
         ),
+        // ---- placement properties (#483; additive) — the synthetic doc is [paragraph@0, table@1].
+        e(
+            "SetParagraphShape",
+            r#"{"intent":"SetParagraphShape","section":0,"block":0,"keep_with_next":true,"widow_orphan":true,"page_break_before":false,"align":"justify","line_spacing_pct":160}"#,
+            Synthetic,
+        ),
+        e(
+            "SetTableProps",
+            r#"{"intent":"SetTableProps","section":0,"index":1,"treat_as_char":false,"page_break":"cell","repeat_header":false}"#,
+            Synthetic,
+        ),
         // ---- AI-generated data chart (issue 062-follow) — a bar/pie/line chart built from data,
         //      inserted as an Inline::Chart on the issue-062 PaintOp::Image.svg render channel. ----
         e(
@@ -385,7 +397,7 @@ fn de_err(v: Value) -> String {
 fn every_intent_variant_has_a_documented_example() {
     assert_eq!(
         examples().len(),
-        55,
+        57,
         "one JSON example per Intent variant (see INTENT-SCHEMA.md)"
     );
 }
