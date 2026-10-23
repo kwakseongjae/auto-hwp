@@ -19,6 +19,9 @@ auto-hwp(오토한글)의 **사용자 가시 변경**을 기록한다. 대상은
   삭제·필수화는 `intent_version` 범프로만 한다. 디코더는 `deny_unknown_fields`라 **알 수 없는
   intent 태그나 오타 필드를 조용히 무시하지 않고 하드 에러로 거부**한다(에이전트가 오타를 "성공"으로
   오인하는 것을 막기 위해). 즉 **TypeScript SDK 표면은 0.x 동안 불안정하고, Intent 계약은 안정이다.**
+  - **예외 1건 (#481, 2026-10-23 메인테이너 결정)**: 0.1.0 동결 전, 버그로 확정된 생략값 의미 변경
+    (`RunSpec` 에서 생략한 글자 속성 = 「끔」 → 「바꾸는 자리의 값을 물려받기」)은 `intent_version` 범프 없이
+    해당 릴리스 `파괴 변경` 절에 기록했다. 근거는 RFC #496 §9.
 - npm 패키지 4종은 **한 버전으로 함께 올린다**(버전 동기). `@auto-hwp/react`는 발행 시점의 형제
   패키지 버전을 읽어 `^<버전>`으로 요구한다.
 - **Rust 워크스페이스(`auto-hwp` CLI 포함)는 별도 릴리스가 없다.** `Cargo.toml`의
@@ -28,7 +31,8 @@ auto-hwp(오토한글)의 **사용자 가시 변경**을 기록한다. 대상은
 *(EN — Versioning: this project is pre-1.0. During 0.x any version bump may contain breaking changes;
 every one of them is recorded in this file with a migration note. The exception is the Intent JSON
 schema (v0), which is additive-only and rejects unknown intents/fields with a hard error. The four npm
-packages are released in lockstep.)*
+packages are released in lockstep. One recorded exception (#481): before the 0.1.0 freeze, a confirmed-bug change to
+what an omitted RunSpec field means was logged under Breaking without an `intent_version` bump.)*
 
 ---
 
