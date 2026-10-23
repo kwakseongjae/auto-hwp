@@ -3,6 +3,22 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-10-24 · Claude Opus 5.5 — **0.0.18 발행(작업 공간 핸들 #482 · #488) — 첫 npm Trusted Publishing · #491(#481) 머지** (main `9c7093c5`).
+  · **발행 방식을 바꿨다**: 7/22 에 넣은 `NPM_TOKEN` 이 만료됐다(쓰기 토큰 최대 90일, `npm whoami` E401). 그래서 `publish.yml` 을 **OIDC Trusted Publishing** 으로 바꿨다
+    (#494 · PR #495: `id-token: write` · npm 11.13.0 · 발행 Node 22 · 네 패키지 `repository` 필드 · **발행 전 네 패키지 교환 검사** — 하나라도 실패하면 아무것도
+    발행하지 않는다, dry-run 은 경고만). 오너가 npmjs.com 네 패키지에 Trusted Publisher(GitHub Actions · `kwakseongjae` · `auto-hwp` · `publish.yml` · 환경 비움)를 넣었다.
+    그 전에는 교환이 4/4 `404 package not found` 였다. 이제 토큰은 쓰지 않는다(시크릿은 남아 있으나 만료).
+  · **#495 머지**(`a119feb`, 머지 트리 = dry-run 40008574195 이 검증한 트리) → **publish 0.0.18**(2026-10-23 19:26Z = KST 10-24 04:26, run 40010031720 · headSha = 머지
+    커밋 · 교환 4/4 `201 ok` · provenance 서명): wasm 8,703,807 B · sha256 `55d37f9e…0255` · SRI `sha384-Q0+FdTsp…aSl` — **0.0.17 과 바이트 동일**(0.0.17 이후
+    `*.rs` 변경 0). 레지스트리 4패키지 `latest=0.0.18` · react → `^0.0.18`. 발행 직후 몇 분은 레지스트리가 404 를 준다(「being processed」).
+  · **#491 머지**(`9c7093c5`, 메인테이너 결정 A — `intent_version` 범프 없이 규칙 예외 1건, CHANGELOG 정책 문단 · RFC #496 §9): main 위로 rebase(충돌 0 —
+    겹친 `CHANGELOG.md` · `HwpWorkspace.tsx` 는 자동 병합, #481 항목은 `[Unreleased]`) · #488 핸들의 선택 서식은 `patchRuns` 한 곳을 지나 「끔 = `false`」가 그대로 적용 ·
+    `verify-local --full`: Rust 111 묶음 ok · 게이트 v2 ok · 오라클 전수 ok(82) · vitest editor-core 296 · ai-protocol 65 · react 459 · hwp-lab 250 · e2e 84 통과 ·
+    1 실패(#462) · 3 건너뜀 · CI 3종.
+  · **다음 릴리스(0.0.19)**: #491 로 wasm 이 바뀐다(8,718,018 B) → `cdn.js` `WASM_BYTES` 를 고친다. 0.0.19 의 `[Unreleased]` = #481 파괴 변경 · 고침.
+  · 함정(그대로): 워크트리에서 platform 경계 테스트(#460) · hwp-lab `npm ci` lock 어긋남(#461 — `npm install` 로 깔고 lock 은 되돌림) · 새 워크트리는
+    `git submodule update --init external/rhwp` 를 먼저 해야 cargo 가 돈다.
+
 - 갱신: 2026-10-14 · Claude Opus 5.5 — **0.0.17 발행 — HWP5 문단 여백 배율(#466) · 띄운 표 배치(#467)** (main `b5fe5f6`).
   · **#468 머지**(`a36ef72`) → **#469 를 그 위로 리베이스**(충돌 = `lift.rs` 테스트 모듈 머리, 두 테스트 모두 유지) → 로컬 `verify-local.sh` quick 그린
     (게이트 v2 8 · 18 · 24 · 줄 98.9%+) · `oracle-sweep --check` ok(82 docs, 79 scorable) · CI 3종 → **#469 머지**(`83b55d4`).
