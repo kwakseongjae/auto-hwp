@@ -27,22 +27,53 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # 발행 인증은 npm Trusted Publishing(OIDC)이다(#494, 2026-10-23). 장기 토큰(secrets.NPM_TOKEN)을 쓰지 않는다 —
+    # 7/22 토큰이 만료(E401)돼 0.0.18 이 막혔고, 쓰기 토큰은 최대 90일이라 같은 일이 반복된다.
+    # id-token: write 가 있어야 npm CLI(11.5.1+)가 GitHub OIDC 토큰을 받아 레지스트리 단기 토큰으로 바꾼다.
+    permissions:
+      contents: read
+      id-token: write
     env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       DRY_RUN: ${{ inputs.dry_run }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive # external/rhwp — engine wasm 빌드에 필요(cargo resolve)
 
-      # 빌드 툴체인을 설치하기 전에 토큰을 fail-fast 검증한다. `npm publish --dry-run`은
-      # 토큰이 없어도 경고만 내고 성공할 수 있으므로 whoami가 발행 인증의 정본이다.
+      # 빌드 툴체인을 설치하기 전에 발행 인증을 fail-fast 검증한다. `npm publish --dry-run`은 인증 없이도
+      # 성공할 수 있고, OIDC 에는 whoami 가 없다 — 그래서 네 패키지 각각의 토큰 교환을 직접 해 본다.
+      # 하나라도 실패하면(그 패키지에 trusted publisher 가 없거나 저장소 · 워크플로 이름이 다르면) 아무것도 발행하지 않는다.
       - uses: actions/setup-node@v7
         with:
           node-version: 20.19
           registry-url: "https://registry.npmjs.org"
-      - name: verify npm authentication
-        run: npm whoami --registry=https://registry.npmjs.org
+      - name: npm 11 (trusted publishing 은 npm 11.5.1 이상)
+        run: npm install -g npm@11.13.0 && npm --version
+      - name: verify npm trusted publishing (OIDC 교환, 네 패키지)
+        run: |
+          set -euo pipefail
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::id-token: write 권한이 없어 OIDC 토큰을 받을 수 없다"
+            exit 1
+          fi
+          for PACKAGE in @auto-hwp/engine @auto-hwp/editor-core @auto-hwp/ai-protocol @auto-hwp/react; do
+            ID_TOKEN="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).value||"")}catch{}})')"
+            if [ -z "$ID_TOKEN" ]; then echo "::error::GitHub OIDC 토큰을 받지 못했다"; exit 1; fi
+            echo "::add-mask::$ID_TOKEN"
+            ESCAPED="${PACKAGE/\//%2f}"
+            CODE="$(curl -sS -o exchange.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ID_TOKEN" \
+              "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/$ESCAPED" || true)"
+            # 받은 단기 토큰은 출력하지 않는다 — 있었는지와 오류 메시지만 본다
+            RESULT="$(node -e 'try{const j=JSON.parse(require("fs").readFileSync("exchange.json","utf8"));process.stdout.write(j.token?"ok":("fail: "+(j.message||j.error||"no token")))}catch{process.stdout.write("fail: unreadable body")}')"
+            rm -f exchange.json
+            echo "$PACKAGE exchange http=$CODE $RESULT"
+            if [ "$RESULT" != "ok" ]; then
+              echo "::error::$PACKAGE trusted publisher 교환 실패 — npmjs.com 패키지 설정의 Trusted Publisher(저장소 kwakseongjae/auto-hwp · 워크플로 publish.yml)를 확인"
+              exit 1
+            fi
+          done
 
       # engine prepack(build-wasm.mjs)이 쓰는 Rust 툴체인 + wasm-bindgen(=0.2.125, Cargo.toml 과 정확히 일치).
       - uses: dtolnay/rust-toolchain@1.95
