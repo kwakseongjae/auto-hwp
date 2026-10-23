@@ -659,20 +659,35 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 | `block` | integer | 블록 인덱스 | ● |
 | `runs` | RunSpec[] | 스타일 run 배열(아래) | ● |
 
-**`RunSpec` (중첩 오브젝트)** — `#[serde(default, deny_unknown_fields)]`. 모든 필드 선택
-(생략 시 기본값). 알 수 없는 run 키는 거부.
+**`RunSpec` (중첩 오브젝트)** — `#[serde(default, deny_unknown_fields)]`. 모든 필드 선택.
+알 수 없는 run 키는 거부. 생략한 필드의 뜻은 아래 「생략 = 물려받기」.
 
 | 필드 | 타입 | 단위/값 | 필수 |
 |------|------|---------|------|
 | `text` | string | run 텍스트(생략 시 `""`) | ○ |
-| `bold` | bool | 기본 `false` | ○ |
-| `italic` | bool | 기본 `false` | ○ |
-| `underline` | bool | 기본 `false` | ○ |
-| `strike` | bool | 기본 `false` | ○ |
-| `size_pt` | number | **pt** | ○ |
-| `color` | string | `"#RRGGBB"` | ○ |
-| `highlight` | string | `"#RRGGBB"`(형광/음영) | ○ |
-| `font` | string | 글꼴 패밀리 | ○ |
+| `bold` | bool/null | 생략 · `null` = 물려받기 | ○ |
+| `italic` | bool/null | 생략 · `null` = 물려받기 | ○ |
+| `underline` | bool/null | 생략 · `null` = 물려받기 | ○ |
+| `strike` | bool/null | 생략 · `null` = 물려받기 | ○ |
+| `size_pt` | number/null | **pt**. 생략 · `null` = 물려받기 | ○ |
+| `color` | string/null | `"#RRGGBB"`. 생략 · `null` = **검정**(물려받지 않는다) | ○ |
+| `highlight` | string/null | `"#RRGGBB"`(형광/음영). 생략 = 물려받기, **`null` = 음영 없음** | ○ |
+| `font` | string/null | 글꼴 패밀리(모든 계열에 쓴다). 생략 · `null` = 물려받기 | ○ |
+
+**생략 = 물려받기 (#481).** `SetTableCellRuns` · `SetParagraphRuns` 에서 run 이 적지 않은 속성은 **바꾸는 자리의
+글자 모양**을 그대로 쓴다. 「크기만」 · 「굵게만」 같은 요청이 나머지 속성을 바꾸지 않는다.
+
+- **기준 run**: 그 문단(구조 문단은 글자 구역) · 칸에서 **글자가 있는 첫 run**(공백이 아니고 크기가 있는 run)이다.
+  없으면 문단은 자기 첫 run → 이웃 문단(§6.9 「서식 상속」), 칸은 첫 문단의 첫 run 을 쓴다. 새 run 은 모두 같은 기준을 쓴다.
+- **예외 — 글자 색**: 생략하면 검정이다. 양식의 안내 글자(파랑 · 빨강)를 바꿔 쓸 때 그 색을 물려받지 않게 하려는 것이다.
+  원래 색을 이어 쓰려면 `color` 를 적는다.
+- **끄기**: 끄려면 `false`, 음영을 지우려면 `highlight: null` 을 적는다. run 의 전체 모양을 아는 생산자(편집기 ·
+  `blockRuns` 를 고쳐 되돌리는 호스트)는 끈 속성도 적는다. `blockRuns` 가 돌려주는 run 은 이미 그렇게 생겼다.
+- **메모리 = 파일**: 메모리(`blockRuns`)의 값과 내보낸 파일을 다시 연 값이 같다. 파일은 기준 run 의 원래
+  `<hh:charPr>` 를 복제해 **기준과 다른 속성만** 고친다. 장평 · 자간 · 상대 크기 · 글자 위치 · 계열별 글꼴처럼
+  `RunSpec` 에 없는 속성은 원래 그대로다. 값이 기준과 같으면 원래 id 를 쓴다.
+- **넣기 Intent**(`InsertParagraphAt` · `InsertTableAt` · `AppendRichParagraph` …)에는 바꾸는 자리가 없다. 그래서 생략은
+  기본값(끔 · 없음)이고, 서식을 하나도 적지 않은 run 은 §6.9 이웃 규칙을 따른다.
 
 ### 6.8 셀 음영 / 범위 서식
 
@@ -814,7 +829,7 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 글자 모양은 **삽입 지점의 이웃 본문 문단**에서 물려받는다. `para`도 비어 있으면 문단 모양(들여쓰기·
 정렬)을 같은 이웃에서 물려받는다. 이웃 탐색은 `index-1`에서 뒤로 → `index`에서 앞으로, **빈
 스페이서 문단(양식이 줄간격용으로 끼워 둔 6~8pt 빈 줄)과 표 앵커 문단은 건너뛴다**. 크기·정렬 등을
-명시하면 그 값이 이긴다(기존 동작). 이유: 예전에는 `CharShape::default()`(height 0 → 조판 10pt
+명시하면 그 값이 이긴다(기존 동작 — 바꾸는 Intent 의 생략 규칙은 §6.7 「생략 = 물려받기」). 이유: 예전에는 `CharShape::default()`(height 0 → 조판 10pt
 폴백) + 기본 `ParaShape`(들여쓰기 0)로 합성돼, 12~14pt 개요 목록 한가운데 삽입하면 **더 작은 글자가
 불릿과 분리된 줄**로 렌더됐다.
 

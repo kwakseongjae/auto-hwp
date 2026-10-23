@@ -568,6 +568,51 @@ fn build_synth_plan(
             if doc.hwpx_pool_char_shapes.contains(&idx) {
                 continue;
             }
+            // #481: a shape an edit DERIVED from a pool shape (`SemanticDoc::char_shape_derived`) is
+            // the ROOT's own charPr with only the differing fields patched — not a re-synthesis from
+            // the header's first charPr, which would swap in that charPr's size/font/장평 for whatever
+            // the edit left unnamed (memory said one thing, the file another).
+            let derived = doc.char_shape_derived.get(&idx).and_then(|root| {
+                let root_id = doc.hwpx_pool_char_ids.get(root)?;
+                let root_xml = synth::char_pr_by_id(header0, *root_id)?;
+                Some((
+                    doc.char_shapes.get(*root)?,
+                    root_xml,
+                    doc.char_shapes.get(idx)?,
+                ))
+            });
+            if let Some((root_shape, root_xml, shape)) = derived {
+                let font_changed =
+                    shape.font_family != root_shape.font_family || shape.fonts != root_shape.fonts;
+                let fontref = if !font_changed {
+                    None
+                } else if shape.fonts.iter().any(Option::is_some) {
+                    let (h, fr) = synth::intern_fonts(&header, &shape.fonts, root_xml);
+                    header = h;
+                    Some(fr)
+                } else if let Some(fam) = shape.font_family.as_deref() {
+                    let (h, fr) = synth::intern_font(&header, fam);
+                    header = h;
+                    Some(fr)
+                } else {
+                    None
+                };
+                let frag =
+                    synth::derive_char_pr(root_xml, next_id, root_shape, shape, fontref.as_deref());
+                // One index per (root, value) already (the model interns derivations), so the only
+                // reuse left is an equal existing pool entry — the root itself when nothing differs.
+                if let Some(existing) =
+                    synth::existing_equivalent_id(header0, "<hh:charPr ", "</hh:charPr>", &frag)
+                {
+                    plan.char_ref.insert(idx, existing);
+                } else {
+                    char_fragments.push_str(&frag);
+                    plan.char_ref.insert(idx, next_id.to_string());
+                    char_count += 1;
+                    next_id += 1;
+                }
+                continue;
+            }
             match doc.char_shapes.get(idx) {
                 Some(s) if s.is_default() => {}
                 Some(shape) => {

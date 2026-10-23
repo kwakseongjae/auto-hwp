@@ -5507,7 +5507,9 @@ mod tests {
         assert_eq!(proposal.proposal_version, 1);
         assert!(proposal.proposal_id.ends_with(&proposal.digest));
         assert_eq!(proposal.base_revision, before_rev);
-        assert_eq!(proposal.intents[0]["runs"][0]["bold"], false);
+        // #481: an unnamed flag stays unnamed in the normalized form — omitted means "inherit", which
+        // `false` ("off") no longer stands for.
+        assert!(proposal.intents[0]["runs"][0].get("bold").is_none());
         assert!(proposal.intents[0]["para"].is_object());
         assert!(proposal.verification.commit_allowed);
         assert!(proposal.verification.submission_ready);

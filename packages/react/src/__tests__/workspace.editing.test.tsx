@@ -219,7 +219,8 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     await waitFor(() => {
       const applied = adapter.applied.find((i) => i.intent === "SetTableCellRuns") as (Intent & { runs: unknown[] }) | undefined;
       expect(applied).toBeTruthy();
-      expect(applied!.runs).toEqual([{ text: "바뀐 값", bold: true }]); // bold PRESERVED through the rich round-trip
+      // bold PRESERVED through the rich round-trip; #481 — the "off" attributes are named too.
+      expect(applied!.runs).toEqual([{ text: "바뀐 값", bold: true, italic: false, underline: false, strike: false, highlight: null }]);
     });
   });
 
@@ -252,7 +253,11 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     await waitFor(() => {
       const applied = adapter.applied.find((i) => i.intent === "SetTableCellRuns") as (Intent & { runs: unknown[] }) | undefined;
       expect(applied).toBeTruthy();
-      expect(applied!.runs).toEqual([{ text: "새로운" }, { text: "굵게", bold: true }]); // bold run untouched
+      // bold run untouched; #481 — the plain run says bold: false (an omitted one would keep the cell's bold).
+      expect(applied!.runs).toEqual([
+        { text: "새로운", bold: false, italic: false, underline: false, strike: false, highlight: null },
+        { text: "굵게", bold: true, italic: false, underline: false, strike: false, highlight: null },
+      ]);
     });
   });
 

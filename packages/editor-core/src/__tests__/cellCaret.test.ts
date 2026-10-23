@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { CellCaretController, cellGlobalOffset, cellParaOffsetAt, inheritStyleAt, runsText, spliceRuns } from "../cellCaret";
+import {
+  CellCaretController,
+  cellGlobalOffset,
+  cellParaOffsetAt,
+  inheritStyleAt,
+  runsText,
+  spliceRuns,
+  styleRunRange,
+} from "../cellCaret";
 import { DocSession } from "../session";
 import type { CellCaretRect, CellTextHit, Intent, RunSpec } from "../types";
 import { MockAdapter } from "./mockAdapter";
@@ -99,6 +107,28 @@ describe("spliceRuns (style-preserving run splice)", () => {
   it("typing into an EMPTY cell emits an unstyled run", () => {
     expect(spliceRuns([], 0, 0, "가")).toEqual([{ text: "가" }]);
     expect(spliceRuns([{ text: "" }], 0, 0, "가")).toEqual([{ text: "가" }]);
+  });
+
+  // #481 — on SetParagraphRuns/SetTableCellRuns an OMITTED field keeps the replaced text's value. So a KNOWN
+  // off (blockRuns' `bold: false`) must survive the splice — dropping it would let a plain run next to a bold
+  // one turn bold — while an UNKNOWN style (empty cell) stays empty for the engine to fill from the cell.
+  it("a known off survives the splice (blockRuns' bold:false is not dropped)", () => {
+    const runs: RunSpec[] = [
+      { text: "굵게", bold: true, highlight: null },
+      { text: " 보통", bold: false, highlight: null },
+    ];
+    expect(spliceRuns(runs, 5, 0, "글")).toEqual([
+      { text: "굵게", bold: true, highlight: null },
+      { text: " 보통글", bold: false, highlight: null },
+    ]);
+  });
+
+  it("turning a flag off names it false — the key is not dropped", () => {
+    const runs: RunSpec[] = [{ text: "가나다", bold: true }];
+    expect(styleRunRange(runs, 0, 2, "bold", false)).toEqual([
+      { text: "가나", bold: false },
+      { text: "다", bold: true },
+    ]);
   });
 
   it("distinct neighbour styles stay distinct (no cross-run style bleed)", () => {

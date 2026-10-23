@@ -170,6 +170,9 @@ const RUNSPEC_TAIL = '      "size_pt": <number pt>, "color": "#RRGGBB", "highlig
 
 const FOOTER = [
   "UNITS/VALUES: size_pt is points; colors are \"#RRGGBB\"; table \"index\" is the table BLOCK index.",
+  // #481 — RunSpec omission = keep: a field a run leaves out keeps the replaced text's value (color: black).
+  "RUNSPEC: a field a run leaves out KEEPS the replaced text's look (bold, size, font …); to turn a style off",
+  "say so (\"bold\": false, \"highlight\": null). \"color\" left out is black.",
   "",
   // Index semantics (051 — 052 실측: "block 0 is not a table" 거부): index/block address the section's
   // BLOCK order, not a per-kind ordinal; a wrong-kind target is an honest engine error.

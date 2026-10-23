@@ -620,39 +620,77 @@ pub struct ChartSeries {
     pub values: Vec<f64>,
 }
 
-/// A formatted text run for `AppendRichParagraph` (the portable representation the AI content
-/// preprocessor emits). Maps 1:1 to a synthesized `CharShape` → `<hh:charPr>` on export.
+/// A formatted text run — the wire shape carried inside the `SetTableCellRuns` / `SetParagraphRuns`
+/// Intents (issue 008) and the portable representation the AI content preprocessor emits for
+/// `AppendRichParagraph`.
 ///
-/// `Deserialize` (issue 008): this is the wire shape carried inside the `SetTableCellRuns` /
-/// `SetParagraphRuns` Intents. `#[serde(default)]` lets a run omit any field (missing → the
-/// field's `Default`, e.g. `{"text":"강조","bold":true}`); `deny_unknown_fields` rejects a
-/// misspelled run key rather than silently dropping formatting.
+/// #481 — every field but `text` is OPTIONAL and an omitted field means "not named": the replace
+/// Intents give it the value of the run being replaced ([`RunSpec::derive_char_shape`] — so "크기만"
+/// keeps bold, "굵게만" keeps the size and font), while the insert paths ([`RunSpec::to_char_shape`])
+/// keep their default (off / none). `null` is the same as omitted, except `highlight: null`, which
+/// CLEARS the shade (the only way to drop an inherited one). Text color is the one field that is never
+/// inherited: omitted or `null` is black. `deny_unknown_fields` rejects a misspelled run key rather
+/// than silently dropping formatting.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RunSpec {
     pub text: String,
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: bool,
-    pub strike: bool,
-    /// Font size in points (e.g. 14.0); None inherits the document default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bold: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub italic: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub underline: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strike: Option<bool>,
+    /// Font size in points (e.g. 14.0).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub size_pt: Option<f32>,
-    /// Text color `#RRGGBB`; None inherits.
+    /// Text color `#RRGGBB`; omitted/`null` = black (never inherited — a form's blue/red 안내 글자
+    /// must not leak into the text that replaces it).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Highlight/shade color `#RRGGBB`; None = none.
-    pub highlight: Option<String>,
-    /// Font family name (e.g. "맑은 고딕"); None inherits.
+    /// Highlight/shade color: omitted = not named (`None`), `null` = no highlight (`Some(None)`),
+    /// `"#RRGGBB"` = that color (`Some(Some(..))`).
+    #[serde(
+        deserialize_with = "present_or_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub highlight: Option<Option<String>>,
+    /// Font family name (e.g. "맑은 고딕"), applied to every script.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
 }
 
+/// Deserialize a field that is PRESENT (a value or `null`) as `Some(..)` — with the struct's
+/// `#[serde(default)]` an ABSENT field stays `None`, so the two are told apart (#481 `highlight`).
+fn present_or_null<'de, D, T>(d: D) -> std::result::Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    serde::Deserialize::deserialize(d).map(Some)
+}
+
+/// #481 — black as a FILE gives it back (`textColor="#000000"` parses opaque), the text color a
+/// replacing run gets when it names none — so the memory value reads what the reopened file reads
+/// (`Color::default()` is the transparent "unset" black, which `blockRuns` reports as `null`).
+const OPAQUE_BLACK: Color = Color {
+    r: 0,
+    g: 0,
+    b: 0,
+    a: 255,
+};
+
 impl RunSpec {
-    /// Build the typography `CharShape` this run requests (default = no overrides).
+    /// The typography `CharShape` this run requests on its own (insert paths: an unnamed field is
+    /// the default — off / no size / no font / black / no highlight).
     pub fn to_char_shape(&self) -> CharShape {
         CharShape {
-            bold: self.bold,
-            italic: self.italic,
-            underline: self.underline,
-            strikeout: self.strike,
+            bold: self.bold.unwrap_or(false),
+            italic: self.italic.unwrap_or(false),
+            underline: self.underline.unwrap_or(false),
+            strikeout: self.strike.unwrap_or(false),
             height: self
                 .size_pt
                 .map(|p| (p * 100.0).round() as i32)
@@ -664,12 +702,62 @@ impl RunSpec {
                 .unwrap_or_default(),
             shade_color: self
                 .highlight
-                .as_deref()
+                .as_ref()
+                .and_then(|h| h.as_deref())
                 .and_then(Color::from_hex)
                 .unwrap_or_default(),
             font_family: self.font.clone().filter(|s| !s.trim().is_empty()),
             ..Default::default()
         }
+    }
+
+    /// #481 — the shape this run gets when it REPLACES text whose shape is `base` (the replace
+    /// Intents): `base` cloned, then every field this spec names applied. An unnamed field keeps
+    /// `base`'s value — except the text color, black unless given (the rule a run that names no
+    /// formatting always had). `highlight: null` clears the shade. A named `font` that differs from
+    /// `base`'s becomes the one family for every script (as [`Self::to_char_shape`] spells it); naming
+    /// the font `base` already uses everywhere changes nothing.
+    pub fn derive_char_shape(&self, base: &CharShape) -> CharShape {
+        let mut s = base.clone();
+        if let Some(v) = self.bold {
+            s.bold = v;
+        }
+        if let Some(v) = self.italic {
+            s.italic = v;
+        }
+        if let Some(v) = self.underline {
+            s.underline = v;
+        }
+        if let Some(v) = self.strike {
+            s.strikeout = v;
+        }
+        if let Some(p) = self.size_pt {
+            s.height = (p * 100.0).round() as i32;
+        }
+        s.text_color = self
+            .color
+            .as_deref()
+            .and_then(Color::from_hex)
+            .unwrap_or(OPAQUE_BLACK);
+        if let Some(h) = &self.highlight {
+            s.shade_color = h.as_deref().and_then(Color::from_hex).unwrap_or_default();
+        }
+        if let Some(f) = self
+            .font
+            .as_deref()
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+        {
+            let already = s.font_family.as_deref() == Some(f)
+                && s.fonts.iter().all(|x| x.as_deref() == Some(f));
+            if !already {
+                s.font_family = Some(f.to_string());
+                s.fonts = Vec::new();
+                s.font_panose = Vec::new();
+                s.face_id = Default::default();
+            }
+        }
+        s
     }
 }
 
@@ -752,7 +840,11 @@ fn intern_char_shape(doc: &mut SemanticDoc, shape: CharShape) -> usize {
         .char_shapes
         .iter()
         .enumerate()
-        .find(|(i, s)| **s == shape && !doc.hwpx_pool_char_shapes.contains(i))
+        .find(|(i, s)| {
+            **s == shape
+                && !doc.hwpx_pool_char_shapes.contains(i)
+                && !doc.char_shape_derived.contains_key(i)
+        })
         .map(|(i, _)| i)
     {
         return i;
@@ -854,6 +946,70 @@ fn neighbour_shapes(
         ),
         None => (None, None),
     }
+}
+
+/// #481 — the pool shape a derivation from char shape `idx` hangs off: `idx` itself when it came from
+/// the original header pool, the root it was derived from when it is a derivation, else `None` (a doc
+/// from another source, or a shape an insert synthesized).
+fn char_shape_root(doc: &SemanticDoc, idx: usize) -> Option<usize> {
+    if doc.hwpx_pool_char_shapes.contains(&idx) {
+        Some(idx)
+    } else {
+        doc.char_shape_derived.get(&idx).copied()
+    }
+}
+
+/// #481 — the shape a replacing run derives from (its value, cloned) and that shape's pool root; the
+/// plain default when the target has no base run at all (the pre-#481 default-shape behaviour).
+fn derivation_base(doc: &SemanticDoc, base_idx: Option<usize>) -> (CharShape, Option<usize>) {
+    match base_idx {
+        Some(i) => (
+            doc.char_shapes.get(i).cloned().unwrap_or_default(),
+            char_shape_root(doc, i),
+        ),
+        None => (CharShape::default(), None),
+    }
+}
+
+/// #481 — intern a shape an edit DERIVED from the run it replaces. With a pool `root` the entry is
+/// recorded in [`SemanticDoc::char_shape_derived`] (the serializer clones the root's own charPr and
+/// patches what differs) and only an entry with the same value AND the same root is reused — never a
+/// pool index (an edited run pointed at one does not re-emit its original id). Without a root this is
+/// [`intern_char_shape`].
+fn intern_derived_char_shape(
+    doc: &mut SemanticDoc,
+    shape: CharShape,
+    root: Option<usize>,
+) -> usize {
+    let Some(root) = root else {
+        return intern_char_shape(doc, shape);
+    };
+    if let Some(i) = doc
+        .char_shape_derived
+        .iter()
+        .find(|(i, r)| **r == root && doc.char_shapes.get(**i) == Some(&shape))
+        .map(|(i, _)| *i)
+    {
+        return i;
+    }
+    doc.char_shapes.push(shape);
+    let i = doc.char_shapes.len() - 1;
+    doc.char_shape_derived.insert(i, root);
+    i
+}
+
+/// #481 — the shape a replacing `RunSpec` inherits from `runs`: the first run that shows TEXT (not just
+/// blanks) at a real size. `None` when no run does (an empty or blank target — callers fall back).
+fn first_text_run_shape(doc: &SemanticDoc, runs: &[Run]) -> Option<usize> {
+    runs.iter()
+        .find(|r| {
+            !run_text(r).trim().is_empty()
+                && doc
+                    .char_shapes
+                    .get(r.char_shape)
+                    .is_some_and(|s| s.height > 0)
+        })
+        .map(|r| r.char_shape)
 }
 
 /// Walk a descending `CellPath` (issue 064 Tier-2) to the LEAF cell (immutable). Level 0 unwraps a 1×1
@@ -1460,50 +1616,43 @@ fn set_cell_runs_by_path(
     if path.is_empty() {
         return Err(Error::Other("SetTableCell: empty cell path".into()));
     }
-    // Intern each run's CharShape + the default `plain` first (mut doc) — intern-then-build ordering.
-    let interned: Vec<(usize, String)> = runs
-        .iter()
-        .map(|r| (intern_char_shape(doc, r.to_char_shape()), r.text.clone()))
-        .collect();
-    let plain = intern_char_shape(doc, CharShape::default());
-    // Immutable pre-read of the LEAF cell: its first-run shape index (→ neutral) + per-paragraph shapes.
-    let (existing_idx, orig_para_shapes): (Option<usize>, Vec<usize>) =
+    // #481 — every run DERIVES its shape from the text it replaces (`RunSpec::derive_char_shape`): the
+    // cell's first run that shows text at a real size, else its first paragraph's first run. A field
+    // the spec leaves out keeps that run's value (a plain edit keeps the template's font/size); text
+    // color is black unless given (gov-doc placeholders ship blue/red; an AI fill must not inherit
+    // that). Immutable pre-read of the LEAF cell (base + per-paragraph shapes), then intern (mut doc).
+    let (base_idx, orig_para_shapes): (Option<usize>, Vec<usize>) =
         match resolve_cell(doc, section, path) {
             Some(cell) => {
-                let first = cell.blocks.iter().find_map(|b| match b {
-                    Block::Paragraph(p) => p.runs.first().map(|r| r.char_shape),
-                    _ => None,
-                });
-                let shapes = cell
-                    .blocks
-                    .iter()
-                    .filter_map(|b| match b {
-                        Block::Paragraph(p) => Some(p.para_shape),
+                let paras = || {
+                    cell.blocks.iter().filter_map(|b| match b {
+                        Block::Paragraph(p) => Some(p),
                         _ => None,
                     })
-                    .collect();
-                (first, shapes)
+                };
+                let first = paras().find_map(|p| p.runs.first().map(|r| r.char_shape));
+                let text = paras().find_map(|p| first_text_run_shape(doc, &p.runs));
+                (text.or(first), paras().map(|p| p.para_shape).collect())
             }
             None => (None, Vec::new()),
         };
-    // A plain (unstyled) edit keeps the template cell's FONT/SIZE but resets the example `text_color` to
-    // black (gov-doc placeholders ship blue/red; an AI fill must not inherit that). Interned up front so
-    // the mutable borrow below is free.
-    let neutral_shape: Option<usize> = existing_idx.map(|idx| {
-        let mut sh = doc.char_shapes.get(idx).cloned().unwrap_or_default();
-        sh.text_color = Color::default();
-        intern_char_shape(doc, sh)
-    });
+    let (base, root) = derivation_base(doc, base_idx);
+    let interned: Vec<(usize, String)> = runs
+        .iter()
+        .map(|r| {
+            let shape = r.derive_char_shape(&base);
+            (intern_derived_char_shape(doc, shape, root), r.text.clone())
+        })
+        .collect();
+    // An empty line (or an empty `runs`) is ONE empty run in the base's neutral shape.
+    let empty_shape =
+        intern_derived_char_shape(doc, RunSpec::default().derive_char_shape(&base), root);
     let para_shape_for = |i: usize| {
         orig_para_shapes
             .get(i)
             .copied()
             .or_else(|| orig_para_shapes.first().copied())
             .unwrap_or(0)
-    };
-    let resolve_shape = |cs: usize| match neutral_shape {
-        Some(prev) if cs == plain => prev,
-        _ => cs,
     };
     // Split the interned runs at "\n" into one group per paragraph (a "\n" inside a run's text is a
     // paragraph boundary, not a literal newline — HWP paragraphs are line-blocks).
@@ -1528,7 +1677,7 @@ fn set_cell_runs_by_path(
         .map(|(i, group)| {
             let runs = if group.is_empty() {
                 vec![Run {
-                    char_shape: neutral_shape.unwrap_or(plain),
+                    char_shape: empty_shape,
                     content: vec![Inline::Text(String::new())],
                     ..Default::default()
                 }]
@@ -1536,7 +1685,7 @@ fn set_cell_runs_by_path(
                 group
                     .into_iter()
                     .map(|(char_shape, text)| Run {
-                        char_shape: resolve_shape(char_shape),
+                        char_shape,
                         content: vec![Inline::Text(text)],
                         ..Default::default()
                     })
@@ -2631,44 +2780,46 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             // The WYSIWYG commit: replace a paragraph's TEXT with STYLED runs (per-run shapes), keeping
             // its source/para_shape/id. A simple paragraph replaces every run; a structural one replaces
             // only its text zone (W4.2). Intern shapes first (mutable doc), then rebuild.
+            //
+            // #481 — every run DERIVES its shape from the text it replaces (`RunSpec::derive_char_shape`):
+            // a field the spec leaves out keeps the base run's value, so "크기만" / "굵게만" no longer
+            // resets bold / size / font to the document default — and the value is concrete in memory,
+            // the same one the file gets (the serializer clones the base's own charPr). Base: the text
+            // zone's first run that shows text at a real size; else the 서식 상속 규칙 — (a) the zone's
+            // first run when it carries a real size, else (b) the nearest text-bearing neighbour (a
+            // SYNTHESIZED paragraph's height-0 default would otherwise commit at the typesetter's 10pt
+            // fallback amid 12–14pt body text). Text color is black unless given, so an AI paragraph
+            // fill doesn't inherit blue/red example-text color.
+            let base_idx: Option<usize> = doc
+                .sections
+                .get(*section)
+                .and_then(|s| s.blocks.get(*block))
+                .and_then(|b| match b {
+                    Block::Paragraph(p) => {
+                        // The text zone (W4.2) — for a structural paragraph run 0 is the secPr/object
+                        // host, whose charPr says nothing about the visible text.
+                        let (lo, hi) = editable_run_window(p).unwrap_or((0, p.runs.len()));
+                        let own_idx = p.runs.get(lo).map(|r| r.char_shape);
+                        let sized = |i: &usize| doc.char_shapes.get(*i).is_some_and(|s| s.height > 0);
+                        first_text_run_shape(doc, p.runs.get(lo..hi).unwrap_or(&[]))
+                            .or_else(|| own_idx.filter(sized))
+                            .or_else(|| neighbour_shapes(doc, *section, *block).0)
+                            .or(own_idx)
+                    }
+                    _ => None,
+                });
+            let (base, root) = derivation_base(doc, base_idx);
             let interned: Vec<(usize, String)> = runs
                 .iter()
-                .map(|r| (intern_char_shape(doc, r.to_char_shape()), r.text.clone()))
-                .collect();
-            let plain = intern_char_shape(doc, CharShape::default());
-            // A default (unstyled) run keeps the paragraph's existing first-run FONT/SIZE, exactly like
-            // SetTableCell — so untouched text doesn't reset to black-plain — but with `text_color` reset
-            // to default black so an AI paragraph fill doesn't inherit blue/red example-text color. Clone
-            // the first run's CharShape, null its color, and re-intern → a NEUTRAL shape. The intern needs
-            // `&mut doc`, so compute it here (immutable navigation to read the first-run shape index)
-            // BEFORE the `section_mut` borrow below.
-            let neutral_shape: Option<usize> = {
-                let own_idx = doc
-                    .sections
-                    .get(*section)
-                    .and_then(|s| s.blocks.get(*block))
-                    .and_then(|b| match b {
-                        // The text zone's FIRST run (W4.2) — for a structural paragraph run 0 is the
-                        // secPr/object host, whose charPr says nothing about the visible text.
-                        Block::Paragraph(p) => {
-                            let lo = editable_run_window(p).map(|(lo, _)| lo).unwrap_or(0);
-                            p.runs.get(lo).map(|r| r.char_shape)
-                        }
-                        _ => None,
-                    });
-                // 서식 상속 규칙: (a) the paragraph's own run when it carries a real size, else
-                // (b) the nearest text-bearing neighbour — a SYNTHESIZED paragraph's height-0 default
-                // would otherwise commit at the typesetter's 10pt fallback amid 12–14pt body text.
-                let existing_idx = own_idx
-                    .filter(|i| doc.char_shapes.get(*i).is_some_and(|s| s.height > 0))
-                    .or_else(|| neighbour_shapes(doc, *section, *block).0)
-                    .or(own_idx);
-                existing_idx.map(|idx| {
-                    let mut sh = doc.char_shapes.get(idx).cloned().unwrap_or_default();
-                    sh.text_color = Color::default();
-                    intern_char_shape(doc, sh)
+                .map(|r| {
+                    let shape = r.derive_char_shape(&base);
+                    (intern_derived_char_shape(doc, shape, root), r.text.clone())
                 })
-            };
+                .collect();
+            // An empty `runs` clears the zone to ONE empty run in the base's neutral shape.
+            let empty_shape = interned.is_empty().then(|| {
+                intern_derived_char_shape(doc, RunSpec::default().derive_char_shape(&base), root)
+            });
             let sec = section_mut(doc, *section)?;
             let blk = sec.blocks.get_mut(*block).ok_or_else(|| {
                 Error::Other(format!("SetParagraphRuns: block {block} out of range"))
@@ -2677,17 +2828,12 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 return Err(Error::Other(format!("SetParagraphRuns: block {block} is not a paragraph")));
             };
             let (lo, hi) = editable_run_window(p)?;
-            let resolve_shape = |cs: usize| match neutral_shape {
-                Some(prev) if cs == plain => prev,
-                _ => cs,
-            };
-            let new = if interned.is_empty() {
-                vec![Run { char_shape: neutral_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
-            } else {
-                interned
+            let new = match empty_shape {
+                Some(cs) => vec![Run { char_shape: cs, content: vec![Inline::Text(String::new())], ..Default::default() }],
+                None => interned
                     .into_iter()
-                    .map(|(cs, text)| Run { char_shape: resolve_shape(cs), content: vec![Inline::Text(text)], ..Default::default() })
-                    .collect()
+                    .map(|(cs, text)| Run { char_shape: cs, content: vec![Inline::Text(text)], ..Default::default() })
+                    .collect(),
             };
             splice_text_window(p, lo, hi, new);
             p.dirty.mark();
@@ -6177,9 +6323,9 @@ mod tests {
         .unwrap();
         assert_eq!(cell_text(&doc, 1, 0, 0), "홍길동");
         let sh = cell_first_shape(&doc, 1, 0, 0);
+        // #481: black as the file gives it back (`textColor="#000000"` parses opaque) — memory = file.
         assert_eq!(
-            sh.text_color,
-            Color::default(),
+            sh.text_color, OPAQUE_BLACK,
             "AI fill must reset color to default black"
         );
         assert_eq!(sh.height, 1400, "font size preserved");
@@ -6247,9 +6393,9 @@ mod tests {
         let p = para_of(&doc, 1);
         assert_eq!(run_texts(p).concat(), "실제 내용");
         let sh = doc.char_shapes[p.runs[0].char_shape].clone();
+        // #481: black as the file gives it back (`textColor="#000000"` parses opaque) — memory = file.
         assert_eq!(
-            sh.text_color,
-            Color::default(),
+            sh.text_color, OPAQUE_BLACK,
             "AI paragraph fill must reset color to default black"
         );
         assert_eq!(sh.height, 1200, "font size preserved");
@@ -6887,7 +7033,7 @@ mod tests {
         let mut doc = doc_with(vec![simple_para(1, "원본")]);
         let r = |t: &str, bold: bool| RunSpec {
             text: t.into(),
-            bold,
+            bold: Some(bold),
             ..Default::default()
         };
         apply(

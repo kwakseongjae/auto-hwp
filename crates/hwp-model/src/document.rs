@@ -26,6 +26,14 @@ pub struct SemanticDoc {
     /// downstream (export, UI) can show the original kind and pick a save policy: HWPX round-trips,
     /// `.hwp`/`.docx` are conversions, `.pdf` is view-mostly. Set by `Engine::open`/the readers.
     pub origin: Option<crate::types::SourceFormat>,
+    /// #481: a char shape an EDIT derived from a pool shape (the shape of the run a `RunSpec`
+    /// replaces, cloned, then the fields the spec names applied) → that ORIGINAL pool index (the root,
+    /// one of [`Self::hwpx_pool_char_shapes`]; deriving from a derivation points at the same root).
+    /// The HWPX serializer clones the root's own `<hh:charPr>` and patches only the fields whose value
+    /// differs from the root's, so what the spec left out (장평 · 자간 · 상대 크기 · 글자 위치 · 계열별
+    /// 글꼴, and the attributes the model does not read) stays the original's and the memory value
+    /// matches the file. Never holds a pool index as a key. Empty for docs from other sources.
+    pub char_shape_derived: BTreeMap<usize, usize>,
     /// `char_shapes`/`para_shapes` indices that the HWPX parser INTERNED FROM the original
     /// `header.xml` pools (resolving each run's `charPrIDRef` / paragraph's `paraPrIDRef` so layout
     /// reads the real size/color/bold/align/indent/spacing instead of the reserved index-0 default).
@@ -1109,6 +1117,7 @@ impl SemanticDoc {
             + (self.hwpx_pool_char_ids.len() + self.hwpx_pool_para_ids.len())
                 * (size_of::<usize>() + size_of::<u64>())
                 * 3
+            + self.char_shape_derived.len() * size_of::<usize>() * 2 * 3
     }
 }
 

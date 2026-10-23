@@ -1107,6 +1107,93 @@ pub fn patch_pool(header: &str, container: &str, fragments: &str, added: usize) 
     s
 }
 
+/// #481 — the header's own `<hh:charPr>` element with id `id` (self-closing or with children), so an
+/// edit derived from that pool shape can be written as a clone of it ([`derive_char_pr`]).
+pub fn char_pr_by_id(header: &str, id: u64) -> Option<&str> {
+    let want = id.to_string();
+    let mut idx = 0;
+    while let Some(p) = header[idx..].find("<hh:charPr ") {
+        let start = idx + p;
+        let gt = start + header[start..].find('>')?;
+        let open = &header[start..=gt];
+        let end = if open.ends_with("/>") {
+            gt + 1
+        } else {
+            start + header[start..].find("</hh:charPr>")? + "</hh:charPr>".len()
+        };
+        if first_attr(open, "id") == Some(want.as_str()) {
+            return Some(&header[start..end]);
+        }
+        idx = end;
+    }
+    None
+}
+
+/// #481 — the `<hh:charPr>` for `shape`, an edit DERIVED from the pool shape `root` whose own element
+/// is `root_xml`: the root cloned, then ONLY the fields whose value differs from the root's patched —
+/// 굵게 · 기울임 표지 (rewritten in schema order only when one of them changed), 밑줄 type, 취소선
+/// shape, 크기, 글자 색, 음영, and `fontRef` when the caller resolved a changed font. Everything else —
+/// 장평 · 자간 · 상대 크기 · 글자 위치 · 그림자 · 테두리, and the attributes the model does not read —
+/// stays the root's byte for byte, so the reopened value is the one memory holds. A shape equal to
+/// the root yields the root modulo id (the caller's dedup folds it back onto the root's id).
+pub fn derive_char_pr(
+    root_xml: &str,
+    new_id: u64,
+    root: &CharShape,
+    shape: &CharShape,
+    fontref: Option<&str>,
+) -> String {
+    let mut s = set_attr(root_xml, "id", &new_id.to_string());
+    if shape.height != root.height {
+        s = set_attr(&s, "height", &shape.height.to_string());
+    }
+    if shape.text_color != root.text_color {
+        s = set_attr(&s, "textColor", &shape.text_color.to_hex());
+    }
+    if shape.shade_color != root.shade_color {
+        let v = if shape.shade_color == Color::default() {
+            "none".to_string()
+        } else {
+            shape.shade_color.to_hex()
+        };
+        s = set_attr(&s, "shadeColor", &v);
+    }
+    if let Some(fr) = fontref {
+        if let Some(p) = s.find("<hh:fontRef") {
+            if let Some(rel) = s[p..].find("/>") {
+                s = format!("{}{}{}", &s[..p], fr, &s[p + rel + 2..]);
+            }
+        }
+    }
+    if shape.bold != root.bold || shape.italic != root.italic {
+        // italic then bold, immediately before <hh:underline> (schema order, as synthesize_char_pr).
+        s = s.replace("<hh:italic/>", "").replace("<hh:bold/>", "");
+        let mut markers = String::new();
+        if shape.italic {
+            markers.push_str("<hh:italic/>");
+        }
+        if shape.bold {
+            markers.push_str("<hh:bold/>");
+        }
+        if !markers.is_empty() {
+            s = s.replacen("<hh:underline", &format!("{markers}<hh:underline"), 1);
+        }
+    }
+    if shape.underline != root.underline {
+        if let Some(p) = s.find("<hh:underline") {
+            let ty = if shape.underline { "BOTTOM" } else { "NONE" };
+            s = format!("{}{}", &s[..p], set_attr(&s[p..], "type", ty));
+        }
+    }
+    if shape.strikeout != root.strikeout {
+        if let Some(p) = s.find("<hh:strikeout") {
+            let sh = if shape.strikeout { "SOLID" } else { "NONE" };
+            s = format!("{}{}", &s[..p], set_attr(&s[p..], "shape", sh));
+        }
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

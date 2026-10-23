@@ -295,7 +295,9 @@ export interface PageGeom {
 
 /** A STYLED text run (Intent schema v0 `RunSpec`) — the shape `blockRuns` returns AND
  *  `SetTableCellRuns`/`SetParagraphRuns` accept (run-format preservation, issue 027). Style fields are
- *  optional (unset = inherit); a multi-paragraph cell joins its paragraphs with a `{text:"\n"}` run. */
+ *  optional: on those two Intents an unset field keeps the value of the text it replaces (#481 — the
+ *  target's first run that shows text), except `color`, which is black unless given; `highlight: null`
+ *  clears the shade. A multi-paragraph cell joins its paragraphs with a `{text:"\n"}` run. */
 export interface RunSpec {
   text: string;
   bold?: boolean;
@@ -304,7 +306,7 @@ export interface RunSpec {
   strike?: boolean;
   size_pt?: number;
   color?: string;
-  highlight?: string;
+  highlight?: string | null;
   font?: string;
 }
 
