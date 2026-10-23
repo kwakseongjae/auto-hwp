@@ -36,6 +36,36 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 추가
+
+- **작업 공간 핸들(#482)** — `HwpWorkspace` 의 `handleRef` 가 마운트된 동안 같은 객체인 `WorkspaceHandle` 을 준다:
+  `getZoom` · `setZoom`(정확한 배율) · `fit("width" | "page")` · `getPage` · `scrollToPage` · `undo` · `redo` · `canUndo` · `canRedo` ·
+  `toggleStyle`(⌘B/⌘I/⌘U 와 같은 레인) · `getSelectionFormat` · `subscribe`(zoom · page · history · selection, 확정 뒤 한 번).
+  사이드 패널 api 에도 `handle` 로 실린다. 자기 크롬을 그리는 호스트가 숨은 DOM 을 읽거나 단축키를 흉내 낼 필요가 없다.
+  *(EN — `handleRef` gives a `WorkspaceHandle` that keeps its identity while mounted: zoom · fit · page · undo/redo · style toggles ·
+  selection format · `subscribe`, so a host can draw its own chrome without reading hidden DOM or synthesizing shortcuts.)*
+- **`chrome` prop(#482)** — `{ toolbar, outline, statusBar }` 를 `false` 로 주면 그 크롬을 그리지 않는다(기본 전부 켬).
+  *(EN — `chrome={{ toolbar, outline, statusBar }}`: `false` stops drawing that chrome; all shown by default.)*
+- **선택 서식(#482)** — `WorkspaceDesignSelection.format` 에 `underline` · `highlight`(글자 배경) · `mixed`(run 마다 다른 필드)가 붙는다
+  (타입은 선택 필드 — 객체를 직접 만드는 호스트 코드는 그대로 컴파일된다).
+  *(EN — the selection format also reports `underline`, `highlight` (character shade) and `mixed`; the new fields are optional.)*
+- **`HwpPageView` 핸들(#482)** — `handleRef` 로 `scrollToPage(page)` · `getPageSize(page)`.
+  *(EN — `HwpPageView` `handleRef`: `scrollToPage(page)` · `getPageSize(page)`.)*
+- **`onReady` · `useWorkspaceState`(#482)** — `onReady(handle)` 는 마운트마다 한 번 같은 핸들로 불린다(`onReady={setHandle}` 처럼 핸들을
+  상태에 받는 호스트용 — 렌더마다 새 함수여도, StrictMode 개발 모드에서도 한 번). react 층 훅 `useWorkspaceState(handle)` 는
+  `{ zoom, page, pageCount, canUndo, canRedo, format }` 을 주고, 보이는 값이 바뀔 때만 그 컴포넌트를 다시 그린다.
+  *(EN — `onReady(handle)` fires once per mount with the same handle; the React-layer hook `useWorkspaceState(handle)` returns
+  `{ zoom, page, pageCount, canUndo, canRedo, format }` and re-renders only when a shown value changes.)*
+
+### 고침
+
+- `jumpToPage`(문서 구조 · 사이드 패널)가 문서 전체에서 쪽을 찾아, 같은 화면에 쪽 보기가 하나 더 있으면 그쪽을 스크롤할 수 있었다 —
+  이제 그 작업 공간 캔버스 안에서만 찾는다(#482).
+  *(EN — `jumpToPage` now scrolls only its own workspace canvas, not another page view on the same screen.)*
+- 문서를 연 직후 상태 막대의 지금 쪽이 마지막 쪽(「8 / 8쪽」)으로 보이던 것 — 쪽이 배치되기 전에 한 번만 계산했다.
+  쪽 열의 크기가 바뀔 때도 다시 계산한다(#482).
+  *(EN — right after opening, the status bar showed the last page as current; the page is now recomputed when the page column resizes.)*
+
 ---
 
 ## [0.0.17] — 2026-10-14

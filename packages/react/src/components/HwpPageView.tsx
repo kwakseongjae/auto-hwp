@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { EngineAdapter } from "../EngineAdapter";
 import { screenToPage } from "../coords";
 import { sanitizeSvg } from "../sanitize";
@@ -90,6 +90,19 @@ export interface HwpPageViewProps {
   /** Per-page overlay layer (SelectionOverlay marks). `scale` = rendered px / viewBox px, so marks
    *  positioned as `pageBox * scale` track zoom exactly. Rendered inside a position:relative sheet. */
   renderOverlay?: (page: number, scale: number) => React.ReactNode;
+  /** #482 — receives a stable `PageViewHandle` (null on unmount): scroll to a page and read page sizes
+   *  without querying this view's DOM. */
+  handleRef?: React.Ref<PageViewHandle>;
+}
+
+/** #482 — imperative access to one page view. Identity is stable while mounted. */
+export interface PageViewHandle {
+  /** Scroll the nearest scrollable ancestor so page `page` (0-based) starts at the top. Works for a
+   *  virtualized (placeholder) page too. No-op for a page outside `pageCount`. */
+  scrollToPage(page: number, behavior?: ScrollBehavior): void;
+  /** CSS px size of page `page` at zoom 1 (the rendered size is this × `zoom`). Before the page's SVG
+   *  has arrived the height uses the A4 aspect. `null` for a page outside `pageCount`. */
+  getPageSize(page: number): { width: number; height: number } | null;
 }
 
 const A4_W = 794; // CSS px for 210mm @ 96dpi — the 100% page width
@@ -225,6 +238,26 @@ export function HwpPageView(props: HwpPageViewProps) {
 
   // The pages container — its closest `.hw-canvas` ancestor is the scroll root the observer watches.
   const pagesElRef = useRef<HTMLDivElement | null>(null);
+  // #482 — the handle reads the live page states/count through refs, so its identity never changes.
+  const pageStatesRef = useRef(pages);
+  pageStatesRef.current = pages;
+  const pageCountRef = useRef(pageCount);
+  pageCountRef.current = pageCount;
+  useImperativeHandle(
+    props.handleRef,
+    () => ({
+      scrollToPage: (page: number, behavior: ScrollBehavior = "smooth") => {
+        if (!(page >= 0 && page < pageCountRef.current)) return;
+        pagesElRef.current?.querySelector(`.hw-sheet-wrap[data-page="${page}"]`)?.scrollIntoView?.({ behavior, block: "start" });
+      },
+      getPageSize: (page: number) => {
+        if (!(page >= 0 && page < pageCountRef.current)) return null;
+        const st = pageStatesRef.current[page];
+        return { width: A4_W, height: st && st.vbW > 0 ? (A4_W * st.vbH) / st.vbW : A4_W * A4_RATIO };
+      },
+    }),
+    [],
+  );
 
   // Per-page RAW (pre-sanitize) svg cache, kept across refreshes so a refresh can compare each page's raw
   // string to its previous value and skip pages that didn't change (issue 034). It is tied to the current
