@@ -36,6 +36,10 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.18] — 2026-10-23
+
 ### 추가
 
 - **작업 공간 핸들(#482)** — `HwpWorkspace` 의 `handleRef` 가 마운트된 동안 같은 객체인 `WorkspaceHandle` 을 준다:
