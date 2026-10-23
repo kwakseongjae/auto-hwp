@@ -1,6 +1,11 @@
 {
   "name": "@auto-hwp/react",
   "version": "0.0.18",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kwakseongjae/auto-hwp.git",
+    "directory": "packages/react"
+  },
   "description": "React components for auto-hwp: open .hwp/.hwpx, render pages to SVG, mark cells/ranges, chat-edit via a host-supplied AI callback, and download HTML/PDF — one <HwpWorkspace/> line. No LLM, no keys, no bundled fonts.",
   "license": "Apache-2.0",
   "type": "module",

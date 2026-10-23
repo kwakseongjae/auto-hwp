@@ -43,9 +43,10 @@ jobs:
       # 빌드 툴체인을 설치하기 전에 발행 인증을 fail-fast 검증한다. `npm publish --dry-run`은 인증 없이도
       # 성공할 수 있고, OIDC 에는 whoami 가 없다 — 그래서 네 패키지 각각의 토큰 교환을 직접 해 본다.
       # 하나라도 실패하면(그 패키지에 trusted publisher 가 없거나 저장소 · 워크플로 이름이 다르면) 아무것도 발행하지 않는다.
+      # trusted publishing 은 npm CLI 11.5.1+ · Node 22.14.0+ 가 필요하다(npm 문서). CI(빌드 · 테스트)는 Node 20 그대로.
       - uses: actions/setup-node@v7
         with:
-          node-version: 20.19
+          node-version: 22
           registry-url: "https://registry.npmjs.org"
       - name: npm 11 (trusted publishing 은 npm 11.5.1 이상)
         run: npm install -g npm@11.13.0 && npm --version
@@ -74,8 +75,13 @@ jobs:
             [ "$RESULT" = "ok" ] || FAILED="$FAILED $PACKAGE"
           done
           if [ -n "$FAILED" ]; then
-            echo "::error::trusted publisher 교환 실패:$FAILED — npmjs.com 패키지 설정의 Trusted Publisher(kwakseongjae · auto-hwp · publish.yml · 환경 비움)를 확인"
-            exit 1
+            if [ "$DRY_RUN" = "true" ]; then
+              # dry-run 은 빌드 · WASM_BYTES 실측 · --dry-run 묶음 검사까지 계속 간다(레지스트리 반영 없음). 실제 발행은 아래 else 에서 막힌다
+              echo "::warning::trusted publisher 교환 실패:$FAILED — dry-run 이라 계속한다. 실제 발행(dry_run=false)은 여기서 멈춘다"
+            else
+              echo "::error::trusted publisher 교환 실패:$FAILED — npmjs.com 패키지 설정의 Trusted Publisher(kwakseongjae · auto-hwp · publish.yml · 환경 비움)를 확인"
+              exit 1
+            fi
           fi
 
       # engine prepack(build-wasm.mjs)이 쓰는 Rust 툴체인 + wasm-bindgen(=0.2.125, Cargo.toml 과 정확히 일치).
