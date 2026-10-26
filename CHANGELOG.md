@@ -40,6 +40,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.19] — 2026-10-26
+
+4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep. 글자 속성 생략값의 의미가 바뀐다(#481, 파괴 변경 — 마이그레이션은 아래) · 배치 속성 Intent 3종이 더해진다(#483).
+
 ### 파괴 변경 (Breaking)
 
 - **`SetParagraphRuns` · `SetTableCellRuns` 의 `RunSpec` 에서 생략한 굵게 · 기울임 · 밑줄 · 취소선 · 음영은 「끔」이 아니라 바꾸는
