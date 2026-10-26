@@ -568,6 +568,7 @@ fn an_empty_paragraph_inherits_the_neighbour() {
             index: Some(4),
             runs: specs(r#"[{"text":"","bold":true}]"#),
             para: Default::default(),
+            para_like: None,
         },
     )
     .expect("insert");
