@@ -3,6 +3,16 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-10-26 · Claude Sonnet 5.5 — **0.0.19 발행(#481 RunSpec 상속 · #483 배치 속성 Intent)** (main `fba3a9b`).
+  · 오너 승인(10-26 「발행하고」). #489(#483) rebase(충돌 = CHANGELOG 같은 자리뿐) 머지 `256bafd` → 릴리스 PR #503(이슈 #502) 머지 `fba3a9b` → publish run 40286591214
+    (OIDC 교환 4/4 201 · provenance 서명). 레지스트리 4패키지 `latest=0.0.19`. 직접 쓴 토큰 없음.
+  · **wasm 8,750,802 B**(CI binaryen 119 실측 — 로컬 빌드 8,718,018 과 다르다. `cdn.js` `WASM_BYTES` 는 CI 값): sha384 `IPdgzxFZ2lrTUUi2nvAY8RWm5ljoDgWqTPLYDzBeznW8zFlsvg2N68pF5zXcj4FR`.
+    발행본 wasm 은 Node · chromium · webkit `WebAssembly.compile` 통과(전체 `init()` 인스턴스화는 앱 번들에서 확인).
+  · `verify-local --full`(#489 rebase 뒤): 전부 그린, 단 기존 이슈만 — 워크트리 platform 경계 테스트(#460 `.git` 파일) · e2e 1 실패(#462) · hwp-lab `node_modules` 는 본 레포에서 복사(#461).
+    rebase 때 #481 테스트(`runspec_inherit_481.rs`)의 `InsertParagraphAt` 에 `para_like: None` 이 빠져 컴파일이 깨졌다 — #483 이 필드를 더한 것과 #481 의 새 테스트가 서로 모르는 사이였다.
+  · 앱(business_plan_k) PR #1633 이 0.0.19 를 반영: #481 은 **생략한 밑줄 · 취소선 · 음영이 상속**이라 앱 run 빌더가 끔을 명시. 엔진 쪽 수 0.0.18 vs 0.0.19 는 28건 전부 같음.
+  · **남은 것**: #484(칸 배치) · #485(모델 질의) · #486(편집 정책 훅) · #487(글꼴 면 등록)은 **0.0.20**. 새로 연 쪽 수 버그 **#500**(긴 표 칸에서 엔진이 줄을 적게 접어 쪽 수 누적 감소) · **#501**(빈 원본에서 한컴 9쪽 · 엔진 7쪽 — 창업센터).
+
 - 갱신: 2026-10-24 · Claude Opus 5.5 — **0.0.18 발행(작업 공간 핸들 #482 · #488) — 첫 npm Trusted Publishing · #491(#481) 머지** (main `9c7093c5`).
   · **발행 방식을 바꿨다**: 7/22 에 넣은 `NPM_TOKEN` 이 만료됐다(쓰기 토큰 최대 90일, `npm whoami` E401). 그래서 `publish.yml` 을 **OIDC Trusted Publishing** 으로 바꿨다
     (#494 · PR #495: `id-token: write` · npm 11.13.0 · 발행 Node 22 · 네 패키지 `repository` 필드 · **발행 전 네 패키지 교환 검사** — 하나라도 실패하면 아무것도
