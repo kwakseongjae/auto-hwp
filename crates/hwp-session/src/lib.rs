@@ -3032,6 +3032,7 @@ mod tests {
                     ..Default::default()
                 }],
                 para: ParaSpec::default(),
+                para_like: None,
             },
         )
         .expect("footer para");

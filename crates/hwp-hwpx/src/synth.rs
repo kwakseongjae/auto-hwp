@@ -811,6 +811,134 @@ pub fn synthesize_para_pr(base: &str, new_id: u64, shape: &ParaShape) -> String 
     s
 }
 
+/// The `<hh:paraPr id="{id}">…</hh:paraPr>` element with the given id (#483 — the original shape a
+/// derived paraPr is cloned from).
+pub fn para_pr_by_id(header: &str, id: &str) -> Option<String> {
+    let needle = format!("<hh:paraPr id=\"{id}\"");
+    let start = header.find(&needle)?;
+    let end = header[start..].find("</hh:paraPr>")? + start + "</hh:paraPr>".len();
+    Some(header[start..end].to_string())
+}
+
+/// #483 — a paraPr DERIVED from `original` (an existing `<hh:paraPr>` element): the same element with
+/// `id` replaced and ONLY the attributes `patch` names changed — 번호/글머리표(`hh:heading`), 탭, 테두리,
+/// 여백 and the break settings the patch leaves alone stay byte-identical. A missing child element is
+/// added in OWPML order (align → heading → breakSetting), never re-synthesized from the default.
+pub fn derive_para_pr(original: &str, new_id: u64, patch: &ParaShapePatch) -> String {
+    let mut s = set_attr(original, "id", &new_id.to_string());
+    let bit = |v: bool| if v { "1" } else { "0" };
+    if let Some(a) = patch.align {
+        let tok = align_token_exact(a);
+        s = match tag_range(&s, "<hh:align") {
+            Some((a0, a1)) => splice_tag(&s, a0, a1, &set_tag_attr(&s[a0..a1], "horizontal", tok)),
+            None => insert_after_open(
+                &s,
+                &format!("<hh:align horizontal=\"{tok}\" vertical=\"BASELINE\"/>"),
+            ),
+        };
+    }
+    let breaks = [
+        ("widowOrphan", patch.widow_orphan),
+        ("keepWithNext", patch.keep_with_next),
+        ("pageBreakBefore", patch.page_break_before),
+    ];
+    if breaks.iter().any(|(_, v)| v.is_some()) {
+        let (b0, b1) = match tag_range(&s, "<hh:breakSetting") {
+            Some(r) => r,
+            None => {
+                // OWPML order: after <hh:heading/> (else <hh:align/>, else the open tag).
+                let el = "<hh:breakSetting breakLatinWord=\"KEEP_WORD\" breakNonLatinWord=\"KEEP_WORD\" widowOrphan=\"0\" keepWithNext=\"0\" keepLines=\"0\" pageBreakBefore=\"0\" lineWrap=\"BREAK\"/>";
+                let at = tag_range(&s, "<hh:heading")
+                    .or_else(|| tag_range(&s, "<hh:align"))
+                    .map(|(_, e)| e)
+                    .unwrap_or_else(|| s.find('>').map_or(s.len(), |i| i + 1));
+                s.insert_str(at, el);
+                (at, at + el.len())
+            }
+        };
+        let mut tag = s[b0..b1].to_string();
+        for (name, v) in breaks {
+            if let Some(v) = v {
+                tag = set_tag_attr(&tag, name, bit(v));
+            }
+        }
+        s = splice_tag(&s, b0, b1, &tag);
+    }
+    if let Some(pct) = patch.line_spacing_pct {
+        // Every `<hh:lineSpacing>` (hp:case AND hp:default): PERCENT is identical in both branches.
+        let mut from = 0;
+        let mut seen = false;
+        while let Some(rel) = s[from..].find("<hh:lineSpacing") {
+            let a0 = from + rel;
+            let Some(a1) = s[a0..].find('>').map(|i| a0 + i + 1) else {
+                break;
+            };
+            let mut tag = set_tag_attr(&s[a0..a1], "type", "PERCENT");
+            tag = set_tag_attr(&tag, "value", &pct.to_string());
+            s = splice_tag(&s, a0, a1, &tag);
+            from = a0 + tag.len();
+            seen = true;
+        }
+        if !seen {
+            let el = format!("<hh:lineSpacing type=\"PERCENT\" value=\"{pct}\" unit=\"HWPUNIT\"/>");
+            let at = s
+                .find("<hh:border ")
+                .or_else(|| s.rfind("</hh:paraPr>"))
+                .unwrap_or(s.len());
+            s.insert_str(at, &el);
+        }
+    }
+    s
+}
+
+/// OWPML `hh:align@horizontal` token, JUSTIFY included (a derived paraPr states every value it sets).
+fn align_token_exact(a: HorizontalAlign) -> &'static str {
+    align_token(a).unwrap_or("JUSTIFY")
+}
+
+/// `[start, end)` of the first `<{open}` start tag in `s` (through its `>`), exact tag name only.
+fn tag_range(s: &str, open: &str) -> Option<(usize, usize)> {
+    let mut from = 0;
+    while let Some(rel) = s[from..].find(open) {
+        let a0 = from + rel;
+        let after = &s[a0 + open.len()..];
+        if after.starts_with([' ', '/', '>', '\t', '\r', '\n']) {
+            let a1 = s[a0..].find('>')? + a0 + 1;
+            return Some((a0, a1));
+        }
+        from = a0 + open.len();
+    }
+    None
+}
+
+fn splice_tag(s: &str, a0: usize, a1: usize, tag: &str) -> String {
+    format!("{}{}{}", &s[..a0], tag, &s[a1..])
+}
+
+/// Insert `el` right after the element's own open tag.
+fn insert_after_open(s: &str, el: &str) -> String {
+    let at = s.find('>').map_or(s.len(), |i| i + 1);
+    format!("{}{}{}", &s[..at], el, &s[at..])
+}
+
+/// Set attribute `name` inside ONE start tag (` name="…"` — whole name only), adding it before the
+/// closing `>`/`/>` when absent.
+pub(crate) fn set_tag_attr(tag: &str, name: &str, val: &str) -> String {
+    let pat = format!(" {name}=\"");
+    if let Some(p) = tag.find(&pat) {
+        let vs = p + pat.len();
+        if let Some(rel) = tag[vs..].find('"') {
+            return format!("{}{}{}", &tag[..vs], val, &tag[vs + rel..]);
+        }
+    }
+    let close = if tag.ends_with("/>") {
+        tag.len() - 2
+    } else {
+        tag.len().saturating_sub(1)
+    };
+    format!("{} {name}=\"{val}\"{}", &tag[..close], &tag[close..])
+}
+
 /// OWPML `hh:lineSpacing@type` token for our [`LineSpacingType`] (inverse of [`parse_para_pr`]).
 fn line_spacing_token(t: LineSpacingType) -> &'static str {
     match t {

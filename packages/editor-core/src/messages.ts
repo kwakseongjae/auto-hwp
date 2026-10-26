@@ -108,6 +108,8 @@ export const coreMessagesKoKR: CoreMessages = {
       ApplyContent: "콘텐츠 적용",
       InsertTableAt: "표 삽입",
       InsertParagraphAt: "문단 삽입",
+      SetParagraphShape: "문단 배치",
+      SetTableProps: "표 배치",
       InsertChartAt: "차트 삽입",
       MoveBlock: "블록 이동",
       DeleteBlock: "블록 삭제",

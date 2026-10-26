@@ -307,6 +307,7 @@ pub fn compile_edits(
                     index,
                     runs: runs.iter().map(AiRun::to_run_spec).collect(),
                     para: para.to_para_spec(),
+                    para_like: None,
                 });
                 changes.push(Drift {
                     section: *section,
@@ -370,6 +371,7 @@ pub fn compile_edits(
                     index,
                     runs: vec![run.to_run_spec()],
                     para: para.to_para_spec(),
+                    para_like: None,
                 });
                 changes.push(Drift {
                     section: *section,

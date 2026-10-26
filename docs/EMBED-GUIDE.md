@@ -197,6 +197,25 @@ sidePanel={(api) => (
 
 정의: [`packages/react/src/components/HwpWorkspace.tsx`](../packages/react/src/components/HwpWorkspace.tsx) 의 `WorkspaceSidePanel`.
 
+#### 쪽 배치 속성 — XML 을 고치지 말고 Intent 로 (#483)
+
+글을 채운 뒤 쪽 배치를 맞추는 속성도 Intent 다. `api.apply`(편집기 레인) · `HwpDoc.applyIntents`(일괄 레인) 어느 쪽으로
+보내도 같은 HWPX 가 나온다 — 내보낸 `section*.xml` · `header.xml` 을 직접 고치지 않는다.
+
+```ts
+await api.apply([
+  // 제목 · 표 캡션이 쪽 끝에 홀로 남지 않게 — 그 문단만(같은 모양을 쓰던 다른 문단은 그대로)
+  { intent: "SetParagraphShape", section: 0, block: 12, keep_with_next: true },
+  // 새 문단이 양식의 원래 문단 모양(번호 · 탭 · 테두리 포함)을 그대로 쓴다 — 새 paraPr 없음
+  { intent: "InsertParagraphAt", section: 0, index: 13, runs: [{ text: "…" }], para_like: { section: 0, block: 12 } },
+  // 쪽보다 길어진 표가 잘리지 않게 — 글자처럼 취급 풀기 · 행 안에서도 나눔 · 제목 행 반복 끄기
+  { intent: "SetTableProps", section: 0, index: 7, treat_as_char: false, page_break: "cell", repeat_header: false },
+]);
+```
+
+필드와 오류 코드(`invalid_target` · `bad_intent` · `out_of_range`)는 [INTENT-SCHEMA §6.12](INTENT-SCHEMA.md).
+조판은 아직 `keep_with_next` · `widow_orphan` 을 읽지 않는다(값을 쓰고 내보내기까지).
+
 #### 기본 UI는 쓰되 배치만 바꾸기
 
 참조 패널은 바이브 편집과 선택 디자인 인스펙터를 제공한다. 제품 셸을 처음부터 만들 필요 없이

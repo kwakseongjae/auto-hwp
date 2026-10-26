@@ -30,6 +30,16 @@ describe("intentTargets", () => {
     expect(intentTargets({ intent: "MoveBlock", section: 0, from: 1, to: 7 }).map((t) => (t as { block: number }).block)).toEqual([1, 7]);
     expect(intentTargets({ intent: "SetPageMargins", section: 0 })[0]).toMatchObject({ kind: "document" });
     expect(intentTargets({ intent: "SomethingNew" })[0]).toMatchObject({ kind: "document", intent: "SomethingNew" });
+    // #483 — placement Intents: a paragraph target, and a table block (a nested table guards as its top-level table)
+    expect(intentTargets({ intent: "SetParagraphShape", section: 0, block: 4, keep_with_next: true })).toEqual([
+      { kind: "paragraph", section: 0, block: 4, intent: "SetParagraphShape" },
+    ]);
+    expect(intentTargets({ intent: "SetTableProps", section: 0, index: 6, page_break: "cell" })).toEqual([
+      { kind: "block", section: 0, block: 6, intent: "SetTableProps" },
+    ]);
+    expect(intentTargets({ intent: "SetTableProps", section: 0, path: [{ block: 2, row: 0, col: 0 }], index: 1, treat_as_char: false })).toEqual([
+      { kind: "block", section: 0, block: 2, intent: "SetTableProps" },
+    ]);
   });
 
   it("a nested cell carries its leaf row/col and path; read-only Intents have no target", () => {

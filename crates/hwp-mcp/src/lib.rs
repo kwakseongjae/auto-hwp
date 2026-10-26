@@ -1327,6 +1327,52 @@ fn do_delete_block(session: &mut Session, section: usize, index: usize) -> Resul
 /// Compatibility policy (frozen at v0): NEW fields may be added only as `Option` (absent → `None`);
 /// renaming/removing a field or changing its meaning requires an `intent_version` bump. The Tauri
 /// shell constructs these variants directly in Rust, so this derive is purely additive to it.
+/// #483 — `SetParagraphShape.align` on the wire (strict: an unknown token is a hard error).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParaAlign {
+    Left,
+    Center,
+    Right,
+    Justify,
+    Distribute,
+    DistributeSpace,
+}
+
+impl ParaAlign {
+    fn to_model(self) -> hwp_model::style::HorizontalAlign {
+        use hwp_model::style::HorizontalAlign as H;
+        match self {
+            ParaAlign::Left => H::Left,
+            ParaAlign::Center => H::Center,
+            ParaAlign::Right => H::Right,
+            ParaAlign::Justify => H::Justify,
+            ParaAlign::Distribute => H::Distribute,
+            ParaAlign::DistributeSpace => H::DistributeSpace,
+        }
+    }
+}
+
+/// #483 — `SetTableProps.page_break` on the wire (`<hp:tbl pageBreak>` NONE/TABLE/CELL).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TablePageBreakArg {
+    None,
+    Table,
+    Cell,
+}
+
+impl TablePageBreakArg {
+    fn to_model(self) -> hwp_model::document::TablePageBreak {
+        use hwp_model::document::TablePageBreak as P;
+        match self {
+            TablePageBreakArg::None => P::None,
+            TablePageBreakArg::Table => P::Table,
+            TablePageBreakArg::Cell => P::Cell,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "intent", deny_unknown_fields)]
 pub enum Intent {
@@ -1701,6 +1747,50 @@ pub enum Intent {
         runs: Vec<hwp_ops::RunSpec>,
         #[serde(default)]
         para: hwp_ops::ParaSpec,
+        /// #483 — the new paragraph reuses this TOP-LEVEL paragraph's shape reference exactly (export
+        /// writes its `paraPrIDRef`, no new paraPr — numbering/tabs/borders included). Resolved against
+        /// the document BEFORE the insert. Exclusive with a non-empty `para` (both → error).
+        #[serde(default)]
+        para_like: Option<hwp_ops::BlockRef>,
+    },
+    /// #483 — paragraph placement/shape of the TOP-LEVEL paragraph `(section, block)`: 다음 문단과 함께
+    /// (`keep_with_next`) · 외톨이줄 보호 (`widow_orphan`) · 문단 앞에서 항상 쪽 나눔 (`page_break_before`,
+    /// the shared paraPr flag — not the per-paragraph hard break) · `align` · `line_spacing_pct`. Every
+    /// field optional, at least one required. Only this paragraph changes: export clones its ORIGINAL
+    /// paraPr and patches just these attributes (other paragraphs sharing it keep their id). One undo
+    /// unit. Layout does not read `keep_with_next`/`widow_orphan` yet (values are written + exported).
+    SetParagraphShape {
+        section: usize,
+        block: usize,
+        #[serde(default)]
+        keep_with_next: Option<bool>,
+        #[serde(default)]
+        widow_orphan: Option<bool>,
+        #[serde(default)]
+        page_break_before: Option<bool>,
+        /// `left|center|right|justify|distribute|distribute_space`.
+        #[serde(default)]
+        align: Option<ParaAlign>,
+        /// Percent (≥ 1).
+        #[serde(default)]
+        line_spacing_pct: Option<u32>,
+    },
+    /// #483 — placement of an EXISTING table: 글자처럼 취급 (`treat_as_char` → `<hp:pos treatAsChar>`) ·
+    /// 쪽 경계 나눔 (`page_break`: `none|table|cell` → `<hp:tbl pageBreak>`) · 제목 행 반복 (`repeat_header`).
+    /// `index` is the table's block index — top-level, or (with `path`, the `DeleteNestedBlock` address)
+    /// the block index inside the parent cell `path` reaches. Every field optional, at least one
+    /// required; only these attributes change on export. One undo unit.
+    SetTableProps {
+        section: usize,
+        index: usize,
+        #[serde(default)]
+        path: Option<Vec<hwp_ops::CellStep>>,
+        #[serde(default)]
+        treat_as_char: Option<bool>,
+        #[serde(default)]
+        page_break: Option<TablePageBreakArg>,
+        #[serde(default)]
+        repeat_header: Option<bool>,
     },
     /// AI-generated data chart (issue 062-follow) — insert a bar/pie/line chart built from `chart`
     /// (type + categories + series, optional title/size) AT block `index` of `section` as ONE undo unit
@@ -2043,6 +2133,9 @@ fn proposal_intent_allowed(kind: &str) -> bool {
             | "InsertTableAt"
             | "InsertParagraphAt"
             | "InsertChartAt"
+            // #483 — the editor's apply lane proposes before it commits; placement edits ride it too.
+            | "SetParagraphShape"
+            | "SetTableProps"
     )
 }
 
@@ -3530,6 +3623,7 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             index,
             runs,
             para,
+            para_like,
         } => {
             let sess = session.doc.as_mut().ok_or("no document open")?;
             let index = match index {
@@ -3541,6 +3635,55 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
                 index,
                 runs,
                 para,
+                para_like,
+            })
+            .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetParagraphShape {
+            section,
+            block,
+            keep_with_next,
+            widow_orphan,
+            page_break_before,
+            align,
+            line_spacing_pct,
+        } => {
+            let sess = session.doc.as_mut().ok_or("no document open")?;
+            sess.do_op(&hwp_ops::Op::SetParagraphShape {
+                section,
+                block,
+                patch: hwp_model::style::ParaShapePatch {
+                    keep_with_next,
+                    widow_orphan,
+                    page_break_before,
+                    align: align.map(ParaAlign::to_model),
+                    line_spacing_pct,
+                },
+            })
+            .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetTableProps {
+            section,
+            index,
+            path,
+            treat_as_char,
+            page_break,
+            repeat_header,
+        } => {
+            let sess = session.doc.as_mut().ok_or("no document open")?;
+            sess.do_op(&hwp_ops::Op::SetTableProps {
+                section,
+                index,
+                path,
+                props: hwp_model::document::TablePropsPatch {
+                    treat_as_char,
+                    page_break: page_break.map(TablePageBreakArg::to_model),
+                    repeat_header,
+                },
             })
             .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
@@ -3827,6 +3970,7 @@ mod tests {
                 ..Default::default()
             }],
             para: ParaSpec::default(),
+            para_like: None,
         })
         .unwrap();
         let mut session = Session {
@@ -4094,6 +4238,7 @@ mod tests {
                         ..Default::default()
                     }],
                     para: ParaSpec::default(),
+                    para_like: None,
                 })
                 .unwrap();
             }

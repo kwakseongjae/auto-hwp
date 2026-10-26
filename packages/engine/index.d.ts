@@ -379,6 +379,7 @@ export interface EngineError extends Error {
     | 'bad_json'
     | 'needs_rhwp'
     | 'out_of_range'
+    | 'invalid_target'
     | 'font_missing'
     | 'ttc_unsupported'
     | 'serialize'

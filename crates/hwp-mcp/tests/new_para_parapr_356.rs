@@ -169,6 +169,7 @@ fn inherited_insert_uses_the_neighbours_original_para_pr_id() {
                 ..Default::default()
             }],
             para: Default::default(),
+            para_like: None,
         },
     )
     .unwrap();
