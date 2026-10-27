@@ -42,6 +42,21 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ---
 
+## [0.0.20] — 2026-10-27
+
+4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep. 파괴 변경 없음.
+
+### 고침 (Fixed)
+
+- **자기 닫힘 `<hp:run/>` 만 있는 빈 문단이 편집 불가(`editable:false`)로 읽히던 것을 고쳤다 (#506).** 한컴이 빈 간격 문단에 쓰는
+  `<hp:run charPrIDRef="40"/>` 를 HWPX 파서가 구조 자식으로 보아 그 문단을 non-simple 로 만들었고, `hitTest` 가 `editable:false` 로 답해
+  눌러도 글 캐럿이 서지 않았다. 이제 빈 런은 구조가 아니다 — 런은 만들지 않으므로 조판 · 쪽 수는 그대로다. 진짜 구조(`<hp:ctrl/>` ·
+  그림 · 표)는 계속 non-simple.
+  *(EN — Fixed: HWPX paragraphs holding only a self-closing `<hp:run/>` (blank spacer lines) were read as non-simple and reported
+  `editable:false`, so clicking them placed no caret. Empty runs are no longer treated as structure; layout is unchanged.)*
+
+---
+
 ## [0.0.19] — 2026-10-26
 
 4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep. 글자 속성 생략값의 의미가 바뀐다(#481, 파괴 변경 — 마이그레이션은 아래) · 배치 속성 Intent 3종이 더해진다(#483).
