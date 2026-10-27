@@ -1049,6 +1049,11 @@ pub(crate) fn parse_section(
                     push_pending(&mut paras, Inline::FieldBegin(fa.into_marker()));
                     mark_not_simple(&mut paras);
                 }
+                // 자기 닫힘 런 `<hp:run charPrIDRef="40"/>` — 글자도 개체도 없는 **빈 런**이다(한컴이 빈 간격 문단에 쓴다).
+                // 예전엔 아래 `other` 폴백이 구조 자식으로 보아 문단을 non-simple 로 만들었고, 그 빈 줄이 `own_hit_test` 에서
+                // `editable:false` 라 눌러도 캐럿이 서지 않았다(#506). 구조가 아니니 simple 을 깨지 않는다.
+                // 런을 만들지는 않는다 — 문단 AST 는 그대로라 조판(빈 줄 높이)은 변하지 않는다.
+                b"run" => {}
                 // `<hp:lineseg/>` (inside linesegarray) is layout cache; everything else structural.
                 other => {
                     if !matches!(other, b"lineseg" | b"linesegarray") {
@@ -1641,6 +1646,34 @@ pub(crate) mod tests {
             p.source.as_ref().is_some_and(|s| s.simple),
             "inline whitespace must NOT make the paragraph non-simple"
         );
+    }
+
+    #[test]
+    fn self_closing_empty_run_keeps_paragraph_simple() {
+        // #506 — `<hp:run charPrIDRef="40"/>` (글 없는 빈 런, 빈 간격 문단)는 구조가 아니다. 이게 non-simple 로 읽히면 그 빈 줄은
+        // `editable:false` 라 클릭해도 캐럿이 서지 않는다.
+        let only = first_para(&sec(
+            r#"<hp:p id="1" paraPrIDRef="35"><hp:run charPrIDRef="40"/><hp:linesegarray><hp:lineseg textpos="0" vertpos="0"/></hp:linesegarray></hp:p>"#,
+        ));
+        assert!(
+            only.source.as_ref().is_some_and(|s| s.simple),
+            "빈 런만 있는 문단은 simple"
+        );
+        // 글이 있는 런과 섞여도 simple(빈 런은 버려진다 — 글 런은 그대로)
+        let mixed = first_para(&sec(
+            r#"<hp:p><hp:run charPrIDRef="1"/><hp:run charPrIDRef="2"><hp:t>가</hp:t></hp:run></hp:p>"#,
+        ));
+        assert!(mixed.source.as_ref().is_some_and(|s| s.simple));
+        assert_eq!(mixed.runs.len(), 1);
+        assert_eq!(mixed.runs[0].char_ref.as_deref(), Some("2"));
+        // 진짜 구조(자기 닫힘 ctrl · 그림 · 표)는 그대로 non-simple — 느슨해지지 않았다
+        for body in [
+            r#"<hp:p><hp:run charPrIDRef="1"><hp:ctrl/></hp:run></hp:p>"#,
+            r#"<hp:p><hp:run charPrIDRef="1"><hp:colPr/></hp:run></hp:p>"#,
+        ] {
+            let p = first_para(&sec(body));
+            assert!(!p.source.as_ref().unwrap().simple, "{body}");
+        }
     }
 
     /// Parse one `<hs:sec>` and hand back its first top-level paragraph (W4.2 zone tests).
