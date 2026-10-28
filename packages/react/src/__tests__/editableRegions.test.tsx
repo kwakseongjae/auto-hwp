@@ -92,6 +92,12 @@ describe("resolveEditableRegions (순수)", () => {
     expect(regions.map((r) => r.className)).toEqual(["bpk-x", "bpk-x"])
   })
 
+  it("엔진이 캐럿을 못 놓는 문단(editable:false)은 정책이 허용해도 표시하지 않는다", async () => {
+    const a = new MockAdapter({ blocks: [para(1, 10, "", { editable: false }), para(2, 40, "")] })
+    const regions = await resolveEditableRegions({ adapter: a, page: 0, scopes: regionScopes("emptyParagraphs"), canEdit: () => true })
+    expect(regions.map((r) => (r.target as { block: number }).block)).toEqual([2])
+  })
+
   it("cellBoxes 가 없는 어댑터는 칸만 빠지고 문단은 나온다", async () => {
     const noCells = new MockAdapter({ blocks: [para(1, 10, "")] })
     const regions = await resolveEditableRegions({ adapter: noCells, page: 0, scopes: regionScopes(true), canEdit: () => true })
@@ -232,5 +238,78 @@ describe("EditableRegionsLayer — 문서 버전(token) 무효화 · 낡은 결�
     rerender(mount(2))
     await settle() // 새 측정이 진행 중
     expect(container.querySelectorAll(".hw-region").length).toBe(1)
+  })
+})
+
+describe("EditableRegionsLayer — 가상화 · 칸이 품은 것 · 렌더 밖 측정 (#511 리뷰 반영)", () => {
+  it("그려지지 않은 쪽(visible=false)은 재지 않고 그리지 않으며, 보이게 되면 잰다", async () => {
+    const calls = vi.fn(async () => [cellItem(0, 0)])
+    const adapter = { cellBoxes: calls } as unknown as EngineAdapter
+    const scopes = regionScopes("cells")
+    const el = (visible: boolean) => (
+      <EditableRegionsLayer adapter={adapter} page={3} scale={1} visible={visible} scopes={scopes} canEdit={() => true} token={1} policyKey="p" />
+    )
+    const { container, rerender } = render(el(false))
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
+    expect(calls).not.toHaveBeenCalled()
+    expect(container.querySelector(".hw-region")).toBeNull()
+    rerender(el(true))
+    await waitFor(() => expect(container.querySelectorAll(".hw-region").length).toBe(1))
+    expect(calls).toHaveBeenCalledTimes(1)
+  })
+
+  it("글이 없어도 안쪽 표 · 그림을 품은 칸(objects)은 빈 칸으로 칠하지 않는다", async () => {
+    const adapter = { cellBoxes: async () => [cellItem(0, 0, { text: "", objects: true }), cellItem(0, 1, { text: "" })] } as unknown as EngineAdapter
+    const { container } = render(
+      <EditableRegionsLayer adapter={adapter} page={0} scale={1} scopes={regionScopes("cells")} canEdit={() => true} token={1} policyKey="p" />,
+    )
+    await waitFor(() => expect(container.querySelectorAll(".hw-region").length).toBe(2))
+    const empties = Array.from(container.querySelectorAll(".hw-region")).map((e) => e.classList.contains("hw-region-empty"))
+    expect(empties).toEqual([false, true])
+  })
+
+  it("측정은 렌더 중이 아니라 효과 뒤(디바운스 뒤)에 시작한다 — 마운트 직후에는 아직 호출이 없다", async () => {
+    const calls = vi.fn(async () => [cellItem(0, 0)])
+    const adapter = { cellBoxes: calls } as unknown as EngineAdapter
+    render(<EditableRegionsLayer adapter={adapter} page={0} scale={1} scopes={regionScopes("cells")} canEdit={() => true} token={1} policyKey="p" />)
+    expect(calls).not.toHaveBeenCalled() // 렌더 · 커밋 직후 — 캐럿 · 그리기 경로에 측정이 끼지 않는다
+    await waitFor(() => expect(calls).toHaveBeenCalledTimes(1))
+  })
+
+  it("regionClass 참조가 바뀌면 다시 잰다", async () => {
+    const calls = vi.fn(async () => [cellItem(0, 0)])
+    const adapter = { cellBoxes: calls } as unknown as EngineAdapter
+    const scopes = regionScopes("cells")
+    const el = (rc: (r: unknown) => string | null) => (
+      <EditableRegionsLayer adapter={adapter} page={0} scale={1} scopes={scopes} canEdit={() => true} token={1} policyKey="p" regionClass={rc as never} />
+    )
+    const { container, rerender } = render(el(() => "a"))
+    await waitFor(() => expect(container.querySelector(".hw-region.a")).toBeTruthy())
+    rerender(el(() => "b"))
+    await waitFor(() => expect(container.querySelector(".hw-region.b")).toBeTruthy())
+    expect(calls).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("HwpWorkspace — 문서가 바뀌면(적용) 영역을 다시 잰다 (#511)", () => {
+  it("side panel 의 apply 한 번 뒤 cellBoxes 가 다시 불린다", async () => {
+    const adapter = new MockAdapter({ cellBoxes: [cellItem(0, 0)] })
+    let api: { apply: (i: unknown[]) => Promise<number> } | null = null
+    const { container } = render(
+      <HwpWorkspace
+        adapter={adapter}
+        document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }}
+        onAiRequest={async () => []}
+        enableEditing
+        showEditableRegions="cells"
+        sidePanel={(a) => { api = a as never; return null }}
+      />,
+    )
+    await waitFor(() => expect(container.querySelectorAll(".hw-region").length).toBe(1), { timeout: 3000 })
+    const before = adapter.cellBoxCalls
+    await act(async () => {
+      await api!.apply([{ intent: "SetTableCellRuns", section: 0, index: 5, row: 0, col: 0, runs: [{ text: "x" }] }])
+    })
+    await waitFor(() => expect(adapter.cellBoxCalls).toBeGreaterThan(before), { timeout: 3000 })
   })
 })

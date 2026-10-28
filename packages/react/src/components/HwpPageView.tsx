@@ -89,7 +89,8 @@ export interface HwpPageViewProps {
   onPagePointerUp?: (click: PageClick, ev: React.PointerEvent) => void;
   /** Per-page overlay layer (SelectionOverlay marks). `scale` = rendered px / viewBox px, so marks
    *  positioned as `pageBox * scale` track zoom exactly. Rendered inside a position:relative sheet. */
-  renderOverlay?: (page: number, scale: number) => React.ReactNode;
+  /** `visible` — false for a virtualized placeholder page (no SVG mounted): overlays that measure the engine (#511) skip it. */
+  renderOverlay?: (page: number, scale: number, visible: boolean) => React.ReactNode;
   /** #482 — receives a stable `PageViewHandle` (null on unmount): scroll to a page and read page sizes
    *  without querying this view's DOM. */
   handleRef?: React.Ref<PageViewHandle>;
@@ -531,7 +532,7 @@ export function HwpPageView(props: HwpPageViewProps) {
             ) : (
               <PagePlaceholder page={p} height={phHeight} />
             )}
-            {renderOverlay?.(p, scale)}
+            {renderOverlay?.(p, scale, isVis(p))}
           </div>
         );
       })}

@@ -427,11 +427,12 @@ export interface HwpWorkspaceProps {
   messages?: DeepPartial<WorkspaceMessages>;
   /** #511 — 편집 정책(`editable`)이 참인 영역을 엔진 오버레이 층(`.hw-region`)에 옅게 그린다(기본 끔). `true` = 칸 + 빈 문단,
    *  `"cells"` · `"emptyParagraphs"` · `"all"`(칸 + 모든 편집 가능 문단) 또는 그 배열로 범위를 고른다. 순수 표시 층이라 클릭 · 캐럿을
-   *  막지 않고, 측정은 쪽 그림이 그려진 뒤 비동기다. 색은 CSS 변수 `--hw-region-*`. 정책이 없으면(`editable` 미지정) 편집 가능한 모든 곳이
-   *  표시된다 */
+   *  막지 않고, 측정은 쪽 그림이 그려진 뒤 비동기다(가상화로 그려지지 않은 쪽은 재지 않는다). 색은 CSS 변수 `--hw-region-*`.
+   *  `enableEditing` + 편집 가능 문서일 때만 그린다. 정책이 없으면(`editable` 미지정) 편집 가능한 모든 곳이 표시된다. 정책 답이 바뀌면
+   *  `editable` 에 새 함수를 주거나 `core.invalidateEditability()` 를 부른다(둘 다 다시 잰다) */
   showEditableRegions?: ShowEditableRegions;
-  /** #511 — 영역마다 클래스를 덧붙인다(`string`) · 그리지 않는다(`null`). 호스트의 「빈 칸」 판정 · 칸 종류 구분에 쓴다. 참조를 안정되게 두면
-   *  불필요한 재측정이 없다 */
+  /** #511 — 영역마다 클래스를 덧붙인다(`string`) · 그리지 않는다(`null`). 호스트의 「빈 칸」 판정 · 칸 종류 구분에 쓴다. 이 함수의 **참조가
+   *  바뀌면 다시 잰다** — 렌더마다 새 함수를 주지 말고 `useCallback` 으로 안정되게 두고, 문서 밖 상태가 바뀌었을 때만 새 함수를 준다 */
   regionClass?: RegionClass;
   /** #482 — receives the stable `WorkspaceHandle` (null on unmount). Works with a ref object or a
    *  callback ref; the identity never changes while mounted, so it is safe to hold in host state. */
@@ -575,7 +576,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   useLayoutEffect(() => {
     if (props.editable) core.invalidateEditability(); // a NEW predicate may answer differently
   }, [core, props.editable]);
-  const [, setEditabilityEpoch] = useState(0);
+  const [editabilityEpoch, setEditabilityEpoch] = useState(0);
   useEffect(() => core.session.onEditabilityChange(() => setEditabilityEpoch((n) => n + 1)), [core]);
   const canEditTarget = (t: PolicyTarget): boolean => core.session.canEdit(t);
   /** #511 — 켜진 영역 표시 범위(집합 정체성은 prop 값이 같으면 같다) */
@@ -4211,7 +4212,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                 onPagePointerDown={onPointerDown}
                 onPagePointerMove={onPointerMove}
                 onPagePointerUp={onPointerUp}
-                renderOverlay={(page, scale) => (
+                renderOverlay={(page, scale, visible) => (
                   <>
                     {/* issue 038: the hover pre-highlight sits UNDER the selection marks (rendered first) and
                         is pointer-events:none, so it never interferes with clicks/marks — it only points. */}
@@ -4220,10 +4221,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         adapter={adapter}
                         page={page}
                         scale={scale}
+                        visible={visible}
                         scopes={regionScopeSet}
                         canEdit={canEditTarget}
                         token={refreshToken}
-                        policyKey={props.editable}
+                        policyKey={editabilityEpoch}
                         regionClass={props.regionClass}
                       />
                     )}

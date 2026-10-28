@@ -16,6 +16,8 @@ export interface EditableRegion {
   target: EditTarget;
   /** 칸 · 문단의 현재 글(평문) */
   text: string;
+  /** 칸이 글이 아닌 것(안쪽 표 · 그림 …)을 품고 있다 — 글이 없어도 「빈 칸」이 아니다. 문단은 항상 false */
+  objects: boolean;
   /** own-render PAGE px */
   box: { x: number; y: number; w: number; h: number };
 }
@@ -55,19 +57,20 @@ export async function resolveEditableRegions(args: {
         ? { kind: "cell", section: cell.section, block: cell.block, row: cell.row, col: cell.col, path: cell.path, intent: "SetTableCellRuns" }
         : { kind: "cell", section: cell.section, block: cell.block, row: cell.row, col: cell.col, intent: "SetTableCellRuns" };
       if (!canEdit(target)) continue;
-      push({ kind: "cell", target, text: cell.text, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h } });
+      push({ kind: "cell", target, text: cell.text, objects: cell.objects === true, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h } });
     }
   }
   const wantsEmpty = scopes.has("emptyParagraphs");
   const wantsAll = scopes.has("all");
   if ((wantsEmpty || wantsAll) && typeof adapter.blocksInRect === "function") {
     for (const hit of await adapter.blocksInRect(page, 0, 0, PAGE_EXTENT, PAGE_EXTENT)) {
-      if (hit.kind !== "paragraph" || !(hit.h > 1)) continue;
+      // 엔진이 캐럿을 못 놓는 문단(구역 첫 문단처럼 글이 아닌 것을 품은 문단)은 정책이 허용해도 표시하지 않는다 — 눌러도 캐럿이 안 선다
+      if (hit.kind !== "paragraph" || !hit.editable || !(hit.h > 1)) continue;
       const empty = hit.text.trim().length === 0;
       if (!wantsAll && !empty) continue;
       const target: EditTarget = { kind: "paragraph", section: hit.section, block: hit.block, intent: "SetParagraphRuns" };
       if (!canEdit(target)) continue;
-      push({ kind: "paragraph", target, text: hit.text, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h } });
+      push({ kind: "paragraph", target, text: hit.text, objects: false, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h } });
     }
   }
   return out;
@@ -78,12 +81,14 @@ export interface EditableRegionsLayerProps {
   page: number;
   /** rendered px / viewBox px for this page */
   scale: number;
+  /** 가상화로 쪽 그림이 그려진 쪽인가 — 아니면 재지 않고 그리지도 않는다(큰 문서에서 전 쪽 측정이 워커를 막지 않게) */
+  visible?: boolean;
   scopes: ReadonlySet<EditableRegionScope>;
   /** 정책 질의 — 최신 함수를 ref 로 읽는다(렌더마다 새 함수여도 다시 재지 않는다) */
   canEdit: (target: EditTarget) => boolean;
   /** 문서가 바뀔 때마다 바뀌는 값(`refreshToken` — 쓰기 · 실행취소 · 확정) */
   token: number;
-  /** 정책이 바뀌었음을 알리는 값(호스트가 `editable` 함수를 새로 주면 바뀐다) */
+  /** 정책이 바뀌었음을 알리는 값(워크스페이스의 `editabilityEpoch` — 호스트가 `editable` 에 새 함수를 주거나 `invalidateEditability()` 를 부르면 바뀐다) */
   policyKey: unknown;
   regionClass?: RegionClass;
 }
@@ -95,11 +100,10 @@ const SETTLE_MS = 80;
 /// 비동기로 하고, 결과가 오기 전에는 이전 영역을 그대로 둔다(깜박임 없음). 문서 · 정책이 바뀌면 다시 재고 낡은 결과는 버린다.
 export function EditableRegionsLayer(props: EditableRegionsLayerProps) {
   const { adapter, page, scale, scopes, token, policyKey, regionClass } = props;
+  const visible = props.visible !== false;
   const [regions, setRegions] = useState<Array<EditableRegion & { className: string }>>([]);
   const canEditRef = useRef(props.canEdit);
   canEditRef.current = props.canEdit;
-  const classRef = useRef(regionClass);
-  classRef.current = regionClass;
   const scopeKey = useMemo(() => [...scopes].sort().join(","), [scopes]);
 
   useEffect(() => {
@@ -107,9 +111,11 @@ export function EditableRegionsLayer(props: EditableRegionsLayerProps) {
       setRegions((prev) => (prev.length === 0 ? prev : []));
       return;
     }
+    // 그려지지 않은 쪽(가상화 플레이스홀더)은 재지 않는다 — 보이게 되면 이 효과가 다시 돌아 잰다
+    if (!visible) return;
     let cancelled = false;
     const timer = setTimeout(() => {
-      resolveEditableRegions({ adapter, page, scopes, canEdit: (t) => canEditRef.current(t), regionClass: classRef.current })
+      resolveEditableRegions({ adapter, page, scopes, canEdit: (t) => canEditRef.current(t), regionClass })
         .then((next) => {
           if (!cancelled) setRegions(next);
         })
@@ -123,15 +129,15 @@ export function EditableRegionsLayer(props: EditableRegionsLayerProps) {
     };
     // scopes 는 scopeKey 로 본다(집합 정체성이 렌더마다 달라도 다시 재지 않게)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adapter, page, token, policyKey, scopeKey]);
+  }, [adapter, page, token, policyKey, scopeKey, visible, regionClass]);
 
-  if (scopes.size === 0 || regions.length === 0) return null;
+  if (scopes.size === 0 || !visible || regions.length === 0) return null;
   return (
     <div className="hw-regions" aria-hidden data-testid="hw-regions">
       {regions.map((r, i) => (
         <div
           key={`${r.kind}:${r.target.kind === "cell" ? `${r.target.block}.${r.target.row}.${r.target.col}.${r.target.path?.length ?? 1}` : `p${(r.target as { block: number }).block}`}:${i}`}
-          className={`hw-region hw-region-${r.kind}${r.text.trim().length === 0 ? " hw-region-empty" : ""}${r.className ? ` ${r.className}` : ""}`}
+          className={`hw-region hw-region-${r.kind}${r.text.trim().length === 0 && !r.objects ? " hw-region-empty" : ""}${r.className ? ` ${r.className}` : ""}`}
           style={{ left: r.box.x * scale, top: r.box.y * scale, width: r.box.w * scale, height: r.box.h * scale }}
         />
       ))}

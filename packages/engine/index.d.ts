@@ -114,6 +114,8 @@ export interface CellBoxItem {
   col: number;
   path: CellAddr[];
   text: string;
+  /** The cell holds something that is not paragraph text (a nested table, …) — empty `text` does not mean an empty cell. */
+  objects: boolean;
   x: number;
   y: number;
   w: number;

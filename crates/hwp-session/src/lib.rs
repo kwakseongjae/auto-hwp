@@ -1275,10 +1275,24 @@ pub struct CellBoxItemDto {
     pub col: usize,
     pub path: Vec<CellAddrDto>,
     pub text: String,
+    /// 칸이 **글이 아닌 것**(안쪽 표 · 그림 · 도형 …)을 품고 있다 — `text` 가 비어도 빈 칸이 아니다(래퍼 칸).
+    pub objects: bool,
     pub x: f64,
     pub y: f64,
     pub w: f64,
     pub h: f64,
+}
+
+/// 칸에 문단 글이 아닌 것이 있나 — 문단이 아닌 블록(표 등) 또는 글이 아닌 인라인(그림 · 수식 …)
+fn cell_has_objects(cell: &hwp_model::prelude::Cell) -> bool {
+    use hwp_model::prelude::{Block, Inline};
+    cell.blocks.iter().any(|b| match b {
+        Block::Paragraph(p) => p
+            .runs
+            .iter()
+            .any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_)))),
+        _ => true,
+    })
 }
 
 /// [`CellBoxItemDto`] 목록 — 이미 놓인 문서(`placed`)에서(쪽 캐시 표면, 조판을 다시 하지 않는다). 쪽이 없으면 빈 목록.
@@ -1298,9 +1312,9 @@ pub fn cell_boxes_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32) -> Ve
                 .iter()
                 .map(CellAddrDto::from)
                 .collect();
-            let text = resolve_cell_path(doc, t.section, &path)
-                .map(cell_plain_text)
-                .unwrap_or_default();
+            let leaf = resolve_cell_path(doc, t.section, &path);
+            let text = leaf.map(cell_plain_text).unwrap_or_default();
+            let objects = leaf.map(cell_has_objects).unwrap_or(false);
             out.push(CellBoxItemDto {
                 section: t.section,
                 block: t.block,
@@ -1308,6 +1322,7 @@ pub fn cell_boxes_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32) -> Ve
                 col: cell.col,
                 path,
                 text,
+                objects,
                 x: cell.x / k,
                 y: cell.y / k,
                 w: cell.w / k,
@@ -4052,6 +4067,58 @@ mod tests {
         let hit = table_cell_at_placed(&doc, &placed, 0, b.x + b.w / 2.0, b.y + b.h / 2.0).unwrap();
         assert_eq!((hit.row, hit.col), (1, 1));
         assert!((hit.x - b.x).abs() < 1e-6 && (hit.w - b.w).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cell_boxes_split_table_fragment_keeps_model_global_rows_per_page() {
+        let doc = doc_with_table(); // block 1 = 3×2 table
+        let mut placed = place(&doc, &[]);
+        // 표를 쪽 사이에서 가른 것처럼 — 0쪽은 행 0..2, 1쪽 조각은 행 2..3(`first_row` = 2)
+        let mut frag = placed.pages[0].tables[0].clone();
+        let (keep, moved): (Vec<_>, Vec<_>) = frag.cells.iter().cloned().partition(|c| c.row < 2);
+        placed.pages[0].tables[0].cells = keep;
+        placed.pages[0].tables[0].last_row = 2;
+        frag.cells = moved;
+        frag.first_row = 2;
+        frag.last_row = 3;
+        let mut page1 = hwp_typeset::PlacedPage::default();
+        page1.tables.push(frag);
+        placed.pages.push(page1);
+        let rows = |page: u32| {
+            let mut r: Vec<usize> = cell_boxes_placed(&doc, &placed, page)
+                .iter()
+                .map(|b| b.row)
+                .collect();
+            r.sort();
+            r
+        };
+        assert_eq!(rows(0), vec![0, 0, 1, 1]);
+        assert_eq!(
+            rows(1),
+            vec![2, 2],
+            "조각의 행은 모델 전역(2) 그대로 — first_row 를 다시 더하지 않는다"
+        );
+        let b = &cell_boxes_placed(&doc, &placed, 1)[0];
+        assert_eq!((b.block, b.path[0].row), (1, 2));
+    }
+
+    #[test]
+    fn cell_boxes_flags_cells_that_hold_objects_even_without_text() {
+        let doc = doc_with_nested_table();
+        let placed = place(&doc, &[]);
+        let boxes = cell_boxes_placed(&doc, &placed, 0);
+        // 바깥 표의 (0,0) 칸은 안쪽 표를 품는다 — 글이 없어도 빈 칸이 아니다
+        let outer = boxes
+            .iter()
+            .find(|b| b.path.len() == 1 && b.row == 0 && b.col == 0)
+            .expect("outer (0,0)");
+        assert!(outer.objects, "안쪽 표를 품은 칸");
+        // 안쪽 표의 글 칸 · 평범한 칸은 아니다
+        let leaf = boxes
+            .iter()
+            .find(|b| b.path.len() == 2 && b.row == 1 && b.col == 1)
+            .expect("nested (1,1)");
+        assert!(!leaf.objects);
     }
 
     #[test]
