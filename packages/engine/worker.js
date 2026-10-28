@@ -41,6 +41,7 @@ const METHODS = new Set([
   'imageAt',
   'imageBbox',
   'tableCellAt',
+  'cellBoxes',
   'cellTextHit',
   'cellCaretRect',
   'cellCaretRectPath',

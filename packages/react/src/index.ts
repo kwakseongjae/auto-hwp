@@ -32,6 +32,8 @@ export type { ImeComposition } from "./composition";
 // Issue 038 — the hover PRE-HIGHLIGHT layer (FG-09) + the cursor system (FG-06). HoverLayer is MarqueeLayer's
 // twin (subscribes to a HoverStore, draws by ref → 0 workspace/sheet renders); useHover owns the pointermove
 // → hit-test → store pipeline; cursorForContext is the single pure hit-kind → cursor mapping.
+export { EditableRegionsLayer, regionScopes, resolveEditableRegions } from "./components/EditableRegionsLayer";
+export type { EditableRegion, EditableRegionScope, EditableRegionsLayerProps, RegionClass, ShowEditableRegions } from "./components/EditableRegionsLayer";
 export { HoverLayer } from "./components/HoverLayer";
 export type { HoverLayerProps } from "./components/HoverLayer";
 export { useHover } from "./useHover";
@@ -243,6 +245,7 @@ export type {
   TableGrid,
   GridCell,
   CellHit,
+  CellBoxItem,
   Intent,
   Outcome,
   OpenResult,

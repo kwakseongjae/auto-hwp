@@ -491,6 +491,18 @@ impl HwpDoc {
             .transpose()
     }
 
+    /// Every table CELL placed on `page` (nested tables included) — address `(section, block, row, col, path)`,
+    /// the cell's plain text, and its own-render px box — as a JSON **string** of a `CellBoxItem[]` array (#511).
+    /// A page with no tables (or an out-of-range page) returns the JSON **`"[]"`** (never `null`). Read-only,
+    /// served from the cached placement like `tableCellAt` (no re-typeset). The host's "show editable regions"
+    /// overlay asks its edit policy per cell.
+    #[wasm_bindgen(js_name = cellBoxes)]
+    pub fn cell_boxes(&self, page: u32) -> Result<String, JsValue> {
+        let boxes =
+            self.with_placed(|doc, placed| hwp_session::cell_boxes_placed(doc, placed, page))?;
+        serde_json::to_string(&boxes).map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
     /// Marquee (rubber-band) select on `page`: every top-level block whose placed band intersects the
     /// own-render px rectangle `(x0,y0)-(x1,y1)` (corners in any order), as a JSON **string** of a
     /// `BlockHit[]` array. A miss returns the JSON **`"[]"`** (an EMPTY ARRAY, never `null` — the

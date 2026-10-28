@@ -60,6 +60,23 @@ export interface CellAddr {
   col: number;
 }
 
+/** One table cell placed on a page (#511) — an item of `EngineAdapter.cellBoxes(page)`. `block` is the outermost
+ *  table's section block (like `CellHit`), `row`/`col` address the cell inside the table it belongs to (MODEL-GLOBAL,
+ *  also on a split-table fragment), `path` is the full descending CellPath (length 1 for a top-level table), `text`
+ *  the cell's plain text, and the box is own-render px. Mirrors `@auto-hwp/engine` `CellBoxItem`. */
+export interface CellBoxItem {
+  section: number;
+  block: number;
+  row: number;
+  col: number;
+  path: CellAddr[];
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** A table CELL hit for cell-level marking in own-render px space (mirrors @auto-hwp/engine CellHit; issue
  *  023). `row`/`col` are MODEL-GLOBAL — already global on a split-table fragment, so NEVER re-add
  *  `first_row` (§좌표계). For a NESTED cell they are the LEAF's (deepest) address; the full descent is in

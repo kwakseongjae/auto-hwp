@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../EngineAdapter";
-import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellBoxItem, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for tests: canned SVG (optionally malicious, to exercise the R7 gate), a
  *  fixed table hit, and a spy-able applyIntent. No wasm — pure in-memory. */
@@ -27,6 +27,8 @@ export class MockAdapter implements EngineAdapter {
       cell?: CellHit | null | ((page: number, x: number, y: number) => CellHit | null);
       /** Canned marquee result for `blocksInRect` (issue 021). */
       blocks?: BlockHit[];
+      /** Canned `cellBoxes(page)` (#511), or a page-aware resolver. Omit to OMIT the method. */
+      cellBoxes?: CellBoxItem[] | ((page: number) => CellBoxItem[]);
       /** Canned column boundaries / page geometry / cell runs (issue 027). Omit to OMIT the method. */
       colBoundaries?: number[] | null;
       /** Canned row boundaries for `tableRowBoundaries` (issue 031). Omit to OMIT the method. */
@@ -75,6 +77,7 @@ export class MockAdapter implements EngineAdapter {
     // Only expose the OPTIONAL methods when the corresponding opt was supplied — so tests exercise BOTH
     // the capable backend (WasmAdapter parity) and a backend that omits the optional method.
     if (!("cell" in this.opts)) (this as { tableCellAt?: unknown }).tableCellAt = undefined;
+    if (!("cellBoxes" in this.opts)) (this as { cellBoxes?: unknown }).cellBoxes = undefined;
     if (!("colBoundaries" in this.opts)) (this as { tableColBoundaries?: unknown }).tableColBoundaries = undefined;
     if (!("rowBoundaries" in this.opts)) (this as { tableRowBoundaries?: unknown }).tableRowBoundaries = undefined;
     if (!("pageGeom" in this.opts)) (this as { pageGeometry?: unknown }).pageGeometry = undefined;
@@ -135,6 +138,13 @@ export class MockAdapter implements EngineAdapter {
   }
   async blocksInRect(): Promise<BlockHit[]> {
     return this.opts.blocks ?? [];
+  }
+  /** #511 spy: how many times the overlay asked for cell boxes. */
+  cellBoxCalls = 0;
+  async cellBoxes(page: number): Promise<CellBoxItem[]> {
+    this.cellBoxCalls += 1;
+    const c = this.opts.cellBoxes;
+    return (typeof c === "function" ? c(page) : c) ?? [];
   }
   async tableColBoundaries(): Promise<number[] | null> {
     return this.liveCol ?? this.opts.colBoundaries ?? null;

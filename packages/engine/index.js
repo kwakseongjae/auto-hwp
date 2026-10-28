@@ -224,6 +224,11 @@ export class HwpDoc {
       return s == null ? null : JSON.parse(s);
     });
   }
+  /** Every table CELL placed on `page` (nested tables included) with its address, plain text and own-render
+   *  px box — `CellBoxItem[]` (#511), `[]` when the page has no tables. Read-only (cached placement). */
+  cellBoxes(page) {
+    return this.#call((r) => JSON.parse(r.cellBoxes(page))); // wasm returns "[]" on a miss
+  }
   /** Per-cell FIT / overflow report (#347) of the table at `(section, block)` — `CellFit[]` in own-render
    *  px, or `null` when the block is not a placed table. `overflow` = the content needs more height than
    *  the cell gives it; on a fixed-height (`fixed`, HWPX `noAdjust="1"`) table that text is clipped (as in

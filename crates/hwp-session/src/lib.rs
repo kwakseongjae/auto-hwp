@@ -1264,6 +1264,60 @@ pub fn table_cell_box_placed(
     None
 }
 
+/// 한 쪽에 놓인 **모든 표 칸**(중첩 표 칸 포함)의 주소 · 칸 글 · PX 사각형 (#511 — 호스트의 「편집 가능 영역 표시」 재료).
+/// `block` 은 `CellHitDto` 처럼 바깥 표의 구역 블록 번호, `row`/`col` 은 **그 칸이 속한 표 안의** 모델 전역 좌표(쪽으로 나뉜 표에서도 그대로),
+/// `path` 는 바깥 칸부터 내려오는 전체 `CellPath`(최상위 표면 길이 1). 크기가 없는 칸은 뺀다.
+#[derive(serde::Serialize)]
+pub struct CellBoxItemDto {
+    pub section: usize,
+    pub block: usize,
+    pub row: usize,
+    pub col: usize,
+    pub path: Vec<CellAddrDto>,
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// [`CellBoxItemDto`] 목록 — 이미 놓인 문서(`placed`)에서(쪽 캐시 표면, 조판을 다시 하지 않는다). 쪽이 없으면 빈 목록.
+pub fn cell_boxes_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32) -> Vec<CellBoxItemDto> {
+    let Some(pg) = placed.pages.get(page as usize) else {
+        return Vec::new();
+    };
+    let k = HWPUNIT_PER_PX;
+    let mut out = Vec::new();
+    for t in &pg.tables {
+        for cell in &t.cells {
+            if !(cell.w > 0.0 && cell.h > 0.0) {
+                continue;
+            }
+            let path: Vec<CellAddrDto> = t
+                .leaf_path(cell.row, cell.col)
+                .iter()
+                .map(CellAddrDto::from)
+                .collect();
+            let text = resolve_cell_path(doc, t.section, &path)
+                .map(cell_plain_text)
+                .unwrap_or_default();
+            out.push(CellBoxItemDto {
+                section: t.section,
+                block: t.block,
+                row: cell.row,
+                col: cell.col,
+                path,
+                text,
+                x: cell.x / k,
+                y: cell.y / k,
+                w: cell.w / k,
+                h: cell.h / k,
+            });
+        }
+    }
+    out
+}
+
 // ---- Cell-addressed caret (issue 053 — CARET-GAP §5 P1) ----------------------------------------
 
 /// Cell-addressed caret rect DTO (own-render PX + the 0-based page the owning fragment landed on).
@@ -3950,6 +4004,78 @@ mod tests {
         // Flat row/col mirror the LEAF for back-compat; the leaf reads its own text "D".
         assert_eq!((hit.row, hit.col), (1, 1));
         assert_eq!(hit.text, "D");
+    }
+
+    #[test]
+    fn cell_boxes_lists_every_placed_cell_with_text_and_page_rect() {
+        let doc = doc_with_table(); // block 1 = 3×2 table
+        let placed = place(&doc, &[]);
+        let boxes = cell_boxes_placed(&doc, &placed, 0);
+        assert_eq!(boxes.len(), 6, "3 rows × 2 cols");
+        let mut addrs: Vec<(usize, usize, usize)> =
+            boxes.iter().map(|b| (b.block, b.row, b.col)).collect();
+        addrs.sort();
+        assert_eq!(
+            addrs,
+            vec![
+                (1, 0, 0),
+                (1, 0, 1),
+                (1, 1, 0),
+                (1, 1, 1),
+                (1, 2, 0),
+                (1, 2, 1)
+            ]
+        );
+        for b in &boxes {
+            assert!(
+                b.w > 0.0 && b.h > 0.0 && b.x >= 0.0 && b.y >= 0.0,
+                "{b:?}",
+                b = b.text
+            );
+            assert_eq!(b.path.len(), 1, "top-level table → length-1 path");
+            assert_eq!(
+                (b.path[0].block, b.path[0].row, b.path[0].col),
+                (b.block, b.row, b.col)
+            );
+        }
+        let text = |r, c| {
+            boxes
+                .iter()
+                .find(|b| b.row == r && b.col == c)
+                .unwrap()
+                .text
+                .clone()
+        };
+        assert_eq!((text(0, 0).as_str(), text(0, 1).as_str()), ("항목", "내용"));
+        // 같은 칸의 상자는 `table_cell_at` 이 같은 점에서 답하는 사각형과 같다
+        let b = boxes.iter().find(|b| b.row == 1 && b.col == 1).unwrap();
+        let hit = table_cell_at_placed(&doc, &placed, 0, b.x + b.w / 2.0, b.y + b.h / 2.0).unwrap();
+        assert_eq!((hit.row, hit.col), (1, 1));
+        assert!((hit.x - b.x).abs() < 1e-6 && (hit.w - b.w).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cell_boxes_includes_nested_cells_with_full_path_and_no_page_is_empty() {
+        let doc = doc_with_nested_table();
+        let placed = place(&doc, &[]);
+        let boxes = cell_boxes_placed(&doc, &placed, 0);
+        let nested: Vec<_> = boxes.iter().filter(|b| b.path.len() == 2).collect();
+        assert!(!nested.is_empty(), "중첩 표 칸도 나온다");
+        let leaf = nested
+            .iter()
+            .find(|b| b.row == 1 && b.col == 1)
+            .expect("nested (1,1)");
+        assert_eq!(leaf.text, "D");
+        assert_eq!(
+            (leaf.path[0].block, leaf.path[0].row, leaf.path[0].col),
+            (1, 0, 0)
+        );
+        assert_eq!(
+            (leaf.path[1].block, leaf.path[1].row, leaf.path[1].col),
+            (1, 1, 1)
+        );
+        assert_eq!(leaf.block, 1, "바깥 표의 구역 블록 번호");
+        assert!(cell_boxes_placed(&doc, &placed, 99).is_empty());
     }
 
     #[test]

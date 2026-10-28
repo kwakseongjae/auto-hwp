@@ -38,6 +38,7 @@ import { CellShadePalette } from "./CellShadePalette";
 import { TableSizeGrid } from "./TableSizeGrid";
 import { FindBar } from "./FindBar";
 import { FindMatchOverlay } from "./FindMatchOverlay";
+import { EditableRegionsLayer, regionScopes, type RegionClass, type ShowEditableRegions } from "./EditableRegionsLayer";
 import { useSelectionActions } from "../useSelectionActions";
 import { readViewBox, screenToPage, type PageBox } from "../coords";
 import { buildFontFaceCss, catalogUrl, SERIF_SUBSTITUTE, type FontCatalogEntry } from "../fonts";
@@ -424,6 +425,14 @@ export interface HwpWorkspaceProps {
    *  prop-drilling. Omit for the default Korean chrome (byte-identical to a workspace without this prop).
    *  Keep the object REFERENCE stable (module const / `useMemo`): a new reference re-merges the catalog. */
   messages?: DeepPartial<WorkspaceMessages>;
+  /** #511 — 편집 정책(`editable`)이 참인 영역을 엔진 오버레이 층(`.hw-region`)에 옅게 그린다(기본 끔). `true` = 칸 + 빈 문단,
+   *  `"cells"` · `"emptyParagraphs"` · `"all"`(칸 + 모든 편집 가능 문단) 또는 그 배열로 범위를 고른다. 순수 표시 층이라 클릭 · 캐럿을
+   *  막지 않고, 측정은 쪽 그림이 그려진 뒤 비동기다. 색은 CSS 변수 `--hw-region-*`. 정책이 없으면(`editable` 미지정) 편집 가능한 모든 곳이
+   *  표시된다 */
+  showEditableRegions?: ShowEditableRegions;
+  /** #511 — 영역마다 클래스를 덧붙인다(`string`) · 그리지 않는다(`null`). 호스트의 「빈 칸」 판정 · 칸 종류 구분에 쓴다. 참조를 안정되게 두면
+   *  불필요한 재측정이 없다 */
+  regionClass?: RegionClass;
   /** #482 — receives the stable `WorkspaceHandle` (null on unmount). Works with a ref object or a
    *  callback ref; the identity never changes while mounted, so it is safe to hold in host state. */
   handleRef?: React.Ref<WorkspaceHandle>;
@@ -569,6 +578,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const [, setEditabilityEpoch] = useState(0);
   useEffect(() => core.session.onEditabilityChange(() => setEditabilityEpoch((n) => n + 1)), [core]);
   const canEditTarget = (t: PolicyTarget): boolean => core.session.canEdit(t);
+  /** #511 — 켜진 영역 표시 범위(집합 정체성은 prop 값이 같으면 같다) */
+  const regionScopeKey = (() => { const s = regionScopes(props.showEditableRegions); return [...s].sort().join(","); })();
+  const regionScopeSet = useMemo(() => regionScopes(props.showEditableRegions), [regionScopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [zoom, setZoom] = useState(0.9);
   const [status, setStatus] = useState<string>("");
   // ── issue 046: outline panel + status bar (leftbar/bottombar layout only — 045 owns keydown/toolbar) ──
@@ -4203,6 +4215,18 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                   <>
                     {/* issue 038: the hover pre-highlight sits UNDER the selection marks (rendered first) and
                         is pointer-events:none, so it never interferes with clicks/marks — it only points. */}
+                    {editingOn && canEdit && regionScopeSet.size > 0 && (
+                      <EditableRegionsLayer
+                        adapter={adapter}
+                        page={page}
+                        scale={scale}
+                        scopes={regionScopeSet}
+                        canEdit={canEditTarget}
+                        token={refreshToken}
+                        policyKey={props.editable}
+                        regionClass={props.regionClass}
+                      />
+                    )}
                     <HoverLayer store={hover.store} page={page} scale={scale} />
                     <SelectionOverlay marks={marks} page={page} scale={scale} flash={revealFlash} />
                     {/* issue 045: the 찾기 match highlight (current 강조 / rest 옅게), visually distinct from

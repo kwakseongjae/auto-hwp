@@ -145,6 +145,7 @@ export type {
   ChatTurn,
   Citation,
   CellAddr,
+  CellBoxItem,
   CellCaretRect,
   CellHit,
   CellTextHit,
