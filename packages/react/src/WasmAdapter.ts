@@ -2,7 +2,7 @@ import { HwpDoc, initEngine, resetEngine } from "@auto-hwp/engine";
 import type { EngineLoadProgress } from "@auto-hwp/engine";
 import { EngineWorkerClient } from "@auto-hwp/engine/worker-client";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BatchApplyOptions, BatchApplyResult, BlockHit, CaretRect, CellAddr, CellFit, HwpxExportOptions, PageUsage, UndoStats, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BatchApplyOptions, BatchApplyResult, BlockHit, CaretRect, CellAddr, CellBoxItem, CellFit, HwpxExportOptions, PageUsage, UndoStats, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -76,6 +76,7 @@ interface EngineDoc {
   hitTest(page: number, x: number, y: number): MaybePromise<unknown>;
   tableAt(page: number, x: number, y: number): MaybePromise<unknown>;
   tableCellAt(page: number, x: number, y: number): MaybePromise<unknown>;
+  cellBoxes?(page: number): MaybePromise<unknown>;
   cellTextHit(page: number, x: number, y: number): MaybePromise<unknown>;
   cellCaretRect(section: number, block: number, row: number, col: number, para: number, offset: number): MaybePromise<unknown>;
   cellCaretRectPath?(section: number, path: CellAddr[], para: number, offset: number): MaybePromise<unknown>;
@@ -220,6 +221,7 @@ export class WasmAdapter implements EngineAdapter {
       hitTest: call("hitTest"),
       tableAt: call("tableAt"),
       tableCellAt: call("tableCellAt"),
+      cellBoxes: call("cellBoxes"),
       cellTextHit: call("cellTextHit"),
       cellCaretRect: call("cellCaretRect"),
       cellCaretRectPath: call("cellCaretRectPath"),
@@ -421,6 +423,15 @@ export class WasmAdapter implements EngineAdapter {
 
   tableCellAt(page: number, x: number, y: number): Promise<CellHit | null> {
     return this.guard(async (d) => (await d.tableCellAt(page, x, y)) as CellHit | null);
+  }
+
+  /** Every table cell placed on `page` (nested included) with address · text · own-render px box (#511). An
+   *  engine build without `cellBoxes` (older wasm) answers `[]` — the "show editable regions" overlay then
+   *  simply draws no cell regions. */
+  cellBoxes(page: number): Promise<CellBoxItem[]> {
+    return this.guard(async (d) =>
+      typeof d.cellBoxes === "function" ? ((await d.cellBoxes(page)) as CellBoxItem[]) : []
+    );
   }
 
   /** Cell-addressed caret, hit half (issue 053) — the engine `cellTextHit` binding (the placed-cache

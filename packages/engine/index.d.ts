@@ -104,6 +104,24 @@ export interface CellHit {
   path: CellAddr[];
 }
 
+/** One table cell placed on a page (#511) — `cellBoxes(page)` item: the cell's address (`block` = the outermost
+ *  table's section block like `CellHit`, `row`/`col` inside the table the cell belongs to, `path` = the full
+ *  descending CellPath, length 1 for a top-level table), its plain text, and its own-render px box. */
+export interface CellBoxItem {
+  section: number;
+  block: number;
+  row: number;
+  col: number;
+  path: CellAddr[];
+  text: string;
+  /** The cell holds something that is not paragraph text (a nested table, …) — empty `text` does not mean an empty cell. */
+  objects: boolean;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** Cell-addressed caret rect (issue 053) — own-render px + the 0-based page the owning table fragment
  *  landed on. Mirrors hwp-session `CellCaretDto`. */
 export interface CellCaretRect {
@@ -418,6 +436,9 @@ export class HwpDoc {
   imageBbox(page: number, section: number, block: number): ImageBox | null;
   /** Table CELL under (x,y) in own-render px for cell-level marking (issue 023); null on a miss. */
   tableCellAt(page: number, x: number, y: number): CellHit | null;
+  /** Every table CELL placed on `page` (nested tables included) with address, plain text and own-render px
+   *  box (#511) — empty array when the page has no tables. Read-only (cached placement). */
+  cellBoxes(page: number): CellBoxItem[];
   /** Cell-addressed caret, hit half (issue 053): the TABLE-CELL text caret target under (x,y) in
    *  own-render px, or `null` off any cell text (018). Geometry = the cached own-render placement (the
    *  same the visible SVG drew), so it answers on binary .hwp too and never drifts from the screen. */

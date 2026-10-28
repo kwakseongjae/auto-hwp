@@ -40,6 +40,17 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 추가 (Added)
+
+- **편집 가능 영역 표시 — `HwpWorkspace` 의 `showEditableRegions` · `regionClass` (#511).** 호스트의 편집 정책(`editable`)이 참인 표 칸 · 빈
+  문단을 엔진 오버레이 층(`.hw-region`)에 옅게 그린다(기본 끔). `true` = 칸 + 빈 문단, `"cells"` · `"emptyParagraphs"` · `"all"` 또는 그 배열로 범위를
+  고른다. 순수 표시 층(`pointer-events:none`)이라 클릭 · 캐럿을 막지 않고, 측정은 쪽 그림이 그려진 뒤 비동기이며 문서(`refreshToken`) · 정책이 바뀌면
+  다시 잰다(낡은 결과는 버림, 결과 전에는 이전 영역 유지). `regionClass(region)` 으로 영역마다 클래스를 덧붙이거나 `null` 로 그리지 않는다. 색은 CSS
+  변수 `--hw-region-*`. 어댑터에 선택 메서드 `cellBoxes(page)` 가 더해졌다 — 그 쪽에 놓인 모든 칸(중첩 표 포함)의 주소 · 칸 글 · own-render px
+  사각형(`WasmAdapter` · `@auto-hwp/engine` `HwpDoc.cellBoxes`; `TauriAdapter` 는 생략 → 칸 표시만 빠진다).
+  *(EN — Added: `showEditableRegions` / `regionClass` on `HwpWorkspace` draw the cells and empty paragraphs your `editable` policy allows in an engine
+  overlay layer; pointer-events:none, async, versioned. New optional adapter method `cellBoxes(page)`.)*
+
 ---
 
 ## [0.0.20] — 2026-10-27

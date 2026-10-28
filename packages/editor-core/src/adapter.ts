@@ -1,4 +1,4 @@
-import type { BatchApplyOptions, BatchApplyResult, BlockHit, CaretRect, CellAddr, CellCaretRect, CellFit, CellHit, CellTextHit, DocProfile, HwpxExportOptions, PageUsage, UndoStats, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BatchApplyOptions, BatchApplyResult, BlockHit, CaretRect, CellAddr, CellBoxItem, CellCaretRect, CellFit, CellHit, CellTextHit, DocProfile, HwpxExportOptions, PageUsage, UndoStats, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -67,6 +67,12 @@ export interface EngineAdapter {
    *  anchor). `row`/`col` are MODEL-GLOBAL. Backends that can't answer a cell query (e.g. the reference
    *  `TauriAdapter`) OMIT this method — the caller then marks at whole-table granularity (021 parity). */
   tableCellAt?(page: number, x: number, y: number): Promise<CellHit | null>;
+
+  /** OPTIONAL — every table cell placed on `page` (nested tables included) with its address, plain text and
+   *  PAGE-LOCAL px box (#511). Resolves to an EMPTY ARRAY when the page has no tables (never null). Powers the
+   *  host-facing "show editable regions" overlay (the workspace asks its edit policy per cell). Backends that can't
+   *  answer (e.g. the reference `TauriAdapter`) OMIT this method — the overlay then draws no cell regions. */
+  cellBoxes?(page: number): Promise<CellBoxItem[]>;
 
   /** OPTIONAL — marquee (rubber-band) select: every top-level block whose band intersects the
    *  PAGE-LOCAL px rectangle `(x0,y0)-(x1,y1)` (corners in any order). Resolves to an EMPTY ARRAY on a

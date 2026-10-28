@@ -1102,6 +1102,26 @@ button > .hw-icon:only-child { margin: 0 auto; }
 
 /* the per-page match highlight overlay (twin of .hw-overlay) — purely visual. */
 .hw-find-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+/* 편집 가능 영역 표시(#511) — `showEditableRegions`. 순수 표시 층: 클릭은 그대로 통과한다. 호스트가 색을 CSS 변수로 바꾸고, 필요하면
+   `.hw-region{pointer-events:auto}` 로 `:hover` 를 쓸 수 있다(클릭은 좌표로 처리돼 영향 없음). */
+.hw-regions { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.hw-region {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 2px;
+  background: var(--hw-region-bg, rgba(37, 99, 235, 0.045));
+  border: 1px dashed var(--hw-region-border, rgba(37, 99, 235, 0.35));
+  transition: background 0.12s, border-color 0.12s;
+}
+.hw-region-empty {
+  background: var(--hw-region-empty-bg, rgba(37, 99, 235, 0.09));
+  border-color: var(--hw-region-empty-border, rgba(37, 99, 235, 0.6));
+}
+.hw-region:hover {
+  background: var(--hw-region-hover-bg, rgba(37, 99, 235, 0.16));
+  border-style: solid;
+  border-color: var(--hw-region-hover-border, rgba(37, 99, 235, 0.9));
+}
 .hw-find-hit {
   position: absolute; border-radius: 1px;
   background: rgba(250, 204, 21, 0.38); box-shadow: inset 0 0 0 1px rgba(202, 138, 4, 0.55);
