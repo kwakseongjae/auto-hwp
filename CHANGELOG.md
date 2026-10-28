@@ -40,6 +40,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.21] — 2026-10-28
+
+4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep. 파괴 변경 없음.
+
 ### 추가 (Added)
 
 - **편집 가능 영역 표시 — `HwpWorkspace` 의 `showEditableRegions` · `regionClass` (#511).** 호스트의 편집 정책(`editable`)이 참인 표 칸 · 빈
