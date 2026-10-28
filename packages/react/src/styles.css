@@ -1102,8 +1102,9 @@ button > .hw-icon:only-child { margin: 0 auto; }
 
 /* the per-page match highlight overlay (twin of .hw-overlay) — purely visual. */
 .hw-find-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
-/* 편집 가능 영역 표시(#511) — `showEditableRegions`. 순수 표시 층: 클릭은 그대로 통과한다. 호스트가 색을 CSS 변수로 바꾸고, 필요하면
-   `.hw-region{pointer-events:auto}` 로 `:hover` 를 쓸 수 있다(클릭은 좌표로 처리돼 영향 없음). */
+/* 편집 가능 영역 표시(#511) — `showEditableRegions`. 순수 표시 층: 클릭은 그대로 통과한다. 호스트는 색을 CSS 변수(`--hw-region-*`)로 바꾼다.
+   ⚠️ `.hw-region{pointer-events:auto}` 로 바꾸지 말 것 — 이 층은 쪽 시트(클릭 핸들러가 달린 `.hw-sheet`)의 **형제**라 클릭을 삼킨다. 호버 강조는
+   엔진의 호버 윤곽선(`.hw-hover-cell`)이 이미 낸다. 아래 `:hover` 규칙은 `pointer-events:none` 이라 지금은 일하지 않는다(호스트가 쓰지 않도록 둔다). */
 .hw-regions { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
 .hw-region {
   position: absolute;
