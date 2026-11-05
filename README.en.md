@@ -165,7 +165,7 @@ are specified as the [`EngineAdapter` contract](./packages/editor-core/src/adapt
 Only **19** of those edit commands are open to the AI, and only what passes schema validation reaches the document — proposals
 preview as cards, "reveal target" shows the block before you approve, and each card reverts on its own (an agentic mode adds web
 search with cited evidence). The protocol is `@auto-hwp/ai-protocol`; the full spec is [INTENT-SCHEMA](./docs/INTENT-SCHEMA.md).
-We are equally explicit about what is missing — there are still **no commands for deleting table rows or inserting/deleting columns**.
+We are equally explicit about what is missing — deleting table rows and inserting or deleting columns exist as engine commands, but **they are not among the 19 commands open to AI yet**.
 
 ## The philosophy behind auto-hwp
 
@@ -201,13 +201,13 @@ The longer version is in [WHY](./docs/WHY.md#english).
 |---|---|---|---|
 | **License** | Apache-2.0 — free for commercial embedding, no seat or concurrency limits | MIT | Apache-2.0 |
 | React-native SDK | `<HwpWorkspace/>` in `@auto-hwp/react` + a headless core | iframe-embedded web component (`@rhwp/editor`) | viewer/parser library (`hwp.js`) |
-| Bulk form filling, finished | web + CLI (1 form + an N-row roster → N documents as a zip) | not found | not found |
-| Chat-driven ("vibe") editing | 19 typed edit commands · preview cards before apply · per-card revert | not found | not found |
+| Bulk form filling, finished | web + CLI (1 form + an N-row roster → N documents as a zip) | form-field filling via MCP `hwp_fill_fields`; roster batches not found | not found |
+| Chat-driven ("vibe") editing | 19 typed edit commands · preview cards before apply · per-card revert | MCP hosts can read, search, fill and convert; preview before apply not found | not found |
 | Automated fidelity gate | page count + line-break match rate checked on every commit ([accuracy](#accuracy-and-limits)) | not found | not found |
-| Distribution surface | npm · CLI · MCP server · Claude Code skill · web demo | browser extensions · VS Code extension · npm · web demo | npm |
-| Latest npm release | `@auto-hwp/engine` 0.0.21 (2026-10) | `@rhwp/core` 0.8.2 (2026-07) | `hwp.js` 0.0.3 (2020-10) |
+| Distribution surface | npm · CLI · MCP server · Claude Code skill · web demo | browser extensions · VS Code extension · npm · CLI · MCP server · web demo | npm |
+| Latest npm release | `@auto-hwp/engine` 0.0.21 (2026-10) | `@rhwp/core` 0.8.7 (2026-10) | `hwp.js` 0.0.3 (2020-10) |
 
-<sub>As of 2026-07, from each project's public repository and npm registry metadata only. "Not found" means we could not
+<sub>As of 2026-11, from each project's public repository and npm registry metadata only. "Not found" means we could not
 find it in public material — not that it is impossible. rhwp is also the upstream auto-hwp bootstraps its `.hwp` parsing
 from ([credits](#license--credits)).</sub>
 
