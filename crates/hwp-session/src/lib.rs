@@ -1275,6 +1275,9 @@ pub struct CellBoxItemDto {
     pub col: usize,
     pub path: Vec<CellAddrDto>,
     pub text: String,
+    /// #507: editor-space paragraph segment → original block index inside this cell. Retains the
+    /// positions of intervening nested tables/objects; multiple newline segments can share one block.
+    pub paragraph_blocks: Vec<usize>,
     /// 칸이 **글이 아닌 것**(안쪽 표 · 그림 · 도형 …)을 품고 있다 — `text` 가 비어도 빈 칸이 아니다(래퍼 칸).
     pub objects: bool,
     pub x: f64,
@@ -1293,6 +1296,24 @@ fn cell_has_objects(cell: &hwp_model::prelude::Cell) -> bool {
             .any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_)))),
         _ => true,
     })
+}
+
+fn cell_paragraph_blocks(cell: &hwp_model::prelude::Cell) -> Vec<usize> {
+    use hwp_model::prelude::{Block, Inline};
+    let mut out = Vec::new();
+    for (index, block) in cell.blocks.iter().enumerate() {
+        if let Block::Paragraph(p) = block {
+            out.push(index);
+            for run in &p.runs {
+                for inline in &run.content {
+                    if let Inline::Text(text) = inline {
+                        out.extend(text.matches('\n').map(|_| index));
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// [`CellBoxItemDto`] 목록 — 이미 놓인 문서(`placed`)에서(쪽 캐시 표면, 조판을 다시 하지 않는다). 쪽이 없으면 빈 목록.
@@ -1322,6 +1343,7 @@ pub fn cell_boxes_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32) -> Ve
                 col: cell.col,
                 path,
                 text,
+                paragraph_blocks: leaf.map(cell_paragraph_blocks).unwrap_or_default(),
                 objects,
                 x: cell.x / k,
                 y: cell.y / k,
@@ -4119,6 +4141,39 @@ mod tests {
             .find(|b| b.path.len() == 2 && b.row == 1 && b.col == 1)
             .expect("nested (1,1)");
         assert!(!leaf.objects);
+    }
+
+    #[test]
+    fn cell_boxes_paragraph_blocks_preserve_nested_reading_order_507() {
+        use hwp_model::prelude::{Block, Inline, Paragraph, Run};
+        let mut doc = doc_with_nested_table();
+        if let Block::Table(t) = &mut doc.sections[0].blocks[1] {
+            let cell = t
+                .cells
+                .iter_mut()
+                .find(|c| c.row == 0 && c.col == 0)
+                .unwrap();
+            cell.blocks.push(Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text("after\nlast".into())],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }));
+        }
+        let placed = place(&doc, &[]);
+        let boxes = cell_boxes_placed(&doc, &placed, 0);
+        let outer = boxes
+            .iter()
+            .find(|b| b.path.len() == 1 && b.row == 0 && b.col == 0)
+            .unwrap();
+        assert_eq!(outer.paragraph_blocks, vec![0, 2, 2]);
+        let leaf = boxes
+            .iter()
+            .find(|b| b.path.len() == 2 && b.row == 0 && b.col == 0)
+            .unwrap();
+        assert_eq!(leaf.paragraph_blocks, vec![0]);
     }
 
     #[test]

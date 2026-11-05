@@ -287,6 +287,59 @@ const off = ws.current?.subscribe((c) => c.zoom && redrawZoomLabel()); // zoom �
 - 사이드 패널 안에서는 `api.handle` 이 같은 핸들이다.
 - 읽기 전용 쪽 보기(`HwpPageView`)도 `handleRef` 로 `scrollToPage(page)` · `getPageSize(page)`(배율 1 의 CSS px)를 준다.
 
+#### 주소로 캐럿 지정과 Tab 이동 (#507)
+
+`enableEditing`을 켜고 **문서가 열린 뒤** 핸들의 세 메서드를 호출한다. 주소는 모두 0부터 시작하는 모델 인덱스이며
+쪽 · 확대율 · DOM 좌표를 계산할 필요가 없다. 반환은 `Promise<boolean>`: 성공하면 캐럿을 세우고 화면 안으로 스크롤한 뒤
+IME 입력 면이 포커스를 가진다. 정책(`editable`) 거절 · 주소 불일치 · 기하/쪽 준비 실패는 `false`, 기존 캐럿과 선택은 그대로다.
+문서가 없거나 읽기 전용일 때, IME 조합 중이거나 기존 제자리 편집기가 열려 있을 때도 `false`다.
+
+```tsx
+<HwpWorkspace {...props} enableEditing handleRef={ws} tabNavigation />
+
+await ws.current?.focusCell({ section: 0, block: 1, row: 0, col: 2 }, 0);
+await ws.current?.focusCell({ section: 0, block: 1, row: 0, col: 2, para: 1 }, "end");
+await ws.current?.focusParagraph({ section: 0, block: 3 }, "end");
+await ws.current?.focusNext();                  // 다음 편집 가능 자리
+await ws.current?.focusNext(-1);                // 이전
+await ws.current?.focusNext(1, { wrap: true });  // 끝에서 문서 처음으로 순환(기본 false)
+```
+
+`offset`은 대상 문단 안의 문자 오프셋(기본 0) 또는 `"end"`이고, 숫자는 문단 길이에 맞춰 잘린다.
+칸의 `para`는 기존 캐럿과 같은 `\n` 분리 문단 번호(기본 0)다. 중첩 칸은 바깥 표부터 leaf까지의 **전체** `path`를 준다.
+`block`은 가장 바깥 표, `row` · `col`은 leaf의 주소여야 한다.
+
+```ts
+await ws.current?.focusCell({
+  section: 0, block: 1, row: 0, col: 1,
+  path: [{ block: 1, row: 2, col: 3 }, { block: 4, row: 0, col: 1 }],
+}, "end");
+```
+
+`focusNext`는 구역 → 블록 → 표의 행 · 열 → 칸 안 문단과 중첩 경로 순서로 편집 가능 자리를 찾는다.
+정책이 거절하거나 캐럿을 해소할 수 없는 자리는 건너뛰며, 쪽에 걸친 같은 칸은 중복 방문하지 않는다.
+캐럿이 없으면 `+1`은 첫 자리, `-1`은 마지막 자리부터 시작한다. 주소 열거는 어댑터의 선택 메서드 `cellBoxes`(칸) ·
+`blocksInRect`(본문 문단)를 이용하므로, 없는 기능의 범위는 탐색에 포함되지 않는다.
+현재 엔진의 `cellBoxes`는 `paragraph_blocks`(칸 안 문단 → 원래 블록 번호)를 함께 제공해 문단 사이의 중첩 표도 제 순서에 방문한다.
+이 선택 필드가 없는 구버전/커스텀 어댑터는 담는 칸의 문단들을 먼저 방문한 뒤 중첩 경로로 내려간다. 정확한 혼합 순서가 필요하면
+필드를 제공하거나 `onTabNavigate`로 순서를 지정한다.
+
+`tabNavigation`은 **기본 꺼짐**이다. 켜면 캐럿 입력 중 Tab / Shift+Tab이 다음 / 이전 자리로 이동한다.
+끝에서는 제자리에 머물며, IME 조합 중 · 호스트 입력창의 Tab은 그대로 둔다. 호스트 순서를 쓰려면 콜백을 준다.
+
+```tsx
+import type { FocusTarget } from "@auto-hwp/react";
+
+<HwpWorkspace
+  {...props} enableEditing handleRef={ws} tabNavigation
+  onTabNavigate={({ direction, current }): FocusTarget | null => {
+    return nextAddressInMyOrder(current, direction); // null = 이동 중단, 기본 순서로 폴백하지 않음
+  }}
+/>
+```
+
+콜백이 돌려준 주소도 같은 편집 정책을 통과해야 한다. 콜백은 Tab에만 적용되며, 직접 부른 `focusNext()`는 문서 순서를 쓴다.
+
 #### 값을 그리는 크롬 — `onReady` + `useWorkspaceState`
 
 단추의 켜짐/꺼짐 · 배율 · 쪽 표시처럼 **값을 그리는** 호스트 크롬은 핸들을 상태로 받고(`onReady`) react 층 훅

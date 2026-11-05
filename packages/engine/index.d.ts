@@ -114,6 +114,9 @@ export interface CellBoxItem {
   col: number;
   path: CellAddr[];
   text: string;
+  /** #507 — editor paragraph segment → original block index in the cell, for nested reading order.
+   *  Empty = no paragraph text target; absent on older engines. */
+  paragraph_blocks?: number[];
   /** The cell holds something that is not paragraph text (a nested table, …) — empty `text` does not mean an empty cell. */
   objects: boolean;
   x: number;

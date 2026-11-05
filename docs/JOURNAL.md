@@ -3,6 +3,11 @@
 > 세션 시작: 최근 항목 1~2개 확인. 세션 종료: **맨 위에** 5줄 이내 항목 추가. 기존 항목 수정 금지.
 > 결정·증거·계획의 정본이 아니다 — "무엇을 하다 어디서 멈췄나"만 기록한다.
 
+## 2026-11-05 · #507 — 주소 캐럿 · 편집 가능 자리 이동 (Codex, 미커밋)
+- 한 일: focusCell/focusParagraph/focusNext · Tab/호스트 순서 · IME/스크롤 · 명령 직렬화, 중첩 혼합 순서용 paragraph_blocks, 문서/신규 시험 35건.
+- 확인: quick · wasm/223칸 · 오라클 82 · core 309/react 499/ai 65/lab 252/proxy 11 통과. platform #460 직접 수집 실패/스냅샷 14 통과, 추가 typecheck core 2/react 16 오류는 HEAD와 동일.
+- 다음: 리드 리뷰 · 실제 업로드/API/Tab/IME/중첩/가상화 브라우저 QA. 사용자 지시로 커밋/푸시/PR/발행·사고 주입·브라우저 e2e 미실행.
+
 ## 2026-10-24 · 0.0.18 — Trusted Publishing 첫 발행 · #491 머지 (#494 · #495 · #498)
 
 - 한 일: 토큰 만료(E401) → `publish.yml` 을 OIDC 로(#495) · 오너 npm 설정 뒤 교환 4/4 → #495 머지 → 0.0.18 발행(run 40010031720, provenance) · #491 rebase · `--full` · 머지.

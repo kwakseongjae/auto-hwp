@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ActiveCaret, EditorCore, RunStyle } from "@auto-hwp/editor-core";
 import type { CompositionStore } from "../composition";
 import { isEditableTarget } from "../viewport";
@@ -62,6 +63,9 @@ export interface ImeCompositionLayerProps {
   /** Commit the composed string as ONE SetTableCellRuns undo unit — the host wraps it with trap/toast
    *  recovery, so this layer stays free of engine-error policy (it just forwards `compositionend.data`). */
   commit: (text: string) => void;
+  /** #507 — an explicit address-focus command may claim input from host controls. Ordinary caret
+   *  changes keep the existing no-focus-stealing guard. Set only after the target page is ready. */
+  focusRequest?: { current: number | null };
 }
 
 /// ImeCompositionLayer — Korean (and any IME) INLINE composition for the cell text caret (issue 059).
@@ -87,7 +91,7 @@ export interface ImeCompositionLayerProps {
 ///
 /// Presence (textarea/preview mount) rides a `useState` (rare); position + composing text are ref writes, so
 /// a composition never re-renders the workspace or the SVG sheets (the render-0 counters lock this).
-export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCompositionLayerProps) {
+export function ImeCompositionLayer({ core, page, scale, store, commit, focusRequest }: ImeCompositionLayerProps) {
   const [active, setActive] = useState(false); // caret is on THIS page → textarea present + focused
   const [composing, setComposing] = useState(false); // a composition is live → preview present
   const activeRef = useRef(false); // live mirror so a same-value caret move never calls setState
@@ -161,13 +165,13 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
 
   // Claim focus from "nowhere" (body/null) so composition can start — but NEVER steal it from a real
   // editable surface (chat composer / size input / menu) or mid-composition (055 lesson: consistent guard).
-  const ensureFocusRef = useRef<() => void>(() => {});
-  ensureFocusRef.current = () => {
+  const ensureFocusRef = useRef<(explicit?: boolean) => void>(() => {});
+  ensureFocusRef.current = (explicit = false) => {
     const ta = taRef.current;
     if (!ta || composingRef.current) return;
     const ae = document.activeElement;
     if (ae === ta) return;
-    if (ae && ae !== document.body && isEditableTarget(ae)) return;
+    if (!explicit && ae && ae !== document.body && isEditableTarget(ae)) return;
     try {
       ta.focus({ preventScroll: true });
     } catch {
@@ -179,19 +183,23 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
   useEffect(() => {
     const onCaret = (s: ActiveCaret | null) => {
       const mine = !!s && s.rect.page === page;
+      const explicit = mine && focusRequest?.current === page;
       pendingRef.current = mine ? s : null;
       if (activeRef.current !== mine) {
         activeRef.current = mine;
-        setActive(mine);
+        // An imperative focus promise must not resolve before its textarea exists. This path runs only
+        // for an explicit command, after page preparation; normal glyph moves remain render-0.
+        if (explicit) flushSync(() => setActive(mine));
+        else setActive(mine);
       }
       if (mine) {
         flushRef.current();
-        ensureFocusRef.current();
+        ensureFocusRef.current(explicit);
       }
     };
     onCaret(core.caret.get()); // sync on mount / core|page|scale change
     return core.caret.onChange(onCaret);
-  }, [core, page, scale]);
+  }, [core, page, scale, focusRequest]);
 
   // On the first activation the textarea doesn't exist until the next commit; focus + position it once
   // mounted (and re-position on a zoom change while the caret is live).

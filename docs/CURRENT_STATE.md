@@ -1,5 +1,22 @@
 # CURRENT STATE — 단일 복원 지점
 
+- 2026-11-05 · Codex · **#507 구현 완료 · 리드 리뷰/브라우저 QA 대기** (`feat/507-focus-api`, HEAD `e5f31f7`, 전부 미커밋).
+  `WorkspaceHandle.focusCell` · `focusParagraph` · `focusNext(direction, {wrap})`, opt-in `tabNavigation` · `onTabNavigate` 구현.
+  실패 시 캐럿/선택 불변, 성공 시 스크롤/IME 포커스. 기본 순서·중첩 path·칸 안 para·정책 거절 건너뜀·Tab 직후 입력/연속 콜백 직렬화 포함.
+  문단 사이 중첩 표의 정확한 순서를 위해 cellBoxes에 선택 메타데이터 `paragraph_blocks` 추가(Rust session + engine/core 타입, Intent/조판 변경 없음).
+  새 시험 35건(React 21 · core 13 · Rust 1), 초기 React 16건 및 발견한 경계 시험은 구현 전 실패 확인. README/EMBED-GUIDE/CHANGELOG 반영.
+  검증: quick 전체 통과(Rust workspace 993 통과/5 ignored · rhwp 추가 61/1 ignored · 게이트 8/18/24쪽·줄 98.9%+), oracle-sweep 82건(79 채점/3 불가) 통과.
+  --full의 4개 JS 빌드·vitest: core 309 · React 499 · ai 65 · lab 252 · proxy 11 통과, i18n/본문 캐럿 교차검증 통과. platform 직접 실행은 기존 #460(.git 파일) 수집 실패;
+  같은 워크트리 target/507-platform-validation에 소스 그대로 복사한 검증 루트(.git 디렉터리 표식)에서는 원문 시험 14/14 통과. #460 소스는 수정 안 함.
+  추가 typecheck(시험 파일 포함)는 core 2건 · React 16건 실패. 같은 워크트리 target/507-typecheck-baseline에 HEAD를 git archive로 복사해 대조했고 오류 목록이 완전히 동일(기존 시험 타입 설정 결함, 범위 밖).
+  wasm 재빌드+bindgen+wasm-opt132+copy 완료(8,759,974 B), Node 실물 스모크: 8쪽 · 223칸(중첩 10) · 286문단 메타데이터 통과. 로그 /tmp/auto-hwp-507-*.log.
+  의존성 6곳 npm ci 직접 설치. 서브모듈 init 공유 gitdir 생성 제한 → 현 워크트리 external/rhwp + /tmp/auto-hwp-507-rhwp-git로 고정 SHA 준비(소스 수정 없음).
+  사용자 지시로 커밋/푸시/PR/병합/발행·사고 주입·브라우저 e2e 미실행. 리드: `.next` 캐시 삭제 후 apps/hwp-lab에서 `npx playwright test e2e/cell-caret-053.spec.ts e2e/nested-cell-caret-gap.spec.ts e2e/page-virtualization-037.spec.ts` 및 실제 API/Tab/IME 업로드 QA.
+  후속/한계: 기존 #460 · #462, paragraph_blocks 없는 커스텀 어댑터는 담는 칸 문단→중첩 경로 폴백(정확한 혼합 순서는 필드/호스트 콜백 필요).
+  주입 계획(실행 안 함): cellCaret.ts:329/344 정책 검사 제거→policy veto/recheck 시험; focus.ts:49 문단 블록번호 무시→nested interleave 시험;
+  caretRouter.ts:194 명령 직렬화 해제→focus/Tab 직후 입력 시험; HwpWorkspace.tsx:3919 Tab 옵션 게이트·3922 IME 가드·3896 스크롤 각각 제거→Tab off/IME/scroll 시험;
+  ImeCompositionLayer.tsx:192 명시 포커스의 동기 마운트 제거→호스트 input에서 IME focus 시험. 실제 사고 주입은 전혀 안 함.
+
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 

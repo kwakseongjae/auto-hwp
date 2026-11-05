@@ -116,6 +116,20 @@ export function Editor() {
 에디터입니다(그때 `onAiRequest`는 호출되지 않습니다). 오프라인·폐쇄망·엄격 CSP라면 wasm을 직접 서빙하세요 —
 [EMBED-GUIDE §2.2](./docs/EMBED-GUIDE.md#22-오버라이드--자기-호스팅정적-파일-복사). 동작하는 앱은 [`examples/vite-embed`](./examples/vite-embed).
 
+호스트에서 주소로 입력 위치를 정하려면 `WorkspaceHandle`을 받습니다. 문서가 열린 뒤 호출하며, 성공 시 해당 위치로
+스크롤하고 IME 입력 면에 포커스를 줍니다. `editable`이 거절하면 `false`이고 기존 캐럿은 그대로입니다.
+
+```tsx
+const ws = useRef<WorkspaceHandle>(null); // import type { WorkspaceHandle } from "@auto-hwp/react"
+<HwpWorkspace {...props} enableEditing handleRef={ws} tabNavigation />;
+await ws.current?.focusCell({ section: 0, block: 1, row: 0, col: 1 }, "end");
+await ws.current?.focusParagraph({ section: 0, block: 3 }, 0);
+await ws.current?.focusNext(); // 읽는 순서의 다음 편집 가능 자리; -1 = 이전
+```
+
+`tabNavigation`은 기본 꺼짐입니다. 켜면 Tab / Shift+Tab으로 이동하며 IME 조합 중에는 가로채지 않습니다.
+끝에서 돌려면 `focusNext(1, { wrap: true })`, 호스트 순서는 `onTabNavigate`를 씁니다([사용법](./docs/EMBED-GUIDE.md#주소로-캐럿-지정과-tab-이동-507)).
+
 ### AI 호출은 내 서버를 거칩니다 (BYOK)
 
 위 `askAi`가 부르는 `/api/hwp-edit`은 우리 서버가 아니라 직접 띄운 서버입니다. 어떤 모델을 부를지, 키를 어디에 두고

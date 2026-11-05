@@ -99,6 +99,37 @@ you ask for it, so existing hosts are unaffected.
 <HwpWorkspace adapter={adapter} document={doc} onAiRequest={onAiRequest} enableEditing />
 ```
 
+### Address focus and Tab navigation (#507)
+
+```tsx
+import { useRef } from "react";
+import { HwpWorkspace, type WorkspaceHandle } from "@auto-hwp/react";
+
+const ws = useRef<WorkspaceHandle>(null);
+<HwpWorkspace {...props} enableEditing handleRef={ws} tabNavigation />;
+// Call after the document opens. All three methods return Promise<boolean>.
+await ws.current?.focusCell({ section: 0, block: 1, row: 0, col: 1 }, "end");
+await ws.current?.focusParagraph({ section: 0, block: 3 });
+await ws.current?.focusNext(-1); // previous editable target; default direction is +1
+```
+
+Success scrolls the caret into view and focuses IME input. A policy veto, invalid address or unavailable
+geometry/page returns `false` and preserves the caret and selection. Cell addresses accept `para`
+(default 0) and a full nested `path`; `offset` defaults to 0 and clamps to that paragraph's length.
+`focusNext` follows section/block/row/column/cell-paragraph order, skips unavailable or non-editable
+targets, and wraps only with `{ wrap: true }` as its second argument. Without a caret, forward starts
+at the first target and backward at the last. IME composition and an open in-place editor keep input
+ownership, so focus commands return `false` while either is active.
+The engine's optional `cellBoxes().paragraph_blocks` metadata interleaves nested tables with the
+containing cell's paragraphs. Older custom adapters visit the containing text before descendants;
+provide the metadata or a host callback when exact mixed order is needed.
+
+`tabNavigation` defaults to **off**. Enable it for Tab / Shift+Tab navigation while a glyph caret is
+active; composing IME events and host text inputs keep their keys. `onTabNavigate({ direction, current })`
+can return a `FocusTarget` (`kind: "cell"` or `"paragraph"`) to supply the host's order, or `null` to stop
+without falling back. Explicit `focusNext()` always uses document order. See the
+[embed guide](../../docs/EMBED-GUIDE.md#주소로-캐럿-지정과-tab-이동-507) for nested addresses and callbacks.
+
 Each feature is also an **individually importable** component driving a single
 [editor-core](../editor-core) command — you can compose them WITHOUT `HwpWorkspace`:
 
