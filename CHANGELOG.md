@@ -40,6 +40,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.22] — 2026-11-05
+
+4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep. 파괴 변경 없음.
+
 ### 추가 (Added)
 
 - **주소로 캐럿 지정 · 편집 가능 자리 이동 (#507)** — `WorkspaceHandle.focusCell(addr, offset?)` · `focusParagraph(addr, offset?)` ·
