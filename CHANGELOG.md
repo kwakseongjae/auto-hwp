@@ -40,6 +40,16 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 추가 (Added)
+
+- **주소로 캐럿 지정 · 편집 가능 자리 이동 (#507)** — `WorkspaceHandle.focusCell(addr, offset?)` · `focusParagraph(addr, offset?)` ·
+  `focusNext(direction?, { wrap? })`가 `Promise<boolean>`을 반환한다. 정책이 허용하고 기하 · 쪽 준비가 성공한 뒤 캐럿을 옮겨 스크롤하고
+  IME 입력 면에 포커스를 준다. 거절/실패는 기존 캐럿 · 선택을 보존한다. 중첩 칸 `path` · 칸 안 `para` · 오프셋 `"end"` 지원.
+  `cellBoxes`의 선택 필드 `paragraph_blocks`로 칸 안 문단 · 중첩 표의 원래 블록 순서를 보존한다.
+  `tabNavigation`(기본 끔)으로 Tab / Shift+Tab 이동을 켜고, `onTabNavigate`로 호스트 순서를 지정하거나 `null`로 막는다. IME 조합 중에는 가로채지 않는다.
+  *(EN — Added: programmatic cell/paragraph caret focus and reading-order navigation, with opt-in Tab navigation, host order callbacks, nested paths,
+  policy checks, scroll and IME focus. Failed focus preserves the current caret and selection.)*
+
 ---
 
 ## [0.0.21] — 2026-10-28

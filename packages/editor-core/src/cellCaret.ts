@@ -24,6 +24,7 @@ import { clampOffset } from "./caret";
 import { type RangeRect, rectsByProbe, selRange } from "./caretRange";
 import { TypingCoalescer } from "./coalesce";
 import { Emitter } from "./events";
+import { validFocusCell, type FocusCellAddress, type FocusOffset, type PrepareFocus } from "./focus";
 import type { RunStyle } from "./runs";
 import type { EditTarget } from "./editPolicy";
 import type { DocSession } from "./session";
@@ -253,6 +254,7 @@ export class CellCaretController {
   private state: CellCaretState | null = null;
   private changed = new Emitter<CellCaretState | null>();
   private chain: Promise<unknown> = Promise.resolve();
+  private focusVersion = 0;
   /** 마우스 글자 드래그가 현재 셀 문단을 소유하는 동안의 고정 주소. */
   private dragging: Pick<CellCaretAnchor, "section" | "block" | "row" | "col" | "para" | "path"> | null = null;
   /** 포인터 종료 뒤 늦은 cell hit가 드래그 소유권을 되살리지 못하게 하는 취소 세대. */
@@ -272,7 +274,10 @@ export class CellCaretController {
   ) {
     // 기하 캐시는 **레이아웃이 바뀌면 전부 거짓말**이 된다 — 우리 커밋뿐 아니라 바깥의 ⌘Z/AI 적용/문서
     // 교체도 마찬가지다. 세션의 무효화 신호 하나에 묶어 버린다(캐시가 캐럿을 엉뚱한 자리에 그리지 않게).
-    this.session.onLayoutInvalidated(() => this.rectMemo.clear());
+    this.session.onLayoutInvalidated(() => {
+      this.rectMemo.clear();
+      this.focusVersion++;
+    });
   }
 
   /** Whether this backend can answer cell caret queries at all (018: absent methods = feature off). */
@@ -290,6 +295,7 @@ export class CellCaretController {
 
   /** Drop the caret (Escape / focus loss / document swap). Emits only when something was cleared. */
   clear(): void {
+    this.focusVersion++;
     this.dragGeneration++;
     this.dragging = null;
     this.rectMemo.clear();
@@ -310,6 +316,36 @@ export class CellCaretController {
     const p = this.chain.then(fn);
     this.chain = p.catch(() => undefined);
     return p;
+  }
+
+  /** #507 — address-first entry. Resolve everything before publishing; a failed query/policy/page
+   *  preparation never clears the current caret or changes the click-veto flag. */
+  focusAt(addr: FocusCellAddress, offset: FocusOffset = 0, prepare?: PrepareFocus): Promise<CellCaretState | null> {
+    if (!validFocusCell(addr) || !this.supported) return Promise.resolve(null);
+    if (isNestedPath(addr.path) && !this.adapter.blockRunsPath) return Promise.resolve(null);
+    return this.enqueue(async () => {
+      const version = this.focusVersion;
+      const target = cellTarget(addr.section, addr.block, addr, addr.path);
+      if (!this.session.canEdit(target)) return null;
+      const runs = isNestedPath(addr.path)
+        ? await this.adapter.blockRunsPath!(addr.section, addr.path)
+        : await this.adapter.blockRuns!(addr.section, addr.block, addr.row, addr.col);
+      const paras = runsText(runs).split("\n");
+      const para = addr.para ?? 0;
+      if (para >= paras.length) return null;
+      const paraLen = paras[para].length;
+      const at = offset === "end" ? paraLen : clampOffset(offset, paraLen);
+      const anchor: CellCaretAnchor = {
+        section: addr.section, block: addr.block, row: addr.row, col: addr.col,
+        ...(isNestedPath(addr.path) ? { path: addr.path.map((p) => ({ ...p })) } : {}),
+        para, offset: at, selAnchor: at, paraLen,
+      };
+      const rect = await this.adapter.caretRectCell!(anchor.section, anchor.block, anchor.row, anchor.col, para, at, anchor.path);
+      if (!rect || (prepare && !(await prepare(rect))) || version !== this.focusVersion || !this.session.canEdit(target)) return null;
+      this.endDrag();
+      this.typing.reset();
+      return this.publish(anchor, rect);
+    });
   }
 
   /** Resolve a PAGE-LOCAL px click to a cell caret. `null` (and a cleared caret) off any cell text.

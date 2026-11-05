@@ -5,6 +5,7 @@ import "./styles.css";
 // Assembly + components
 export { HwpWorkspace } from "./components/HwpWorkspace";
 export type { HwpWorkspaceProps, WorkspaceDesignSelection, WorkspaceHandle, WorkspaceHandleChange, WorkspaceSidePanel, WorkspaceTextFormat, WorkspaceToolbarItem } from "./components/HwpWorkspace";
+export type { FocusCellAddress, FocusParagraphAddress, FocusTarget, FocusOffset } from "@auto-hwp/editor-core";
 // #482 — React-layer hook over `WorkspaceHandle.subscribe` (pairs with `onReady`).
 export { useWorkspaceState } from "./useWorkspaceState";
 export type { WorkspaceViewState } from "./useWorkspaceState";

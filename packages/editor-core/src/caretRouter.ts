@@ -10,6 +10,9 @@ import type { BodyCaretController } from "./bodyCaret";
 import type { RangeRect } from "./caretRange";
 import type { CellCaretController, ToggleKey } from "./cellCaret";
 import { Emitter } from "./events";
+import { collectFocusTargets, type FocusCellAddress, type FocusOffset, type FocusOrder, type FocusParagraphAddress, type FocusTarget, type PrepareFocus } from "./focus";
+import type { EngineAdapter } from "./adapter";
+import type { DocSession } from "./session";
 import type { RunStyle } from "./runs";
 import type { CellCaretRect } from "./types";
 
@@ -38,11 +41,19 @@ export class CaretRouter {
   /** controller hit-test가 늦게 끝나도 이미 끝난 포인터 세션을 다시 소유하지 못하게 한다. */
   private dragGeneration = 0;
   private changed = new Emitter<ActiveCaret | null>();
+  private commandChain: Promise<unknown> = Promise.resolve();
+  private focusVersion = 0;
+  private focusCancelVersion = 0;
+  private focusTargets: (FocusOrder & { version: number }) | null = null;
 
   constructor(
     private cell: CellCaretController,
     private body: BodyCaretController,
+    private adapter?: EngineAdapter,
+    private session?: DocSession,
   ) {
+    session?.onLayoutInvalidated(() => this.focusVersion++);
+    session?.onDocChange(() => this.focusVersion++);
     this.cell.onChange((s) =>
       this.absorb(
         "cell",
@@ -86,6 +97,8 @@ export class CaretRouter {
 
   /** 두 캐럿 모두 해제(Escape / 문서 교체 / 이미지 선택 등). */
   clear(): void {
+    this.focusVersion++;
+    this.focusCancelVersion++;
     this.endDrag();
     this.cell.clear();
     this.body.clear();
@@ -94,6 +107,8 @@ export class CaretRouter {
   /** 클릭 해소 순서: **셀 먼저**(표 안이 우선 — 기존 053 동작 무회귀), 셀이 아니면 본문 문단.
    *  `extend`(Shift+클릭)는 같은 문단/셀 안에서만 범위가 되고, 그 밖이면 새 캐럿이다. */
   async clickAt(page: number, x: number, y: number, extend = false): Promise<ActiveCaret | null> {
+    this.focusVersion++;
+    this.focusCancelVersion++;
     this.endDrag();
     const inCell = await this.cell.clickAt(page, x, y, extend);
     if (inCell) return this.state;
@@ -106,6 +121,78 @@ export class CaretRouter {
     const inBody = await this.body.clickAt(page, x, y, extend);
     if (!inBody && this.body.lastClickVetoed) this.clear();
     return inBody ? this.state : null;
+  }
+
+  /** #507 — current model address, with no page geometry or selection-range internals. */
+  getTarget(): FocusTarget | null {
+    if (this.active === "cell") {
+      const a = this.cell.get()!.anchor;
+      return { kind: "cell", section: a.section, block: a.block, row: a.row, col: a.col, para: a.para,
+        ...(a.path ? { path: a.path.map((p) => ({ ...p })) } : {}) };
+    }
+    const a = this.active === "body" ? this.body.get()?.anchor : null;
+    return a ? { kind: "paragraph", section: a.section, block: a.block } : null;
+  }
+
+  focusCell(addr: FocusCellAddress, offset: FocusOffset = 0, prepare?: PrepareFocus): Promise<boolean> {
+    return this.enqueueFocus((ready) => this.focusTarget({ kind: "cell", ...addr }, offset, ready), prepare);
+  }
+
+  focusParagraph(addr: FocusParagraphAddress, offset: FocusOffset = 0, prepare?: PrepareFocus): Promise<boolean> {
+    return this.enqueueFocus((ready) => this.focusTarget({ kind: "paragraph", ...addr }, offset, ready), prepare);
+  }
+
+  /** No-caret navigation starts at the first/last candidate for forward/backward direction. */
+  focusNext(direction: 1 | -1 = 1, opts: { wrap?: boolean; navigate?: (current: FocusTarget | null) => FocusTarget | null } = {}, prepare?: PrepareFocus): Promise<boolean> {
+    return this.enqueueFocus(async (ready) => {
+      if (!this.adapter || !this.session || (direction !== 1 && direction !== -1)) return false;
+      if (opts.navigate) {
+        const target = opts.navigate(this.getTarget());
+        return target ? this.focusTarget(target, 0, ready) : false;
+      }
+      if (this.focusTargets?.version !== this.focusVersion) {
+        const version = this.focusVersion;
+        const order = await collectFocusTargets(this.adapter, this.session.pages);
+        if (version !== this.focusVersion) return false;
+        this.focusTargets = { version, ...order };
+      }
+      const { targets, compare } = this.focusTargets;
+      const current = this.getTarget();
+      const ordered = direction === 1 ? targets : [...targets].reverse();
+      const after = current ? ordered.filter((t) => compare(t, current) * direction > 0) : ordered;
+      const candidates = opts.wrap && current
+        ? [...after, ...ordered.filter((t) => compare(t, current) * direction <= 0)]
+        : after;
+      for (const target of candidates) {
+        if (await this.focusTarget(target, 0, ready)) return true;
+      }
+      return false;
+    }, prepare);
+  }
+
+  private async focusTarget(target: FocusTarget, offset: FocusOffset, ready: PrepareFocus): Promise<boolean> {
+    return !!(target.kind === "cell"
+      ? await this.cell.focusAt(target, offset, ready)
+      : await this.body.focusAt(target, offset, ready));
+  }
+
+  private enqueueFocus(fn: (ready: PrepareFocus) => Promise<boolean>, prepare?: PrepareFocus): Promise<boolean> {
+    const cancel = this.focusCancelVersion;
+    return this.enqueueCommand(async () => {
+      if (cancel !== this.focusCancelVersion || !this.session?.getMeta()?.editable) return false;
+      // Preceding typing may have invalidated layout. Start the geometry snapshot only after that
+      // command has settled; subsequent layout/click/clear changes still invalidate this request.
+      const version = this.focusVersion;
+      const ready: PrepareFocus = async (rect) => version === this.focusVersion
+        && (!prepare || await prepare(rect)) && version === this.focusVersion;
+      try { return await fn(ready); } catch { return false; }
+    });
+  }
+
+  private enqueueCommand<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.commandChain.then(fn);
+    this.commandChain = result.catch(() => undefined);
+    return result;
   }
 
   /** #368 — re-check the live caret against the host's edit policy (dynamic predicates). */
@@ -146,85 +233,107 @@ export class CaretRouter {
 
   /** 좌우 이동(문단/셀 문단 안). 살아 있는 캐럿이 없으면 no-op. */
   async move(delta: number): Promise<void> {
-    if (this.active === "cell") await this.cell.move(delta);
-    else if (this.active === "body") await this.body.move(delta);
+    return this.enqueueCommand(async () => {
+      if (this.active === "cell") await this.cell.move(delta);
+      else if (this.active === "body") await this.body.move(delta);
+    });
   }
 
   /** Shift+←/→ — 두 캐럿 공통(같은 `{anchor, focus}` 규약). */
   async extend(delta: number): Promise<void> {
-    if (this.active === "cell") await this.cell.extend(delta);
-    else if (this.active === "body") await this.body.extend(delta);
+    return this.enqueueCommand(async () => {
+      if (this.active === "cell") await this.cell.extend(delta);
+      else if (this.active === "body") await this.body.extend(delta);
+    });
   }
 
   /** Shift+↑/↓ — 줄 단위 범위 확장. **본문 캐럿 전용**(셀은 줄 개념 대신 셀 이동으로 강등되는 기존 동작).
    *  처리했으면 true. */
   async extendLine(delta: number): Promise<boolean> {
-    if (this.active !== "body") return false;
-    await this.body.extendLine(delta);
-    return true;
+    return this.enqueueCommand(async () => {
+      if (this.active !== "body") return false;
+      await this.body.extendLine(delta);
+      return true;
+    });
   }
 
   /** ⌘A — 캐럿이 든 문단(셀 문단) 전체 선택. 캐럿이 없으면 false(호출자가 브라우저 기본동작에 양보). */
   async selectAll(): Promise<boolean> {
-    if (this.active === "cell") return !!(await this.cell.selectAll());
-    if (this.active === "body") return !!(await this.body.selectAll());
-    return false;
+    return this.enqueueCommand(async () => {
+      if (this.active === "cell") return !!(await this.cell.selectAll());
+      if (this.active === "body") return !!(await this.body.selectAll());
+      return false;
+    });
   }
 
   /** ⌘B/⌘I — 선택 **범위에만** 서식 토글(범위 없으면 false). 셀=SetTableCellRuns / 본문=SetParagraphRuns. */
   async toggleStyle(key: ToggleKey): Promise<boolean> {
-    if (this.active === "cell") return this.cell.toggleStyle(key);
-    if (this.active === "body") return this.body.toggleStyle(key);
-    return false;
+    return this.enqueueCommand(async () => {
+      if (this.active === "cell") return this.cell.toggleStyle(key);
+      if (this.active === "body") return this.body.toggleStyle(key);
+      return false;
+    });
   }
 
   /** Enter — **본문 캐럿 전용** 문단 분리(`SplitParagraph`). 셀의 Enter 는 기존대로 "\n" 삽입이라
    *  호출자가 `insertText("\n")` 을 쓴다(다문단 셀 처리가 이미 있다). 처리했으면 true. */
   async splitParagraph(): Promise<boolean> {
-    if (this.active !== "body") return false;
-    return this.body.splitParagraph();
+    return this.enqueueCommand(async () => {
+      if (this.active !== "body") return false;
+      return this.body.splitParagraph();
+    });
   }
 
   /** 위/아래 줄 이동 — **본문 캐럿 전용**(셀은 036 셀 이동으로 강등되는 기존 동작을 지킨다).
    *  처리했으면 true(호출자가 기본동작을 막는다), 아니면 false(호출자가 셀 이동으로 넘긴다). */
   async moveLine(delta: number): Promise<boolean> {
-    if (this.active !== "body") return false;
-    await this.body.moveLine(delta);
-    return true;
+    return this.enqueueCommand(async () => {
+      if (this.active !== "body") return false;
+      await this.body.moveLine(delta);
+      return true;
+    });
   }
 
   /** Home/End — 셀은 현재 시각 줄의 처음/끝(leaf 줄정보, issue #48). 본문은 v1로 문단
    *  처음/끝으로 이동한다 — 시각 줄 경계 이동은 #52 후속. */
   async moveToLineEnd(which: "start" | "end"): Promise<boolean> {
-    if (this.active === "cell") return !!(await this.cell.moveToLineEnd(which));
-    if (this.active === "body") {
-      const a = this.body.get()?.anchor;
-      if (!a) return false;
-      await this.body.move(which === "start" ? -a.offset : a.paraLen - a.offset);
-      return true;
-    }
-    return false;
+    return this.enqueueCommand(async () => {
+      if (this.active === "cell") return !!(await this.cell.moveToLineEnd(which));
+      if (this.active === "body") {
+        const a = this.body.get()?.anchor;
+        if (!a) return false;
+        await this.body.move(which === "start" ? -a.offset : a.paraLen - a.offset);
+        return true;
+      }
+      return false;
+    });
   }
 
   async insertText(text: string): Promise<boolean> {
-    if (this.active === "cell") return this.cell.insertText(text);
-    if (this.active === "body") return this.body.insertText(text);
-    return false;
+    return this.enqueueCommand(async () => {
+      if (this.active === "cell") return this.cell.insertText(text);
+      if (this.active === "body") return this.body.insertText(text);
+      return false;
+    });
   }
 
   /** 평문 붙여넣기. 셀/본문 모두 개행을 bare run separator로 보존하며, 각각
    *  SetTableCellRuns / SetParagraphRuns 한 번으로 커밋된다(한 paste = 한 engine undo). */
   async pasteText(text: string): Promise<boolean> {
     const normalized = text.replace(/\r\n?/g, "\n");
-    if (this.active === "cell") return this.cell.insertText(normalized);
-    if (this.active === "body") return this.body.pasteText(normalized);
-    return false;
+    return this.enqueueCommand(async () => {
+      if (this.active === "cell") return this.cell.insertText(normalized);
+      if (this.active === "body") return this.body.pasteText(normalized);
+      return false;
+    });
   }
 
   async deleteBack(): Promise<boolean> {
-    if (this.active === "cell") return this.cell.deleteBack();
-    if (this.active === "body") return this.body.deleteBack();
-    return false;
+    return this.enqueueCommand(async () => {
+      if (this.active === "cell") return this.cell.deleteBack();
+      if (this.active === "body") return this.body.deleteBack();
+      return false;
+    });
   }
 
   /** 캐럿 자리의 런 스타일(059 IME 미리보기). 읽기 전용 — 캐럿을 건드리지 않는다. */

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Anchor, Box, CellAddr, CellDir, DocContext, EditTarget as PolicyTarget, EngineAdapter, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@auto-hwp/editor-core";
+import type { Anchor, Box, CellAddr, CellDir, DocContext, EditTarget as PolicyTarget, EngineAdapter, FocusCellAddress, FocusOffset, FocusParagraphAddress, FocusTarget, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, PrepareFocus, RunSpec, Selection, TableBox, XYWH } from "@auto-hwp/editor-core";
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize, DRAG_THRESHOLD_PX, intentGhosts } from "@auto-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
@@ -295,6 +295,14 @@ export interface WorkspaceHandle {
   getPage(): { current: number; count: number };
   /** Scroll the canvas to a page (0-based) — the same lane as the outline and `jumpToPage`. */
   scrollToPage(page: number): void;
+  /** #507 — place a glyph caret at a model address (offset defaults to 0, clamped to the paragraph).
+   *  Success scrolls the target into view and focuses IME input. Policy/geometry/preparation failure
+   *  returns false without changing caret or selection. Requires enableEditing and an editable document. */
+  focusCell(addr: FocusCellAddress, offset?: FocusOffset): Promise<boolean>;
+  focusParagraph(addr: FocusParagraphAddress, offset?: FocusOffset): Promise<boolean>;
+  /** Next/previous editable cell paragraph or body paragraph in reading order. No wrap by default;
+   *  without a caret, starts at the first/last target. */
+  focusNext(direction?: 1 | -1, opts?: { wrap?: boolean }): Promise<boolean>;
   /** Undo/redo one batch — the toolbar's lane (same toast). Resolves `true` when something changed. */
   undo(): Promise<boolean>;
   redo(): Promise<boolean>;
@@ -431,6 +439,12 @@ export interface HwpWorkspaceProps {
    *  `enableEditing` + 편집 가능 문서일 때만 그린다. 정책이 없으면(`editable` 미지정) 편집 가능한 모든 곳이 표시된다. 정책 답이 바뀌면
    *  `editable` 에 새 함수를 주거나 `core.invalidateEditability()` 를 부른다(둘 다 다시 잰다) */
   showEditableRegions?: ShowEditableRegions;
+  /** #507 — opt-in Tab/Shift+Tab navigation while a glyph caret owns input. Default off. IME composition
+   *  and host text inputs keep their keys. At a document boundary the caret stays in place. */
+  tabNavigation?: boolean;
+  /** Override Tab's reading order. Return a model address, or null to block navigation (no fallback).
+   *  Explicit handle.focusNext() always uses the engine's reading order. */
+  onTabNavigate?: (info: { direction: 1 | -1; current: FocusTarget | null }) => FocusTarget | null;
   /** #511 — 영역마다 클래스를 덧붙인다(`string`) · 그리지 않는다(`null`). 호스트의 「빈 칸」 판정 · 칸 종류 구분에 쓴다. 이 함수의 **참조가
    *  바뀌면 다시 잰다** — 렌더마다 새 함수를 주지 말고 `useCallback` 으로 안정되게 두고, 문서 밖 상태가 바뀌었을 때만 새 함수를 준다 */
   regionClass?: RegionClass;
@@ -855,6 +869,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const compositionRef = useRef<CompositionStore | null>(null);
   if (compositionRef.current == null) compositionRef.current = new CompositionStore();
   const compositionStore = compositionRef.current;
+  const imeFocusRequestRef = useRef<number | null>(null);
   // Down-point of the current pointer gesture (client px) — a caret is placed only on a PLAIN CLICK
   // (movement under the drag threshold), never at the end of a marquee/drag.
   const caretDownRef = useRef<{ x: number; y: number } | null>(null);
@@ -3838,8 +3853,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   currentPageRef.current = currentPage;
   const designSelectionRef = useRef(designSelection);
   designSelectionRef.current = designSelection;
-  const handleLive = useRef({ core, undo, redo, toast, onTrap, msg });
-  handleLive.current = { core, undo, redo, toast, onTrap, msg };
+  const handleLive = useRef({ core, undo, redo, toast, onTrap, msg, editingOn, onTabNavigate: props.onTabNavigate });
+  handleLive.current = { core, undo, redo, toast, onTrap, msg, editingOn, onTabNavigate: props.onTabNavigate };
   const pageViewHandleRef = useRef<PageViewHandle | null>(null);
   const handleListenersRef = useRef(new Set<(change: WorkspaceHandleChange) => void>());
   const emitHandle = useCallback((change: WorkspaceHandleChange) => {
@@ -3851,6 +3866,69 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       }
     });
   }, []);
+  const focusActions = useMemo(() => {
+    // Enter the core command queue synchronously, so a key immediately after Tab queues behind it.
+    const run = async (command: (live: typeof handleLive.current, prepare: PrepareFocus) => Promise<boolean>): Promise<boolean> => {
+      const requestedCore = handleLive.current.core;
+      const live = handleLive.current;
+      const allowed = () => handleLive.current.core === requestedCore && handleLive.current.editingOn
+        && !!requestedCore.session.getMeta()?.editable && !!canvasRef.current?.isConnected
+        && !editorRef.current && compositionStore.get() == null;
+      if (!allowed()) return false;
+      const prepare: PrepareFocus = async (rect) => {
+        if (!allowed() || rect.page < 0 || rect.page >= requestedCore.session.pages) return false;
+        const svg = () => canvasRef.current?.querySelector(`.hw-sheet[data-page="${rect.page}"] svg`);
+        if (!svg()) {
+          scrollPageIntoView(rect.page, "auto"); // the wrapper also exists for a virtualized page
+          for (let frame = 0; frame < 20 && !svg() && allowed(); frame++) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          }
+        }
+        if (!allowed() || !svg()) return false;
+        imeFocusRequestRef.current = rect.page;
+        return true;
+      };
+      try {
+        if (!(await command(live, prepare))) return false;
+        // The isolated IME layer mounts and claims input synchronously on explicit publication.
+        requestedCore.selection.clear();
+        const caret = requestedCore.caret.get()!;
+        scrollCellIntoView(caret.rect.page, { x: caret.rect.x, y: caret.rect.top, w: 1, h: caret.rect.height });
+        const input = canvasRef.current?.querySelector<HTMLTextAreaElement>(`.hw-sheet-wrap[data-page="${caret.rect.page}"] [data-hw-ime-input]`);
+        input?.focus({ preventScroll: true });
+        return true;
+      } catch {
+        return false;
+      } finally {
+        imeFocusRequestRef.current = null;
+      }
+    };
+    return {
+      focusCell: (addr: FocusCellAddress, offset?: FocusOffset) => run((live, prepare) => live.core.caret.focusCell(addr, offset, prepare)),
+      focusParagraph: (addr: FocusParagraphAddress, offset?: FocusOffset) => run((live, prepare) => live.core.caret.focusParagraph(addr, offset, prepare)),
+      focusNext: (direction: 1 | -1 = 1, opts?: { wrap?: boolean }) => run((live, prepare) => live.core.caret.focusNext(direction, opts, prepare)),
+      tab: (direction: 1 | -1) => run((live, prepare) => {
+        if (!live.onTabNavigate) return live.core.caret.focusNext(direction, undefined, prepare);
+        return live.core.caret.focusNext(direction, {
+          navigate: (current) => live.onTabNavigate!({ direction, current }),
+        }, prepare);
+      }),
+    };
+  }, [compositionStore, scrollPageIntoView, scrollCellIntoView]);
+  useEffect(() => {
+    if (!props.tabNavigation || !editingOn || !canEdit) return;
+    const keydown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.key !== "Tab" || e.metaKey || e.ctrlKey || e.altKey || !core.caret.get()) return;
+      if (e.isComposing || e.keyCode === 229 || compositionStore.get() != null || editorRef.current) return;
+      if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
+      // An unrelated workspace on the same page must not consume this canvas's Tab.
+      if (e.target instanceof Element && !canvasRef.current?.contains(e.target)) return;
+      e.preventDefault();
+      void focusActions.tab(e.shiftKey ? -1 : 1);
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, [props.tabNavigation, editingOn, canEdit, core, compositionStore, focusActions]);
   const handle = useMemo<WorkspaceHandle>(() => {
     const history = async (isRedo: boolean): Promise<boolean> => {
       const live = handleLive.current;
@@ -3890,6 +3968,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       },
       getPage: () => ({ current: currentPageRef.current, count: metaRef.current?.pages ?? 0 }),
       scrollToPage: (page) => scrollPageIntoView(page),
+      focusCell: focusActions.focusCell,
+      focusParagraph: focusActions.focusParagraph,
+      focusNext: focusActions.focusNext,
       undo: () => history(false),
       redo: () => history(true),
       canUndo: () => handleLive.current.core.session.canUndo(),
@@ -3913,7 +3994,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         };
       },
     };
-  }, [zoomToCenter, scrollPageIntoView, compositionStore]);
+  }, [zoomToCenter, scrollPageIntoView, compositionStore, focusActions]);
   useImperativeHandle(props.handleRef, () => handle, [handle]);
   // #482 — `onReady` once per mounted handle. Refs survive StrictMode's simulated remount, so the guard keeps
   // the dev double-effect from firing it twice; a real remount is a new instance and fires again.
@@ -4250,7 +4331,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         + the compositionView overlay. Same isolation as CaretLayer: a composition never
                         re-renders the workspace/sheets (position + composing text are ref writes). */}
                     {editingOn && canEdit && (
-                      <ImeCompositionLayer core={core} page={page} scale={scale} store={compositionStore} commit={commitComposition} />
+                      <ImeCompositionLayer core={core} page={page} scale={scale} store={compositionStore} commit={commitComposition} focusRequest={imeFocusRequestRef} />
                     )}
                     {editingOn && editTarget && editTarget.page === page && editTarget.boundaries && editTarget.tableBox && canEditTarget({ kind: "block", section: editTarget.section, block: editTarget.block, intent: "SetTableColWidths" }) && (
                       <ColumnResizeOverlay

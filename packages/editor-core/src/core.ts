@@ -45,7 +45,7 @@ export class EditorCore {
     this.find = new FindController(adapter, this.session);
     this.cellCaret = new CellCaretController(adapter, this.session);
     this.bodyCaret = new BodyCaretController(adapter, this.session);
-    this.caret = new CaretRouter(this.cellCaret, this.bodyCaret);
+    this.caret = new CaretRouter(this.cellCaret, this.bodyCaret, adapter, this.session);
     // #368 — a new/changed edit policy re-checks the live caret.
     this.session.onEditabilityChange(() => this.caret.revalidate());
   }

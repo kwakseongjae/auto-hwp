@@ -96,6 +96,7 @@ export {
   styleRunRange,
 } from "./cellCaret";
 export type { CellCaretAnchor, CellCaretState, ToggleKey } from "./cellCaret";
+export type { FocusCellAddress, FocusParagraphAddress, FocusTarget, FocusOffset, PrepareFocus } from "./focus";
 
 // 본문 문단 캐럿 — 셀 밖 문단의 클릭/이동/타이핑(SetParagraphRuns 커밋) + 페이지 SVG 글리프 ↔ 모델 문자
 // 정렬의 순수 헬퍼(정렬 실패 = null, 018).

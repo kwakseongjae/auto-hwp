@@ -30,6 +30,7 @@ import { type RangeRect, rectsFromCharBoxes, selRange } from "./caretRange";
 import { TypingCoalescer } from "./coalesce";
 import { inheritStyleAt, rangeHasStyle, runsText, spliceRuns, styleRunRange, type ToggleKey } from "./cellCaret";
 import { Emitter } from "./events";
+import { validFocusAddress, type FocusOffset, type FocusParagraphAddress, type PrepareFocus } from "./focus";
 import type { RunStyle } from "./runs";
 import type { DocSession } from "./session";
 import type { BlockHit, CellCaretRect, Intent, RunSpec } from "./types";
@@ -351,11 +352,14 @@ export class BodyCaretController {
   /** 현재 문단의 문자 박스 캐시 — 방향키 이동은 이걸로 즉답(엔진 왕복 0). 커밋 때 갱신된다. */
   private boxes: CharBox[] | null = null;
   private page = 0;
+  private focusVersion = 0;
 
   constructor(
     private adapter: EngineAdapter,
     private session: DocSession,
-  ) {}
+  ) {
+    this.session.onLayoutInvalidated(() => this.focusVersion++);
+  }
 
   /** 이 백엔드가 본문 캐럿을 답할 수 있는가(018: 없는 메서드 = 기능 off). */
   get supported(): boolean {
@@ -373,6 +377,7 @@ export class BodyCaretController {
 
   /** 캐럿 제거(Escape / 포커스 상실 / 문서 교체). 실제로 지워질 때만 emit. */
   clear(): void {
+    this.focusVersion++;
     this.dragGeneration++;
     this.dragging = false;
     this.boxes = null;
@@ -392,6 +397,34 @@ export class BodyCaretController {
     const p = this.chain.then(fn);
     this.chain = p.catch(() => undefined);
     return p;
+  }
+
+  /** #507 — find a model paragraph's own-render band and resolve its existing glyph lane. No state
+   *  changes until geometry and shell preparation both succeed (including empty paragraphs). */
+  focusAt(addr: FocusParagraphAddress, offset: FocusOffset = 0, prepare?: PrepareFocus): Promise<BodyCaretState | null> {
+    if (!validFocusAddress(addr) || !this.supported || !this.adapter.blocksInRect) return Promise.resolve(null);
+    return this.enqueue(async () => {
+      const version = this.focusVersion;
+      const target = { kind: "paragraph" as const, section: addr.section, block: addr.block, intent: "SetParagraphRuns" };
+      if (!this.session.canEdit(target)) return null;
+      for (let page = 0; page < this.session.pages; page++) {
+        const bands = await this.adapter.blocksInRect!(page, 0, 0, 1e6, 1e6);
+        const band = bands.find((b) => b.section === addr.section && b.block === addr.block && b.kind === "paragraph" && b.editable && b.h > 1);
+        if (!band) continue;
+        const geo = await this.resolve(page, band);
+        if (!geo) continue;
+        const at = offset === "end" ? geo.text.length : clampOffset(offset, geo.text.length);
+        const rect = bodyCaretRectAt(geo.boxes, at, page);
+        if (!rect || (prepare && !(await prepare(rect))) || version !== this.focusVersion || !this.session.canEdit(target)) return null;
+        this.endDrag();
+        this.typing.reset();
+        this.boxes = geo.boxes;
+        this.page = page;
+        this.emit({ section: addr.section, block: addr.block, offset: at, selAnchor: at, paraLen: geo.text.length });
+        return this.state;
+      }
+      return null;
+    });
   }
 
   /** 문단 밴드 + 모델 텍스트 + 페이지 SVG를 읽어 문자 박스를 만든다. 정렬 실패 = null(018).
