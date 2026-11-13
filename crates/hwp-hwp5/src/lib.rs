@@ -21,6 +21,7 @@ pub use probe::{
     StructuralDelta, StructuralInventory,
 };
 pub use record::{walk_records, Record, RecordError, RecordLimits};
+pub use semantic::page_numbers::{OwnedPageNumberMark, OwnedSectionPageNumbers, PageNumberSite};
 
 use hwp_model::document::SemanticDoc;
 use thiserror::Error;
@@ -129,5 +130,13 @@ impl OwnHwp5Parser {
 
     pub fn parse(&self, bytes: &[u8]) -> Result<SemanticDoc> {
         semantic::parse_text_only(bytes)
+    }
+
+    /// 쪽 번호 전용 추출 — 문서 전체 엄격 파싱이 실패하는 문서에서도 쪽 번호 제어만 읽는다. 구역마다
+    /// 하나씩. 받지 않는 자리 · 읽을 수 없는 값은 오류가 아니라 그 구역의 끈 이유(`facts.off`)로 남는다. 오류는
+    /// 문서를 받지 않을 때다(배포용 · 암호 문서, 한도 초과, 구역 번호 불연속, CFB · 압축 · 레코드를 엄격하게
+    /// 읽지 못함, 읽는 레코드가 짧음 — `semantic/page_numbers.rs` 머리 참고).
+    pub fn page_numbers(&self, bytes: &[u8]) -> Result<Vec<OwnedSectionPageNumbers>> {
+        semantic::page_numbers::page_number_controls(bytes)
     }
 }

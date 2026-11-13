@@ -44,6 +44,9 @@ RULE_DPI = 72
 RULE_MIN_PX = 30  # ~10.6 mm at 72 dpi
 RULE_DARK = 140
 PAGE_NUMBER = re.compile(r"^[-–—\s]*\d{1,3}[-–—\s]*$|^\d{1,3}\s*/\s*\d{1,3}$")
+# a dash-wrapped number inside a longer band line (body text that ran into the footer band joins it).
+# No digit or dash may touch it, so dates (2026-11-13) and phone numbers (02-123-4567) never match.
+DASHED_NUMBER = re.compile(r"(?<![\d\-–—])[-–—]\s*(\d{1,3})\s*[-–—](?![\d\-–—])")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -207,14 +210,35 @@ def text_loss(ref_pages: list[dict], cand_pages: list[dict], ir_text: str | None
     return out
 
 
-def page_numbers(pages: list[dict]) -> int:
-    count = 0
+def page_number_values(pages: list[dict]) -> list[str | None]:
+    """Per page, the page number printed in the header/footer band (digits, `a/b` kept) or None.
+
+    A band line that is only the number wins; otherwise a dash-wrapped number inside a longer band line
+    (our body text can run into the footer band and pdftotext then reads both as one line)."""
+    values = []
     for page in pages:
         band = [l["text"].strip() for l in page["lines"]
                 if (l["y0"] + l["y1"]) / 2 < BAND * page["h"] or (l["y0"] + l["y1"]) / 2 > (1 - BAND) * page["h"]]
-        if any(PAGE_NUMBER.match(t) for t in band):
-            count += 1
-    return count
+        exact = [re.sub(r"[^0-9/]", "", t) for t in band if PAGE_NUMBER.match(t)]
+        dashed = [m.group(1) for t in band for m in [DASHED_NUMBER.search(t)] if m]
+        values.append((exact or dashed or [None])[-1])
+    return values
+
+
+def page_numbers(pages: list[dict]) -> int:
+    return sum(value is not None for value in page_number_values(pages))
+
+
+def page_number_sequence(ref: list[str | None], cand: list[str | None]) -> dict:
+    """Compare page-number VALUES page by page (a page count alone scores `1 2 1 2` like `1 2 3 4`).
+
+    `equal`: same values on every page and the same page count. `common_equal`: same values on every page
+    both PDFs have (ours may run longer/shorter — that is pagination, reported elsewhere)."""
+    compared = min(len(ref), len(cand))
+    same = sum(ref[i] == cand[i] for i in range(compared))
+    return {"ref": sum(v is not None for v in ref), "cand": sum(v is not None for v in cand),
+            "compared_pages": compared, "same_value_pages": same,
+            "common_equal": compared > 0 and same == compared, "equal": ref == cand}
 
 
 def line_geometry(ref_pages: list[dict], cand_pages: list[dict], pages: list[int]) -> dict:
@@ -430,7 +454,9 @@ def measure_pair(pair: dict, out: Path, cli: str, registry: str, skip_visual: bo
     res["alignment"] = align
     scored_pages = (list(range(1, res["ref_pages"] + 1)) if res["cand_pages"] == res["ref_pages"]
                     else align["aligned_pages"])
-    res["page_numbers"] = {"ref": page_numbers(ref_pages), "cand": page_numbers(cand_pages)}
+    ref_values, cand_values = page_number_values(ref_pages), page_number_values(cand_pages)
+    res["page_numbers"] = page_number_sequence(ref_values, cand_values)
+    res["page_number_values"] = {"ref": ref_values, "cand": cand_values}
     geometry = line_geometry(ref_pages, cand_pages, scored_pages)
     res["line_geometry"] = {k: v for k, v in geometry.items() if k not in ("dy_abs", "dx_abs")}
     res["_dy_abs"], res["_dx_abs"] = geometry.get("dy_abs", []), geometry.get("dx_abs", [])
@@ -518,6 +544,10 @@ def summarize(results: list[dict]) -> tuple[dict, str]:
         "broken_glyph_docs": sum((r["text"]["cand_replacement_chars"] + r["text"]["cand_private_use_chars"]) > 0 for r in ok),
         "page_number_docs_ref": sum(r["page_numbers"]["ref"] > 0 for r in ok),
         "page_number_docs_both": sum(r["page_numbers"]["ref"] > 0 and r["page_numbers"]["cand"] > 0 for r in ok),
+        "page_number_docs_values_equal": sum(r["page_numbers"]["ref"] > 0 and bool(r["page_numbers"].get("equal"))
+                                             for r in ok),
+        "page_number_docs_common_pages_equal": sum(r["page_numbers"]["ref"] > 0
+                                                   and bool(r["page_numbers"].get("common_equal")) for r in ok),
         "matched_lines": len(dy),
         "dy_abs_median_pt": statistics.median(dy) if dy else None,
         "dy_within_2pt": (sum(v <= 2 for v in dy) / len(dy)) if dy else None,
@@ -526,7 +556,7 @@ def summarize(results: list[dict]) -> tuple[dict, str]:
         "ink_f1_p10_p25_p50_p75_p90": quantiles(inks),
     }
     lines = ["| label | group | pages ours/ref | typeset/lineseg pages · body/cell lines exact | first divergent page | "
-             "Hangul missing IR · PDF | page numbers ref/ours | line dy median | lines within 2pt | "
+             "Hangul missing IR · PDF | page numbers ref/ours · same value pages | line dy median | lines within 2pt | "
              "ink F1 median (min) · pages | v/h rules 2px | v rules 6px · h-rule count same | clipped |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
@@ -549,13 +579,20 @@ def summarize(results: list[dict]) -> tuple[dict, str]:
         lines.append(
             f"| {r['label']} | {r['group']} | {r['cand_pages']}/{r['ref_pages']}{mark} | {lc_cell} | "
             f"{r['alignment']['first_divergent_page'] or '–'} | {_fmt(text.get('missing_ir'), pct=True)} · "
-            f"{_fmt(text.get('missing_pdf'), pct=True)} | {r['page_numbers']['ref']}/{r['page_numbers']['cand']} | "
+            f"{_fmt(text.get('missing_pdf'), pct=True)} | {r['page_numbers']['ref']}/{r['page_numbers']['cand']}"
+            f"{_page_number_same(r['page_numbers'])} | "
             f"{_fmt(geo.get('dy_abs_median_pt'), 1)}pt | {_fmt(geo.get('dy_within_2pt'), pct=True)} | {ink} | "
             f"{_fmt(statistics.mean(vr) if vr else None)}/{_fmt(statistics.mean(hr) if hr else None)} | "
             f"{_fmt(ts['v_rule_recall_6px_mean'])} · {ts['h_rule_count_same_pages']}/{ts['h_rule_count_pages']} | "
             f"{_fmt(r.get('clipped_regions'))} |")
     head = [f"- {k}: {_fmt(v, 3) if isinstance(v, float) else v}" for k, v in totals.items()]
     return totals, "\n".join(["# Hancom-PDF parity sweep (report-only)", "", *head, "", *lines, ""])
+
+
+def _page_number_same(numbers: dict) -> str:
+    if "compared_pages" not in numbers or not (numbers["ref"] or numbers["cand"]):
+        return ""
+    return f" · {numbers['same_value_pages']}/{numbers['compared_pages']}"
 
 
 def public_view(result: dict) -> dict:

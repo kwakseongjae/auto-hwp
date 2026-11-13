@@ -56,16 +56,220 @@ impl Engine {
     }
 }
 
-/// Merge the one bounded HWP5 decoration already owned by the strict parser. The candidate parse
-/// must succeed for the whole document, and this helper validates every section before mutating any
-/// section so a topology mismatch or typed conflict cannot leave a partially enriched document.
+/// Enrich the rhwp bootstrap model with strictly owned HWP5 facts, each axis atomically.
+///
+/// - 쪽 번호(S2): the page-number-only owned extraction ([`hwp_hwp5::OwnHwp5Parser::page_numbers`]),
+///   which does NOT need the whole document to parse strictly — real forms fail that parse on
+///   unrelated records (bullets, image fills, section-definition children).
+/// - Table anchor spacing and source line geometry still require the complete strict parse.
 fn enrich_hwp5_owned_page_numbers(bytes: &[u8], target: &mut SemanticDoc) {
+    apply_page_number_extraction(target, hwp_hwp5::OwnHwp5Parser::new().page_numbers(bytes));
     let Ok(owned) = hwp_hwp5::OwnHwp5Parser::new().parse(bytes) else {
         return;
     };
-    merge_owned_page_numbers(target, &owned);
     merge_owned_table_anchor_spacings(target, &owned);
     merge_owned_source_line_geometry(target, &owned);
+}
+
+/// Where an owned page-number mark lands in the rhwp-lifted section: a top-level block, or
+/// `(table block, cell index, block inside the cell)`.
+#[derive(Clone, Copy)]
+enum MarkPath {
+    Top(usize),
+    Cell(usize, usize, usize),
+}
+
+fn paragraph_indices(blocks: &[Block]) -> impl Iterator<Item = usize> + '_ {
+    blocks
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| matches!(block, Block::Paragraph(_)))
+        .map(|(index, _)| index)
+}
+
+/// Resolve an owned site onto the rhwp-lifted blocks: the k-th top-level paragraph, or the cell
+/// paragraph of the t-th table the k-th paragraph hosts (rhwp emits each host paragraph followed by
+/// its tables). `None` when the topology does not line up.
+fn resolve_mark_path(
+    blocks: &[Block],
+    tops: &[usize],
+    site: hwp_hwp5::PageNumberSite,
+) -> Option<MarkPath> {
+    match site {
+        hwp_hwp5::PageNumberSite::Paragraph(paragraph) => {
+            tops.get(paragraph).map(|i| MarkPath::Top(*i))
+        }
+        hwp_hwp5::PageNumberSite::Cell {
+            paragraph,
+            table,
+            row,
+            col,
+            cell_paragraph,
+        } => {
+            let start = *tops.get(paragraph)?;
+            let end = tops.get(paragraph + 1).copied().unwrap_or(blocks.len());
+            let table_index = (start + 1..end)
+                .filter(|index| matches!(blocks[*index], Block::Table(_)))
+                .nth(table)?;
+            let Block::Table(found) = &blocks[table_index] else {
+                return None;
+            };
+            let mut cells = found
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, cell)| cell.active && cell.row == row && cell.col == col);
+            let (cell_index, cell) = cells.next()?;
+            if cells.next().is_some() {
+                return None;
+            }
+            let block_index = paragraph_indices(&cell.blocks).nth(cell_paragraph)?;
+            Some(MarkPath::Cell(table_index, cell_index, block_index))
+        }
+    }
+}
+
+fn mark_paragraph(blocks: &mut [Block], path: MarkPath) -> Option<&mut Paragraph> {
+    let block = match path {
+        MarkPath::Top(index) => blocks.get_mut(index)?,
+        MarkPath::Cell(table, cell, index) => match blocks.get_mut(table)? {
+            Block::Table(found) => found.cells.get_mut(cell)?.blocks.get_mut(index)?,
+            Block::Paragraph(_) => return None,
+        },
+    };
+    match block {
+        Block::Paragraph(paragraph) => Some(paragraph),
+        Block::Table(_) => None,
+    }
+}
+
+/// 쪽 번호 전용 추출 결과를 붙인다. 추출이 실패하면(배포용 · 암호 문서, 한도 초과, CFB · 압축 · 레코드를
+/// 엄격하게 읽지 못함 — rhwp 는 이 중 일부를 연다) 쪽 번호 제어가 있었는지 모른다. 조용히 넘기지 않되, 구역마다
+/// 이유를 달면 쪽 번호가 아예 없는 문서에도 구역 수만큼 알림이 쌓이므로, 번호가 없는 **첫 구역 하나에만**
+/// [`PageNumberOff::SourceUnreadable`] 을 단다(문서 단위 알림 한 건).
+fn apply_page_number_extraction(
+    target: &mut SemanticDoc,
+    extracted: hwp_hwp5::Result<Vec<hwp_hwp5::OwnedSectionPageNumbers>>,
+) -> bool {
+    match extracted {
+        Ok(numbers) => merge_owned_page_number_marks(target, &numbers),
+        Err(_) => {
+            turn_unnumbered_sections_off(
+                target.sections.iter_mut().take(1),
+                PageNumberOff::SourceUnreadable,
+            );
+            false
+        }
+    }
+}
+
+fn turn_unnumbered_sections_off<'a>(
+    sections: impl Iterator<Item = &'a mut Section>,
+    reason: PageNumberOff,
+) {
+    for section in sections.filter(|section| section.page_number.is_none()) {
+        section.page_number_off = Some(reason);
+    }
+}
+
+/// Resolve every owned mark of one numbered section onto the rhwp-lifted blocks; `None` when the
+/// topology does not line up or a target paragraph already carries marks.
+fn plan_section_marks(
+    section: &Section,
+    numbers: &hwp_hwp5::OwnedSectionPageNumbers,
+    decoration: PageNumberDecoration,
+) -> Option<Vec<(MarkPath, PageNumberMark)>> {
+    if section
+        .page_number
+        .is_some_and(|current| current != decoration)
+    {
+        return None;
+    }
+    let tops: Vec<usize> = paragraph_indices(&section.blocks).collect();
+    if tops.len() != numbers.top_level_paragraphs {
+        return None;
+    }
+    numbers
+        .marks
+        .iter()
+        .map(|owned| {
+            let path = resolve_mark_path(&section.blocks, &tops, owned.site)?;
+            let empty = match path {
+                MarkPath::Top(index) => matches!(
+                    section.blocks.get(index),
+                    Some(Block::Paragraph(p)) if p.page_number_marks.is_empty()
+                ),
+                MarkPath::Cell(table, cell, index) => matches!(
+                    section.blocks.get(table),
+                    Some(Block::Table(t)) if matches!(
+                        t.cells.get(cell).and_then(|c| c.blocks.get(index)),
+                        Some(Block::Paragraph(p)) if p.page_number_marks.is_empty()
+                    )
+                ),
+            };
+            empty.then_some((path, owned.mark))
+        })
+        .collect()
+}
+
+/// Attach the owned page-number decoration + marks to the rhwp-lifted document. Whether a section is
+/// numbered at all is decided by [`PageNumberFacts::resolve`] (the same rule the HWPX reader uses);
+/// a turned-off section records its reason. Every numbered section is validated (section count,
+/// top-level paragraph count, every mark's table/cell/paragraph, no conflicting decoration, no marks
+/// already present) before ANY mark is attached — a mismatch attaches nothing and records
+/// [`PageNumberOff::SourceMismatch`] on the sections that would have been numbered.
+fn merge_owned_page_number_marks(
+    target: &mut SemanticDoc,
+    owned: &[hwp_hwp5::OwnedSectionPageNumbers],
+) -> bool {
+    if target.sections.len() != owned.len() {
+        if owned
+            .iter()
+            .any(|numbers| numbers.facts.decoration.is_some() || numbers.facts.off.is_some())
+        {
+            turn_unnumbered_sections_off(target.sections.iter_mut(), PageNumberOff::SourceMismatch);
+        }
+        return false;
+    }
+    let mut plan = Vec::new();
+    let mut turned_off = Vec::new();
+    let mut mismatched = Vec::new();
+    for (index, (section, numbers)) in target.sections.iter().zip(owned).enumerate() {
+        match numbers.facts.resolve(index) {
+            Err(reason) => turned_off.push((index, reason)),
+            Ok(None) => {}
+            Ok(Some(decoration)) => match plan_section_marks(section, numbers, decoration) {
+                Some(marks) => plan.push((index, decoration, marks)),
+                None => mismatched.push(index),
+            },
+        }
+    }
+    for (index, reason) in turned_off {
+        if target.sections[index].page_number.is_none() {
+            target.sections[index].page_number_off = Some(reason);
+        }
+    }
+    if !mismatched.is_empty() {
+        let would_number = plan.iter().map(|(index, _, _)| *index).chain(mismatched);
+        for index in would_number.collect::<Vec<_>>() {
+            if target.sections[index].page_number.is_none() {
+                target.sections[index].page_number_off = Some(PageNumberOff::SourceMismatch);
+            }
+        }
+        return false;
+    }
+    for (index, decoration, marks) in plan {
+        let section = &mut target.sections[index];
+        section.page_number = Some(decoration);
+        section.page_number_off = None;
+        for (path, mark) in marks {
+            mark_paragraph(&mut section.blocks, path)
+                .expect("validated above")
+                .page_number_marks
+                .push(mark);
+        }
+    }
+    true
 }
 
 #[derive(PartialEq, Eq)]
@@ -146,29 +350,6 @@ fn merge_owned_source_line_geometry(target: &mut SemanticDoc, owned: &SemanticDo
             if let (Block::Paragraph(target), Block::Paragraph(owned)) = (target, owned) {
                 target.source_line_geometry = owned.source_line_geometry.clone();
             }
-        }
-    }
-    true
-}
-
-fn merge_owned_page_numbers(target: &mut SemanticDoc, owned: &SemanticDoc) -> bool {
-    if target.sections.len() != owned.sections.len()
-        || !target
-            .sections
-            .iter()
-            .zip(&owned.sections)
-            .all(
-                |(target, owned)| match (target.page_number, owned.page_number) {
-                    (Some(current), Some(candidate)) => current == candidate,
-                    _ => true,
-                },
-            )
-    {
-        return false;
-    }
-    for (target, owned) in target.sections.iter_mut().zip(&owned.sections) {
-        if target.page_number.is_none() {
-            target.page_number = owned.page_number;
         }
     }
     true
@@ -389,19 +570,6 @@ mod hwp5_candidate_tests {
         }
     }
 
-    fn sections(numbers: &[Option<PageNumberDecoration>]) -> SemanticDoc {
-        SemanticDoc {
-            sections: numbers
-                .iter()
-                .map(|page_number| Section {
-                    page_number: *page_number,
-                    ..Section::default()
-                })
-                .collect(),
-            ..SemanticDoc::default()
-        }
-    }
-
     fn table_doc(rows: usize, spacing: HwpUnit) -> SemanticDoc {
         SemanticDoc {
             sections: vec![Section {
@@ -449,45 +617,271 @@ mod hwp5_candidate_tests {
         }
     }
 
-    #[test]
-    fn page_number_merge_is_atomic_for_topology_partial_and_typed_conflicts() {
-        let first = number(1, PageNumberPosition::BottomCenter);
-        let second = number(2, PageNumberPosition::BottomCenter);
-        let conflicting = number(1, PageNumberPosition::TopCenter);
+    fn owned_numbers(
+        decoration: Option<PageNumberDecoration>,
+        top_level_paragraphs: usize,
+        marks: &[(hwp_hwp5::PageNumberSite, PageNumberMark)],
+    ) -> hwp_hwp5::OwnedSectionPageNumbers {
+        hwp_hwp5::OwnedSectionPageNumbers {
+            facts: PageNumberFacts {
+                decoration,
+                ..PageNumberFacts::default()
+            },
+            top_level_paragraphs,
+            marks: marks
+                .iter()
+                .map(|(site, mark)| hwp_hwp5::OwnedPageNumberMark {
+                    site: *site,
+                    mark: *mark,
+                })
+                .collect(),
+        }
+    }
 
-        let mut topology = sections(&[None]);
-        assert!(!merge_owned_page_numbers(
-            &mut topology,
-            &sections(&[Some(first), Some(second)])
-        ));
-        assert!(topology.sections[0].page_number.is_none());
+    /// `[문단, 문단(표 호스트), 표(2×1), 문단]` — rhwp lift 의 순서(호스트 문단 뒤에 그 표).
+    fn hosted_table_doc() -> SemanticDoc {
+        let cell = |row| Cell {
+            row,
+            col: 0,
+            blocks: vec![Block::Paragraph(Paragraph::default())],
+            active: true,
+            ..Cell::default()
+        };
+        SemanticDoc {
+            sections: vec![Section {
+                blocks: vec![
+                    Block::Paragraph(Paragraph::default()),
+                    Block::Paragraph(Paragraph::default()),
+                    Block::Table(Table {
+                        rows: 2,
+                        cols: 1,
+                        cells: vec![cell(0), cell(1)],
+                        ..Table::default()
+                    }),
+                    Block::Paragraph(Paragraph::default()),
+                ],
+                ..Section::default()
+            }],
+            ..SemanticDoc::default()
+        }
+    }
 
-        let mut partial = sections(&[None, Some(conflicting)]);
-        assert!(!merge_owned_page_numbers(
-            &mut partial,
-            &sections(&[Some(first), Some(second)])
-        ));
-        assert!(partial.sections[0].page_number.is_none());
-        assert_eq!(partial.sections[1].page_number, Some(conflicting));
+    type MarkView = (Vec<Vec<PageNumberMark>>, Vec<Vec<PageNumberMark>>);
 
-        let mut compatible = sections(&[None, Some(second)]);
-        assert!(merge_owned_page_numbers(
-            &mut compatible,
-            &sections(&[Some(first), Some(second)])
-        ));
-        assert_eq!(compatible.sections[0].page_number, Some(first));
-        assert_eq!(compatible.sections[1].page_number, Some(second));
+    fn marks_at(doc: &SemanticDoc) -> MarkView {
+        let blocks = &doc.sections[0].blocks;
+        let top = blocks
+            .iter()
+            .map(|block| match block {
+                Block::Paragraph(paragraph) => paragraph.page_number_marks.clone(),
+                Block::Table(_) => Vec::new(),
+            })
+            .collect();
+        let Block::Table(table) = &blocks[2] else {
+            unreachable!()
+        };
+        let cells = table
+            .cells
+            .iter()
+            .map(|cell| match &cell.blocks[0] {
+                Block::Paragraph(paragraph) => paragraph.page_number_marks.clone(),
+                Block::Table(_) => Vec::new(),
+            })
+            .collect();
+        (top, cells)
     }
 
     #[test]
-    fn production_hwp5_open_enriches_the_strictly_owned_page_number() {
+    fn page_number_marks_merge_onto_rhwp_blocks_atomically() {
+        use hwp_hwp5::PageNumberSite::{Cell as InCell, Paragraph as Top};
+        let first = number(1, PageNumberPosition::BottomCenter);
+        let one = NonZeroU16::MIN;
+        let in_row = |row| InCell {
+            paragraph: 1,
+            table: 0,
+            row,
+            col: 0,
+            cell_paragraph: 0,
+        };
+        let good = owned_numbers(
+            Some(first),
+            3,
+            &[
+                (in_row(0), PageNumberMark::Show),
+                (in_row(1), PageNumberMark::Hide),
+                (Top(2), PageNumberMark::Restart(one)),
+            ],
+        );
+
+        let mut doc = hosted_table_doc();
+        assert!(merge_owned_page_number_marks(
+            &mut doc,
+            std::slice::from_ref(&good)
+        ));
+        assert_eq!(doc.sections[0].page_number, Some(first));
+        assert_eq!(
+            marks_at(&doc),
+            (
+                vec![vec![], vec![], vec![], vec![PageNumberMark::Restart(one)]],
+                vec![vec![PageNumberMark::Show], vec![PageNumberMark::Hide]],
+            )
+        );
+
+        // 어긋나면 아무것도 바꾸지 않는다: 구역 수 · 최상위 문단 수 · 없는 칸 · 없는 표 · 다른 모양.
+        // 어긋나면 표지는 하나도 붙이지 않고, 켜졌을 구역에 이유(SourceMismatch)를 남긴다.
+        let untouched = |owned: &[hwp_hwp5::OwnedSectionPageNumbers], mut doc: SemanticDoc| {
+            assert!(!merge_owned_page_number_marks(&mut doc, owned));
+            assert_eq!(marks_at(&doc), marks_at(&hosted_table_doc()));
+            if doc.sections[0].page_number.is_none() {
+                assert_eq!(
+                    doc.sections[0].page_number_off,
+                    Some(PageNumberOff::SourceMismatch)
+                );
+            }
+            doc.sections[0].page_number
+        };
+        assert_eq!(
+            untouched(&[good.clone(), good.clone()], hosted_table_doc()),
+            None
+        );
+        let mut short = good.clone();
+        short.top_level_paragraphs = 4;
+        assert_eq!(untouched(&[short], hosted_table_doc()), None);
+        let missing_cell = owned_numbers(
+            Some(first),
+            3,
+            &[
+                (Top(0), PageNumberMark::Show),
+                (in_row(5), PageNumberMark::Hide),
+            ],
+        );
+        assert_eq!(untouched(&[missing_cell], hosted_table_doc()), None);
+        let no_hosted_table = InCell {
+            paragraph: 0,
+            table: 0,
+            row: 0,
+            col: 0,
+            cell_paragraph: 0,
+        };
+        let missing_table =
+            owned_numbers(Some(first), 3, &[(no_hosted_table, PageNumberMark::Hide)]);
+        assert_eq!(untouched(&[missing_table], hosted_table_doc()), None);
+        let mut conflicting = hosted_table_doc();
+        let other = number(1, PageNumberPosition::TopCenter);
+        conflicting.sections[0].page_number = Some(other);
+        assert_eq!(
+            untouched(std::slice::from_ref(&good), conflicting),
+            Some(other)
+        );
+
+        // 쪽 시작 번호가 0 이 아니거나, 둘째 구역인데 첫 문단에 새 번호가 없으면 그 구역은 켜지 않는다.
+        let mut explicit_start = good.clone();
+        explicit_start.facts.start_page = 3;
+        let mut doc = hosted_table_doc();
+        assert!(merge_owned_page_number_marks(&mut doc, &[explicit_start]));
+        assert_eq!(doc.sections[0].page_number, None);
+        assert_eq!(
+            doc.sections[0].page_number_off,
+            Some(PageNumberOff::NonzeroSectionStart)
+        );
+        assert_eq!(marks_at(&doc), marks_at(&hosted_table_doc()));
+        assert_eq!(
+            good.facts.resolve(1),
+            Err(PageNumberOff::ContinuesPreviousSection)
+        );
+
+        // 추출이 실패하면 쪽 번호가 있었는지 모른다 — 조용히 넘기지 않고 이유를 남긴다.
+        let mut doc = hosted_table_doc();
+        assert!(!apply_page_number_extraction(
+            &mut doc,
+            Err(hwp_hwp5::Error::MissingStream("DocInfo"))
+        ));
+        assert_eq!(
+            doc.sections[0].page_number_off,
+            Some(PageNumberOff::SourceUnreadable)
+        );
+        // 배포용처럼 rhwp 는 열고 추출만 실패하는 문서: 구역이 여럿이어도 이유는 문서 단위 한 건이다.
+        let mut doc = hosted_table_doc();
+        let section = doc.sections[0].clone();
+        doc.sections.extend([section.clone(), section]);
+        assert!(!apply_page_number_extraction(
+            &mut doc,
+            Err(hwp_hwp5::Error::OpaqueBody(0x02))
+        ));
+        assert_eq!(
+            doc.sections
+                .iter()
+                .map(|section| section.page_number_off)
+                .collect::<Vec<_>>(),
+            vec![Some(PageNumberOff::SourceUnreadable), None, None]
+        );
+        // 쪽 번호 제어가 없는 문서는 끈 것이 아니다.
+        let mut doc = hosted_table_doc();
+        assert!(apply_page_number_extraction(
+            &mut doc,
+            Ok(vec![owned_numbers(None, 3, &[])])
+        ));
+        assert_eq!(doc.sections[0].page_number_off, None);
+    }
+
+    #[test]
+    fn production_hwp5_open_reads_page_numbers_without_a_whole_document_strict_parse() {
         let doc = Engine::open(&benchmark()).expect("production HWP5 open succeeds");
         assert_eq!(doc.sections.len(), 1);
         assert_eq!(
             doc.sections[0].page_number,
             open_hwp5_own(&benchmark()).unwrap().sections[0].page_number
         );
-        assert!(doc.sections[0].page_number.is_some());
+        let first_marks = |doc: &SemanticDoc| {
+            doc.sections[0]
+                .blocks
+                .iter()
+                .enumerate()
+                .find_map(|(index, block)| match block {
+                    Block::Paragraph(p) if !p.page_number_marks.is_empty() => {
+                        Some((index, p.page_number_marks.clone()))
+                    }
+                    _ => None,
+                })
+        };
+        // 쪽 번호 위치 · 새 번호가 첫 문단에 두 번씩(같은 값) — 그대로 표지가 된다.
+        let one = NonZeroU16::MIN;
+        assert_eq!(
+            first_marks(&doc),
+            Some((
+                0,
+                vec![
+                    PageNumberMark::Show,
+                    PageNumberMark::Restart(one),
+                    PageNumberMark::Show,
+                    PageNumberMark::Restart(one),
+                ]
+            ))
+        );
+        // 엄격 파싱은 쪽 번호와 무관한 레코드에서 실패하지만(BULLET 확장 · 구역 정의 자식) 쪽 번호는 읽힌다.
+        for (name, top_paragraph) in [("benchmark1.hwp", 0usize), ("benchmark2.hwp", 4)] {
+            let bytes = std::fs::read(format!(
+                "{}/../../benchmarks/{name}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap();
+            let doc = Engine::open(&bytes).unwrap();
+            assert_eq!(
+                doc.sections[0].page_number,
+                Some(number(1, PageNumberPosition::BottomCenter)),
+                "{name}"
+            );
+            let (index, marks) = first_marks(&doc).expect(name);
+            let ordinal = doc.sections[0].blocks[..index]
+                .iter()
+                .filter(|block| matches!(block, Block::Paragraph(_)))
+                .count();
+            assert_eq!(
+                (ordinal, marks),
+                (top_paragraph, vec![PageNumberMark::Show]),
+                "{name}"
+            );
+        }
     }
 
     #[test]

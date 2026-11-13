@@ -810,6 +810,8 @@ pub fn parse(proj: &JsxCssProject) -> Result<SemanticDoc> {
                 .as_ref()
                 .map(parse_page_number)
                 .transpose()?,
+            // 끈 이유는 원본을 읽을 때의 진단이라 투영에 싣지 않는다(쪽 번호 표지와 같은 부류).
+            page_number_off: None,
             page_edited: meta.page_edited,
             decorations: meta
                 .decorations
@@ -1001,6 +1003,8 @@ fn parse_para(el: &JsxElement) -> Result<Paragraph> {
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
         // Structural page/column-zone breaks + table-anchor flag aren't carried through the HTML/JSX
         // projection (own-render gets them from the binary parser); keep them explicitly absent here.
+        // 쪽 번호 표지도 같은 부류다(원본 파서가 채운다).
+        page_number_marks: Vec::new(),
         page_break_before: false,
         column_break_before: false,
         column_layout_before: None,

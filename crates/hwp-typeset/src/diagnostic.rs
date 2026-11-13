@@ -437,9 +437,11 @@ mod tests {
         let report = compare_placed_docs(
             &PlacedDoc {
                 pages: vec![candidate],
+                ..PlacedDoc::default()
             },
             &PlacedDoc {
                 pages: vec![oracle],
+                ..PlacedDoc::default()
             },
         );
         assert_eq!(report.pages[0].decoration_glyphs.candidate_only, 1);
@@ -466,9 +468,11 @@ mod tests {
         let report = compare_placed_docs(
             &PlacedDoc {
                 pages: vec![candidate],
+                ..PlacedDoc::default()
             },
             &PlacedDoc {
                 pages: vec![oracle],
+                ..PlacedDoc::default()
             },
         );
         let blocks = &report.pages[0].blocks;
@@ -483,6 +487,7 @@ mod tests {
         let report = compare_placed_docs(
             &PlacedDoc {
                 pages: vec![page()],
+                ..PlacedDoc::default()
             },
             &PlacedDoc::default(),
         );

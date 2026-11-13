@@ -492,6 +492,10 @@ pub struct PdfExport {
     pub replay: Vec<PdfPageReplayStats>,
     /// Bounded capability failures. An unsupported SVG never becomes an unexplained blank object.
     pub diagnostics: Vec<PdfCapabilityDiagnostic>,
+    /// What the placement deliberately did not draw (e.g. a page number turned off for a section).
+    /// Report-only: unlike [`Self::diagnostics`] these are not paint failures, so callers that gate on
+    /// capability diagnostics (printing, verification) are unaffected.
+    pub notices: Vec<PdfNotice>,
     /// Additive report-only regions from the same placement and font provider as `bytes`.
     pub visual_evidence: PdfVisualEvidence,
 }
@@ -866,6 +870,15 @@ impl PdfPageReplayStats {
     }
 }
 
+/// One report-only notice about content the placement chose not to draw. `kind` groups notices
+/// (`page-number`); `code` is the stable machine-readable reason. No source content is copied here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PdfNotice {
+    pub page_index: usize,
+    pub kind: String,
+    pub code: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PdfCapabilityDiagnostic {
     pub page_index: usize,
@@ -941,6 +954,18 @@ pub fn export_pdf_with_fonts(
         replay.push(stats);
         diagnostics.append(&mut page_diagnostics);
     }
+    // 쪽 번호를 끈 구역은 조용히 넘기지 않는다 — 그 구역 첫 쪽에 이유 코드를 남긴다. 그리지 못한 것이
+    // 아니라 그리지 않기로 한 것이므로 진단(diagnostics)이 아니라 알림(notices)이다 — 인쇄 · 검증 관문은
+    // 진단만 본다.
+    let notices = placed
+        .page_number_off
+        .iter()
+        .map(|notice| PdfNotice {
+            page_index: notice.first_page,
+            kind: "page-number".into(),
+            code: notice.reason.code().into(),
+        })
+        .collect();
 
     let bytes = document
         .finish()
@@ -953,6 +978,7 @@ pub fn export_pdf_with_fonts(
         font_path: embed.as_ref().map(|f| f.path.clone()),
         replay,
         diagnostics,
+        notices,
         visual_evidence,
     })
 }
@@ -2223,14 +2249,36 @@ mod tests {
         assert_eq!(numbered_out.pages, plain_out.pages);
         assert_eq!(
             numbered_out.replay[0].text.produced,
-            plain_out.replay[0].text.produced + 5,
-            "-[7]- is five shared PaintOp::Glyph operations"
+            plain_out.replay[0].text.produced + 7,
+            "\"- [7] -\" is seven shared PaintOp::Glyph operations (the side gaps are spaces)"
+        );
+        assert!(
+            numbered_out.notices.is_empty() && numbered_out.diagnostics.is_empty(),
+            "a numbered section leaves no page-number notice"
         );
         assert_eq!(
             numbered_out.replay[0].text.produced,
             numbered_out.replay[0].text.replayed
         );
         assert_eq!(numbered_out.replay[0].text.stubbed, 0);
+    }
+
+    /// 쪽 번호를 끈 구역은 알림(notices)으로 남는다 — 조용히 넘기지 않되, 그리지 못한 개체가 아니므로
+    /// 진단(diagnostics)에는 넣지 않는다(인쇄 · 검증 관문은 진단만 본다).
+    #[test]
+    fn a_turned_off_page_number_is_reported_as_a_notice_not_a_diagnostic() {
+        let mut doc = doc_with(vec![Block::Paragraph(para("본문"))]);
+        doc.sections[0].page_number_off = Some(PageNumberOff::OutsideBody);
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        assert_eq!(
+            out.notices,
+            vec![PdfNotice {
+                page_index: 0,
+                kind: "page-number".into(),
+                code: "page-number.outside-body".into(),
+            }]
+        );
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     }
 
     #[test]

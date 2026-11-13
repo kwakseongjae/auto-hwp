@@ -50,6 +50,21 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   *(EN — Fixed: `auto-hwp view` / `verify-convert` inlined every page SVG into one HTML document while rhwp restarts clip/pattern/marker
   ids per page, so later pages resolved `url(#cell-clip-N)` to page 1's clip rect and lost content. Ids are now scoped per page (and per
   column); `view` parses the document once. CLI only; no npm package change.)*
+- **자체 조판(SVG · PDF)에 쪽 번호가 빠지거나 틀리던 것을 고쳤다.** 한컴이 「- N -」을 찍는 11문서 중 우리는 1문서에만 찍었다.
+  - HWPX: `<hp:pageNum>`(쪽 번호 위치) · `<hp:newNum numType="PAGE">`(새 번호로 시작) · `<hp:pageHiding hidePageNum="1">`(현재 쪽만
+    감추기)를 읽는다.
+  - HWP5: 문서 전체가 자체 엄격 파서로 읽혀야만 쪽 번호를 붙이던 조건을 「쪽 번호 전용 자체 추출」로 바꿨다. 쪽 번호와 무관한 레코드
+    (글머리표 확장 · 그림 채우기 등) 때문에 빠지던 문서에도 붙는다.
+  - 새 번호 · 감추기는 그 제어가 **놓인 쪽**에서 효력을 낸다(한컴 규칙: 감춘 쪽도 번호는 센다). 쪽 나눔 · 본문 위치는 바뀌지 않는다.
+  - 읽을 수 없거나 규칙을 확인하지 못한 꼴(모르는 위치 · 형식, 머리말 안의 제어, 앞 구역에서 이어 세는 둘째 구역 등)은 틀린 번호 대신
+    그 구역의 쪽 번호를 그리지 않고, 이유를 PDF 내보내기 알림(`PdfExport.notices`, `kind: "page-number"`)과 CLI 경고로 남긴다. 알림은 그리지 못한 개체를 뜻하는
+    진단(`diagnostics`)과 따로 있어, 진단을 보는 인쇄 · 검증 관문의 동작은 바뀌지 않는다.
+  - 줄표가 있는 쪽 번호를 한컴처럼 띄워 찍는다(「-1-」 → 「- 1 -」, 줄표와 숫자 사이 반 칸).
+  *(EN — Fixed: own-typeset SVG/PDF missed or misnumbered page numbers. HWPX page-number position / page restart / hide-on-this-page
+  controls are read; HWP5 page numbers no longer depend on the whole document passing the strict parser. Restarts and hides apply on
+  the page that holds the control; pagination is unchanged. Unsupported shapes turn that section's numbers off instead of guessing and
+  report why (a `page-number` entry in the new report-only `PdfExport.notices`, kept apart from capability `diagnostics` so print and
+  verification gates are unchanged; CLI warning). Dash-wrapped numbers are spaced like Hancom: `- 1 -`.)*
 
 ### 추가 (Added)
 
@@ -59,6 +74,17 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   (예: MCP 로 쪽을 이어 붙이는 경우)는 이 둘 중 하나를 거치면 같은 충돌을 피한다. Rust 크레이트 공개 함수 — crates.io 발행은 없다.
   *(EN — Added: `scope_svg_ids` prefixes ids a fragment defines and their in-tag references; `render_document_svgs` renders every page
   from one parse with per-page id scopes. Use either when inlining several page SVGs into one document.)*
+- **`hwp_model::document::PageNumberMark` · `Paragraph::page_number_marks`.** 쪽 번호 표지(보이기 시작 · 새 번호 · 이 쪽 감추기)를
+  제어가 놓인 문단(본문 · 표 칸)에 담는다. 기본은 빈 목록이라 기존 문서 · 직렬화 결과는 그대로다. HWPX 저장은 원본 제어를 바이트 그대로
+  남기고, JSX 투영은 이 필드를 싣지 않는다(쪽 나누기 · 표 앵커와 같은 부류). Rust 크레이트 공개 타입 — crates.io 발행은 없다.
+  *(EN — Added: page-number marks on the paragraph that holds the control; empty by default. Not carried by the JSX projection.)*
+- **`hwp_hwp5::OwnHwp5Parser::page_numbers(bytes)`.** 쪽 번호 제어만 읽는 자체 추출. 받는 자리는 최상위 문단과 그 문단이 품은 표의 칸
+  두 가지이고, 그 밖의 자리 · 값은 그 구역을 끄고 이유를 남긴다. 오류는 문서를 받지 않을 때(배포용 · 암호 문서, 한도 초과, 구역 번호
+  불연속, CFB · 압축 · 레코드를 엄격하게 읽지 못함)이고, 그때는 번호가 없는 첫 구역 하나에만 이유를 단다(문서 단위 알림 한 건).
+  *(EN — Added: page-number-only owned HWP5 extraction; two accepted sites, anything else turns that section off with a reason.)*
+- **`PageNumberFacts` · `PageNumberOff` · `Section::page_number_off` · `PlacedDoc::page_number_off`.** 쪽 번호를 켤지 끌지 정하는 한 규칙
+  (`PageNumberFacts::resolve`, HWPX · HWP5 공용)과 끈 이유. Rust 크레이트 공개 타입 — crates.io 발행은 없다.
+  *(EN — Added: one shared on/off rule for page numbers and the reason a section's numbers are off.)*
 
 ---
 
