@@ -304,7 +304,8 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
             .iter()
             .map(|page| page.glyphs.len())
             .sum::<usize>()
-            + 24
+            // 쪽마다 「- N -」 다섯 글자(줄표 · 반 칸 · 숫자 · 반 칸 · 줄표, #528) × 8쪽 — 쪽 번호 꾸밈만 다르다.
+            + 40
     );
     assert!(candidate
         .sections
@@ -316,9 +317,9 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
         .all(|section| section.page_number.is_none()));
     assert!(typed_delta.pages.iter().all(|page| {
         page.page_box.is_exact()
-            && page.decoration_glyphs.candidate_count == 3
+            && page.decoration_glyphs.candidate_count == 5
             && page.decoration_glyphs.oracle_count == 0
-            && page.decoration_glyphs.candidate_only == 3
+            && page.decoration_glyphs.candidate_only == 5
             && page.decoration_glyphs.first_changed_ordinal == Some(0)
     }));
     assert!(typed_delta.pages.iter().all(|page| {
@@ -355,7 +356,7 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
     let page_number_delta =
         compare_placed_docs(&candidate_placed, &candidate_without_page_number_placed);
     assert!(page_number_delta.pages.iter().all(|page| {
-        page.decoration_glyphs.candidate_only == 3
+        page.decoration_glyphs.candidate_only == 5
             && page.body_glyphs.is_exact()
             && page.blocks.is_exact()
             && page.tables.is_exact()

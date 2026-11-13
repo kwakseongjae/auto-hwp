@@ -443,6 +443,34 @@ fn record_block_band(
 #[derive(Clone, Debug, Default)]
 pub struct PlacedDoc {
     pub pages: Vec<PlacedPage>,
+    /// 쪽 번호를 그리지 않은 구역과 그 이유 — 원본을 읽으며 끈 것([`Section::page_number_off`])과 조판이
+    /// 표지가 놓인 쪽을 찾지 못한 것을 한 목록으로 모은다. PDF 내보내기가 진단으로 싣는다.
+    pub page_number_off: Vec<PageNumberOffNotice>,
+}
+
+/// One section that draws no page number, with why.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageNumberOffNotice {
+    pub section: usize,
+    /// The section's first page (0-based) — where its numbers would have started.
+    pub first_page: usize,
+    pub reason: PageNumberOff,
+}
+
+fn page_number_notice(
+    section: &Section,
+    section_index: usize,
+    first_page: usize,
+    marks: &PageNumberMarkPages,
+) -> Option<PageNumberOffNotice> {
+    let reason = section.page_number_off.or_else(|| {
+        (section.page_number.is_some() && marks.unresolved).then_some(PageNumberOff::UnplacedMark)
+    })?;
+    Some(PageNumberOffNotice {
+        section: section_index,
+        first_page,
+        reason,
+    })
 }
 
 /// Place a whole [`SemanticDoc`] into positioned pages, re-driving the paginator so screen == the
@@ -453,6 +481,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
         return place_doc_columns(doc, fonts);
     }
     let mut pages: Vec<PlacedPage> = vec![PlacedPage::default()];
+    let mut page_number_off = Vec::new();
     let mut started = false; // any content placed on the current page yet?
 
     for (sec_idx, sec) in doc.sections.iter().enumerate() {
@@ -673,14 +702,19 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
         }
         marks.finish(pages.len() - 1);
         place_section_decorations(&mut pages, section_first_page, sec, doc, fonts, &marks);
+        page_number_off.extend(page_number_notice(sec, sec_idx, section_first_page, &marks));
     }
-    PlacedDoc { pages }
+    PlacedDoc {
+        pages,
+        page_number_off,
+    }
 }
 
 /// Explicit-column placement lane. The established single-column implementation above is retained
 /// unchanged and remains the path for every document without a column-zone/break signal.
 fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDoc {
     let mut pages = vec![PlacedPage::default()];
+    let mut page_number_off = Vec::new();
     let mut started = false;
     for (section_index, section) in doc.sections.iter().enumerate() {
         let page = &section.page;
@@ -896,8 +930,17 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
         }
         marks.finish(pages.len() - 1);
         place_section_decorations(&mut pages, section_first_page, section, doc, fonts, &marks);
+        page_number_off.extend(page_number_notice(
+            section,
+            section_index,
+            section_first_page,
+            &marks,
+        ));
     }
-    PlacedDoc { pages }
+    PlacedDoc {
+        pages,
+        page_number_off,
+    }
 }
 
 fn emit_column_separators(
@@ -3994,32 +4037,38 @@ fn place_page_number(
     if decoration.position == PageNumberPosition::None {
         return;
     }
-    let number = format_page_number(page_number, decoration.format);
-    let mut text = String::new();
-    if let Some(dash) = decoration.dash {
-        text.push(dash);
-    }
-    if let Some(prefix) = decoration.prefix {
-        text.push(prefix);
-    }
-    text.push_str(&number);
-    if let Some(suffix) = decoration.suffix {
-        text.push(suffix);
-    }
-    if let Some(dash) = decoration.dash {
-        text.push(dash);
-    }
-
     let size = 1_000.0;
     let key = FontKey {
         family: String::new(),
         bold: false,
         italic: false,
     };
-    let width = text
-        .chars()
-        .map(|ch| fonts.advance_width(&key, ch, size as i32))
-        .sum::<f64>();
+    // (글자, 나아갈 폭). 줄표와 번호 사이는 한컴처럼 띄운다 — 한컴 PDF 11문서(한컴독스 · 데스크톱 · Mac 인쇄)
+    // 모두 「- N -」이고 줄표와 숫자 사이가 4.9~5.1pt(10pt 글자의 반 칸)였다. 공백 글자를 실어 텍스트
+    // 추출도 「- N -」이 되게 하고, 폭은 글꼴 공백 폭 대신 반 칸으로 고정한다.
+    let side_gap = size * 0.5;
+    let advance = |ch: char| fonts.advance_width(&key, ch, size as i32);
+    let mut text: Vec<(char, f64)> = Vec::new();
+    if let Some(dash) = decoration.dash {
+        text.push((dash, advance(dash)));
+        text.push((' ', side_gap));
+    }
+    if let Some(prefix) = decoration.prefix {
+        text.push((prefix, advance(prefix)));
+    }
+    text.extend(
+        format_page_number(page_number, decoration.format)
+            .chars()
+            .map(|ch| (ch, advance(ch))),
+    );
+    if let Some(suffix) = decoration.suffix {
+        text.push((suffix, advance(suffix)));
+    }
+    if let Some(dash) = decoration.dash {
+        text.push((' ', side_gap));
+        text.push((dash, advance(dash)));
+    }
+    let width = text.iter().map(|(_, step)| step).sum::<f64>();
     let is_odd = page_number % 2 == 1;
     let (top, height, horizontal) = match decoration.position {
         PageNumberPosition::TopLeft => (header_y, header_h, 0),
@@ -4040,7 +4089,7 @@ fn place_page_number(
         _ => left + band_w - width,
     };
     let baseline = top + (height.max(size) - size) / 2.0 + BASELINE_RATIO * size;
-    for ch in text.chars() {
+    for (ch, step) in text {
         page.glyphs.push(PlacedGlyph {
             x,
             baseline,
@@ -4054,7 +4103,7 @@ fn place_page_number(
             cluster: None,
             origin: PlacedGlyphOrigin::PageDecoration,
         });
-        x += fonts.advance_width(&key, ch, size as i32);
+        x += step;
     }
 }
 
@@ -4525,8 +4574,8 @@ mod tests {
             .filter(|glyph| glyph.baseline > 2_400.0)
             .map(|glyph| glyph.ch)
             .collect::<String>();
-        assert_eq!(first_footer, "-[G]-");
-        assert_eq!(second_footer, "-[H]-");
+        assert_eq!(first_footer, "- [G] -");
+        assert_eq!(second_footer, "- [H] -");
     }
 
     #[test]
@@ -4929,7 +4978,34 @@ mod tests {
         if let Some(Block::Paragraph(paragraph)) = orphan.cells[5].blocks.first_mut() {
             paragraph.page_number_marks = vec![PageNumberMark::Restart(nz(9))];
         }
-        assert_eq!(numbered(orphan), ["", ""]);
+        assert_eq!(numbered(orphan.clone()), ["", ""]);
+        // 그리고 조용히 넘기지 않는다 — 이유가 PlacedDoc 에 남는다.
+        let mut doc = doc_with_page(vec![Block::Table(orphan)], 10_000);
+        doc.sections[0].page_number = Some(digit_number());
+        assert_eq!(
+            place_doc(&doc, &ApproxFontMetrics).page_number_off,
+            vec![PageNumberOffNotice {
+                section: 0,
+                first_page: 0,
+                reason: PageNumberOff::UnplacedMark,
+            }]
+        );
+        // 원본을 읽으며 끈 이유도 같은 목록으로 모인다(쪽 번호 없는 구역은 목록에 없다).
+        let mut doc = doc_with_page(vec![Block::Paragraph(para("가"))], 10_000);
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(para("나"))],
+            page: doc.sections[0].page,
+            page_number_off: Some(PageNumberOff::ContinuesPreviousSection),
+            ..Section::default()
+        });
+        assert_eq!(
+            place_doc(&doc, &ApproxFontMetrics).page_number_off,
+            vec![PageNumberOffNotice {
+                section: 1,
+                first_page: 1,
+                reason: PageNumberOff::ContinuesPreviousSection,
+            }]
+        );
     }
 
     #[test]

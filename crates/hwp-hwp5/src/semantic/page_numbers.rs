@@ -7,17 +7,18 @@
 //! - 최상위 문단의 제어(레코드 깊이 1)
 //! - 최상위 문단이 품은 표의 칸 문단의 제어(깊이 3, 그 표의 `TABLE` 레코드 뒤 `LIST_HEADER` 칸)
 //!
-//! 그 밖의 자리(머리말 · 꼬리말 · 각주 · 글상자 · 캡션 · 표 속 표), 모르는 속성 비트, 같은 구역 안의
-//! 서로 다른 쪽 번호 위치는 전부 오류다 — 호출부는 오류면 아무것도 바꾸지 않는다(원자적).
-//! 본문 위상(문단 · 표 · 칸)을 rhwp 결과와 맞춰 보는 일은 `hwp-core` 의 몫이다.
+//! 그 밖의 자리(머리말 · 꼬리말 · 각주 · 글상자 · 캡션 · 표 속 표), 읽을 수 없는 값, 같은 구역 안의 서로 다른
+//! 쪽 번호 위치는 그 구역의 쪽 번호를 **끄고 이유를 남긴다**([`PageNumberFacts`] — HWPX 파서와 같은 판단).
+//! 오류(`Err`)는 컨테이너 · 레코드 틀이 깨졌을 때뿐이다. 본문 위상(문단 · 표 · 칸)을 rhwp 결과와 맞춰 보는
+//! 일은 `hwp-core` 의 몫이다.
 
 use super::{
     data, malformed, parse_new_number_control, parse_page_number_control, read_u16, read_u32,
-    unsupported_reason, CTRL_NEW_NUMBER, CTRL_PAGE_NUM_POS, CTRL_SECTION_DEF, CTRL_TABLE,
-    TAG_CTRL_HEADER, TAG_LIST_HEADER, TAG_PARA_HEADER, TAG_TABLE,
+    CTRL_NEW_NUMBER, CTRL_PAGE_NUM_POS, CTRL_SECTION_DEF, CTRL_TABLE, TAG_CTRL_HEADER,
+    TAG_LIST_HEADER, TAG_PARA_HEADER, TAG_TABLE,
 };
 use crate::{probe, Record, Result, StreamProbe};
-use hwp_model::document::{PageNumberDecoration, PageNumberMark};
+use hwp_model::document::{PageNumberFacts, PageNumberMark, PageNumberOff};
 
 const CTRL_PAGE_HIDE: u32 = u32::from_be_bytes(*b"pghd");
 /// `pghd` 속성: 머리말 0x01 · 꼬리말 0x02 · 바탕쪽 0x04 · 테두리 0x08 · 배경 0x10 · 쪽 번호 0x20.
@@ -43,30 +44,14 @@ pub struct OwnedPageNumberMark {
     pub mark: PageNumberMark,
 }
 
-/// 한 구역의 쪽 번호 사실.
+/// 한 구역의 쪽 번호 사실. 켤지 끌지는 HWPX 파서와 같은 [`PageNumberFacts::resolve`] 가 정한다.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OwnedSectionPageNumbers {
-    /// 구역 안 쪽 번호 위치(같은 값의 반복은 하나로 본다). 시작 번호는 1 — 새 번호는 표지가 맡는다.
-    pub decoration: Option<PageNumberDecoration>,
+    /// 쪽 번호 위치 · 끈 이유 · 구역 시작 번호(`secd`) · 첫 문단의 새 번호.
+    pub facts: PageNumberFacts,
     /// 최상위 문단 수 — 본문과 위상을 맞출 때 쓴다.
     pub top_level_paragraphs: usize,
     pub marks: Vec<OwnedPageNumberMark>,
-    /// 구역 정의(`secd`)의 쪽 시작 번호. 0 = 앞 구역에서 이어 센다.
-    pub start_page: u16,
-    /// 첫 최상위 문단에 직접 놓인 새 번호 — 구역 첫 쪽의 번호를 확정한다.
-    pub restart_at_start: bool,
-}
-
-impl OwnedSectionPageNumbers {
-    /// 이 구역에 그릴 쪽 번호 모양. HWPX 파서와 같은 규칙이다.
-    /// - 쪽 시작 번호가 0 이 아니면 끈다(코퍼스로 확인하지 못한 꼴).
-    /// - 둘째 구역부터는 첫 문단에 새 번호가 있을 때만 켠다(이어 세는 번호를 지금 조판이 모른다).
-    pub fn decoration_for(&self, section_index: usize) -> Option<PageNumberDecoration> {
-        if self.start_page != 0 || (section_index > 0 && !self.restart_at_start) {
-            return None;
-        }
-        self.decoration
-    }
 }
 
 pub(crate) fn page_number_controls(bytes: &[u8]) -> Result<Vec<OwnedSectionPageNumbers>> {
@@ -119,15 +104,15 @@ fn scan_section(stream: &StreamProbe) -> Result<OwnedSectionPageNumbers> {
                 if id == CTRL_SECTION_DEF && !section_def_seen {
                     section_def_seen = true;
                     // secd: id · 속성 u32 · 단 간격 · 세로 · 가로 격자 · 기본 탭 u32 · 번호 문단 모양 · 쪽 시작 번호.
-                    out.start_page = read_u16(data(stream, record), 20).ok_or_else(|| {
+                    out.facts.start_page = read_u16(data(stream, record), 20).ok_or_else(|| {
                         malformed(record, Some(section), "section definition is too short")
                     })?;
                 }
                 let site = at.paragraph.map(PageNumberSite::Paragraph);
                 let before = out.marks.len();
-                read_control(stream, record, section, id, site, &mut out)?;
+                read_control(stream, record, section, id, site, &mut out);
                 if id == CTRL_NEW_NUMBER && at.paragraph == Some(0) && out.marks.len() > before {
-                    out.restart_at_start = true;
+                    out.facts.restart_at_start = true;
                 }
             }
             (TAG_TABLE, 2) if at.control == Some(CTRL_TABLE) => at.table_body = true,
@@ -156,23 +141,18 @@ fn scan_section(stream: &StreamProbe) -> Result<OwnedSectionPageNumbers> {
                     (3, Some(paragraph), Some((row, col)), Some(cell_paragraph))
                         if at.control == Some(CTRL_TABLE) =>
                     {
-                        PageNumberSite::Cell {
+                        Some(PageNumberSite::Cell {
                             paragraph,
                             table: at.tables - 1,
                             row,
                             col,
                             cell_paragraph,
-                        }
+                        })
                     }
-                    _ => {
-                        return Err(unsupported_reason(
-                            *record,
-                            section,
-                            "page-number control outside a top-level paragraph or table cell is not owned",
-                        ))
-                    }
+                    // 머리말 · 꼬리말 · 각주 · 글상자 · 캡션 · 표 속 표 — 받지 않는 자리.
+                    _ => None,
                 };
-                read_control(stream, record, section, id, Some(site), &mut out)?;
+                read_control(stream, record, section, id, site, &mut out);
             }
             _ => {}
         }
@@ -189,6 +169,8 @@ fn is_page_number_control(id: u32) -> bool {
     matches!(id, CTRL_PAGE_NUM_POS | CTRL_NEW_NUMBER | CTRL_PAGE_HIDE)
 }
 
+/// 쪽 번호 제어 하나를 읽어 표지로 단다. 받지 않는 자리 · 읽을 수 없는 값이면 그 구역을 끈다(이유를 남긴다).
+/// `pgnp` · `nwno` 는 엄격 파서의 함수로 읽는다.
 fn read_control(
     stream: &StreamProbe,
     record: &Record,
@@ -196,66 +178,51 @@ fn read_control(
     id: u32,
     site: Option<PageNumberSite>,
     out: &mut OwnedSectionPageNumbers,
-) -> Result<()> {
+) {
     if !is_page_number_control(id) {
-        return Ok(());
+        return;
     }
     let Some(site) = site else {
-        return Err(malformed(
-            record,
-            Some(section),
-            "page-number control appears before any paragraph",
-        ));
+        out.facts.turn_off(PageNumberOff::OutsideBody);
+        return;
     };
-    let bytes = data(stream, record);
-    let mark = match id {
+    match read_mark(data(stream, record), record, section, id, &mut out.facts) {
+        Ok(Some(mark)) => out.marks.push(OwnedPageNumberMark { site, mark }),
+        Ok(None) => {}
+        Err(reason) => out.facts.turn_off(reason),
+    }
+}
+
+fn read_mark(
+    bytes: &[u8],
+    record: &Record,
+    section: usize,
+    id: u32,
+    facts: &mut PageNumberFacts,
+) -> std::result::Result<Option<PageNumberMark>, PageNumberOff> {
+    let unread = |_| PageNumberOff::UnreadValue;
+    match id {
         CTRL_PAGE_NUM_POS => {
-            let decoration = parse_page_number_control(bytes, record, section)?;
-            match out.decoration {
-                Some(existing) if existing != decoration => {
-                    return Err(malformed(
-                        record,
-                        Some(section),
-                        "page-number positions in one section have conflicting semantics",
-                    ))
-                }
-                _ => out.decoration = Some(decoration),
-            }
-            Some(PageNumberMark::Show)
+            facts.add_position(parse_page_number_control(bytes, record, section).map_err(unread)?);
+            Ok(Some(PageNumberMark::Show))
         }
         CTRL_NEW_NUMBER => {
             // 쪽이 아닌 카운터(각주 · 그림 · 표 · 수식 번호)는 쪽 번호와 무관하다.
-            let page_counter =
-                bytes.len() == 10 && read_u32(bytes, 4).is_some_and(|attr| attr & 0x0f == 0);
-            if bytes.len() == 10 && !page_counter {
-                None
-            } else {
-                Some(PageNumberMark::Restart(parse_new_number_control(
-                    bytes, record, section,
-                )?))
+            let other_counter =
+                bytes.len() == 10 && read_u32(bytes, 4).is_some_and(|attr| attr & 0x0f != 0);
+            if other_counter {
+                return Ok(None);
             }
+            let start = parse_new_number_control(bytes, record, section).map_err(unread)?;
+            Ok(Some(PageNumberMark::Restart(start)))
         }
         _ => {
-            if bytes.len() != 8 {
-                return Err(malformed(
-                    record,
-                    Some(section),
-                    "page-hide control is not exactly 8 bytes",
-                ));
-            }
-            let attr = read_u32(bytes, 4).expect("exact length checked");
-            if attr & !PAGE_HIDE_KNOWN_BITS != 0 {
-                return Err(malformed(
-                    record,
-                    Some(section),
-                    "page-hide control has unknown attribute bits",
-                ));
-            }
-            (attr & PAGE_HIDE_PAGE_NUMBER != 0).then_some(PageNumberMark::Hide)
+            let attr = (bytes.len() == 8)
+                .then(|| read_u32(bytes, 4))
+                .flatten()
+                .filter(|attr| attr & !PAGE_HIDE_KNOWN_BITS == 0)
+                .ok_or(PageNumberOff::UnreadValue)?;
+            Ok((attr & PAGE_HIDE_PAGE_NUMBER != 0).then_some(PageNumberMark::Hide))
         }
-    };
-    if let Some(mark) = mark {
-        out.marks.push(OwnedPageNumberMark { site, mark });
     }
-    Ok(())
 }

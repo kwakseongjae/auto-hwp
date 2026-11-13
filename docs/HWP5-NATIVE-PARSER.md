@@ -69,21 +69,29 @@ rejected instead of being interpreted as records.
   After that succeeds, owned facts are attached, each axis atomically (validation precedes mutation;
   any failure, topology mismatch, or conflict is a no-op for that axis). HWP3 remains the unmodified
   rhwp route.
-  - **Page numbers** come from the page-number-only owned extraction
-    (`OwnHwp5Parser::page_numbers`), which does **not** require the whole document to parse strictly.
+  - **Page numbers — and only page numbers — are independent of the whole-document strict parse
+    (#528).** They come from the page-number-only owned extraction (`OwnHwp5Parser::page_numbers`).
     Real forms fail the whole-document parse on records unrelated to page numbers (a DocInfo bullet
     extension, a section-definition child record, image/gradient border fills), and Hancom places
     page-number controls where the strict parser does not accept them (a later paragraph, a table
-    cell, `pghd` page hiding). The extraction validates the container and every record frame through
-    the shared probe, reads `pgnp` and page-counter `nwno` with the strict parser's own decoders, adds
-    a strict `pghd` reader (attribute bit 0x20 = hide the page number; unknown bits are refused), and
-    accepts exactly two sites: a control of a top-level paragraph (record level 1), and a control of a
-    cell paragraph of a table that paragraph hosts (level 3, after the `TABLE` record). Captions,
-    headers/footers, notes, text boxes, nested tables, conflicting positions, a nonzero section
-    start number, and a later section without a first-paragraph restart are refused or left off.
-    `hwp-core` then requires the same section count and top-level paragraph count as the rhwp model
-    and resolves every table/cell/paragraph before it sets `Section.page_number` and appends
-    `Paragraph.page_number_marks`.
+    cell, `pghd` page hiding).
+    - The container and every record frame are validated through the shared probe; a broken frame is
+      an error.
+    - Only `pgnp`, page-counter `nwno` (read with the strict parser's own decoders) and the
+      page-number bit of `pghd` (0x20; unknown bits are not read) are interpreted.
+    - Accepted sites are exactly two: (X) a control of a top-level paragraph (record level 1) and (Y)
+      a control of a cell paragraph of a table that paragraph hosts (level 3, after the `TABLE`
+      record).
+    - Anything else turns that section's page numbers **off** and records why
+      (`Section.page_number_off`, surfaced as a `page-number` PDF diagnostic): other sites (captions,
+      headers/footers, notes, text boxes, nested tables), unread values, conflicting positions, a
+      nonzero section start number, a later section without a first-paragraph restart, or a
+      topology mismatch with the rhwp model. The on/off rule is `PageNumberFacts::resolve`, shared
+      with the HWPX reader.
+    - `hwp-core` requires the same section count and top-level paragraph count as the rhwp model and
+      resolves every table/cell/paragraph before it sets `Section.page_number` and appends
+      `Paragraph.page_number_marks`.
+    - This exception covers page numbers only. Every other owned fact keeps the whole-document rule.
   - **Table anchor spacing and source line geometry** still require the complete strict parse.
 - `open_hwp5_own`: explicit first-party-only route. It returns a `SemanticDoc` only for the owned
   text, single-sided page setup, strict column subset, page numbering, and explicitly enumerated
@@ -181,7 +189,7 @@ and cutover gates below are satisfied.
 still decoded by rhwp; a complete strict first-party parse acted as the fail-closed evidence source
 until S2 replaced it, for page numbers only, with the bounded page-number extraction above.
 On the canonical eight-page benchmark, production SVG and PDF now match the first-party candidate,
-including three page-number glyphs per page. HWP3, HWPX, the generic cutover eligibility result, and
+including three page-number glyphs per page (five since #528 spaces the dashes like Hancom: `- N -`). HWP3, HWPX, the generic cutover eligibility result, and
 vendored rhwp are unchanged. This bounded enrichment does not imply that unsupported first-party
 documents can bypass rhwp.
 

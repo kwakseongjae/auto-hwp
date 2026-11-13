@@ -810,6 +810,8 @@ pub fn parse(proj: &JsxCssProject) -> Result<SemanticDoc> {
                 .as_ref()
                 .map(parse_page_number)
                 .transpose()?,
+            // 끈 이유는 원본을 읽을 때의 진단이라 투영에 싣지 않는다(쪽 번호 표지와 같은 부류).
+            page_number_off: None,
             page_edited: meta.page_edited,
             decorations: meta
                 .decorations

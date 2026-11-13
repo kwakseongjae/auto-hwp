@@ -889,6 +889,17 @@ fn export_pdf(
         })
         .transpose()?;
     std::fs::write(out, &result.bytes).map_err(|e| format!("write {}: {e}", out.display()))?;
+    for diagnostic in result
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.kind == "page-number")
+    {
+        eprintln!(
+            "경고: {}쪽부터 시작하는 구역에 쪽 번호를 그리지 않았다 ({})",
+            diagnostic.page_index + 1,
+            diagnostic.code
+        );
+    }
     if let (Some(path), Some(bytes)) = (visual_regions, evidence) {
         use std::io::Write as _;
         let mut options = std::fs::OpenOptions::new();
@@ -1074,6 +1085,15 @@ fn render(_file: &PathBuf, _page: u32, _out: &PathBuf) -> Result<(), String> {
 fn own_render(file: &PathBuf, page: Option<usize>, out: &PathBuf) -> Result<(), String> {
     let bytes = read(file)?;
     let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+    for (index, section) in doc.sections.iter().enumerate() {
+        if let Some(reason) = section.page_number_off {
+            eprintln!(
+                "경고: 구역 {}에 쪽 번호를 그리지 않았다 ({})",
+                index + 1,
+                reason.code()
+            );
+        }
+    }
     let svgs = hwp_session::render_svg(&doc);
     if svgs.is_empty() {
         return Err("nothing to render (no pages)".into());

@@ -57,10 +57,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
     (글머리표 확장 · 그림 채우기 등) 때문에 빠지던 문서에도 붙는다.
   - 새 번호 · 감추기는 그 제어가 **놓인 쪽**에서 효력을 낸다(한컴 규칙: 감춘 쪽도 번호는 센다). 쪽 나눔 · 본문 위치는 바뀌지 않는다.
   - 읽을 수 없거나 규칙을 확인하지 못한 꼴(모르는 위치 · 형식, 머리말 안의 제어, 앞 구역에서 이어 세는 둘째 구역 등)은 틀린 번호 대신
-    그 구역의 쪽 번호를 그리지 않는다.
+    그 구역의 쪽 번호를 그리지 않고, 이유를 PDF 진단(`kind: "page-number"`)과 CLI 경고로 남긴다.
+  - 줄표가 있는 쪽 번호를 한컴처럼 띄워 찍는다(「-1-」 → 「- 1 -」, 줄표와 숫자 사이 반 칸).
   *(EN — Fixed: own-typeset SVG/PDF missed or misnumbered page numbers. HWPX page-number position / page restart / hide-on-this-page
   controls are read; HWP5 page numbers no longer depend on the whole document passing the strict parser. Restarts and hides apply on
-  the page that holds the control; pagination is unchanged. Unsupported shapes turn that section's numbers off instead of guessing.)*
+  the page that holds the control; pagination is unchanged. Unsupported shapes turn that section's numbers off instead of guessing and
+  report why (PDF diagnostic `page-number`, CLI warning). Dash-wrapped numbers are spaced like Hancom: `- 1 -`.)*
 
 ### 추가 (Added)
 
@@ -75,8 +77,11 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   남기고, JSX 투영은 이 필드를 싣지 않는다(쪽 나누기 · 표 앵커와 같은 부류). Rust 크레이트 공개 타입 — crates.io 발행은 없다.
   *(EN — Added: page-number marks on the paragraph that holds the control; empty by default. Not carried by the JSX projection.)*
 - **`hwp_hwp5::OwnHwp5Parser::page_numbers(bytes)`.** 쪽 번호 제어만 읽는 자체 추출. 받는 자리는 최상위 문단과 그 문단이 품은 표의 칸
-  두 가지이고, 그 밖의 자리 · 값은 오류다.
-  *(EN — Added: page-number-only owned HWP5 extraction; two accepted sites, everything else is an error.)*
+  두 가지이고, 그 밖의 자리 · 값은 그 구역을 끄고 이유를 남긴다. 오류는 레코드 틀이 깨졌을 때뿐이다.
+  *(EN — Added: page-number-only owned HWP5 extraction; two accepted sites, anything else turns that section off with a reason.)*
+- **`PageNumberFacts` · `PageNumberOff` · `Section::page_number_off` · `PlacedDoc::page_number_off`.** 쪽 번호를 켤지 끌지 정하는 한 규칙
+  (`PageNumberFacts::resolve`, HWPX · HWP5 공용)과 끈 이유. Rust 크레이트 공개 타입 — crates.io 발행은 없다.
+  *(EN — Added: one shared on/off rule for page numbers and the reason a section's numbers are off.)*
 
 ---
 

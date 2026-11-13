@@ -941,6 +941,18 @@ pub fn export_pdf_with_fonts(
         replay.push(stats);
         diagnostics.append(&mut page_diagnostics);
     }
+    // 쪽 번호를 끈 구역은 조용히 넘기지 않는다 — 그 구역 첫 쪽에 이유 코드를 남긴다.
+    diagnostics.extend(
+        placed
+            .page_number_off
+            .iter()
+            .map(|notice| PdfCapabilityDiagnostic {
+                page_index: notice.first_page,
+                op_index: 0,
+                kind: "page-number".into(),
+                code: notice.reason.code().into(),
+            }),
+    );
 
     let bytes = document
         .finish()
@@ -2223,14 +2235,35 @@ mod tests {
         assert_eq!(numbered_out.pages, plain_out.pages);
         assert_eq!(
             numbered_out.replay[0].text.produced,
-            plain_out.replay[0].text.produced + 5,
-            "-[7]- is five shared PaintOp::Glyph operations"
+            plain_out.replay[0].text.produced + 7,
+            "\"- [7] -\" is seven shared PaintOp::Glyph operations (the side gaps are spaces)"
+        );
+        assert!(
+            numbered_out.diagnostics.is_empty(),
+            "a numbered section leaves no page-number diagnostic"
         );
         assert_eq!(
             numbered_out.replay[0].text.produced,
             numbered_out.replay[0].text.replayed
         );
         assert_eq!(numbered_out.replay[0].text.stubbed, 0);
+    }
+
+    /// 쪽 번호를 끈 구역은 PDF 진단으로 남는다 — 조용히 넘기지 않는다.
+    #[test]
+    fn a_turned_off_page_number_is_reported_as_a_diagnostic() {
+        let mut doc = doc_with(vec![Block::Paragraph(para("본문"))]);
+        doc.sections[0].page_number_off = Some(PageNumberOff::OutsideBody);
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        assert_eq!(
+            out.diagnostics,
+            vec![PdfCapabilityDiagnostic {
+                page_index: 0,
+                op_index: 0,
+                kind: "page-number".into(),
+                code: "page-number.outside-body".into(),
+            }]
+        );
     }
 
     #[test]

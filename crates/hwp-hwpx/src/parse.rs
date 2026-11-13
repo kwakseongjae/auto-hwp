@@ -62,7 +62,7 @@ pub fn parse_semantic(bytes: &[u8]) -> Result<SemanticDoc> {
         let numbering = parse_section(&text, &mut section.blocks, &mut decos, &border_pool)
             .map_err(|l| Error::Parse(l.to_string()))?;
         section.decorations = decos;
-        section.page_number = numbering.decoration(doc.sections.len());
+        numbering.apply_to(&mut section, doc.sections.len());
         // Batch B (#196): the real page geometry (size/margins) drives body width/height → correct
         // pagination. Left un-edited (`page_edited` stays false) so the secPr round-trips verbatim.
         if let Some(pg) = parse_page_setup(&text) {
@@ -114,7 +114,7 @@ pub fn parse_semantic_guarded(bytes: &[u8]) -> std::result::Result<SemanticDoc, 
         let numbering = parse_section(&text, &mut section.blocks, &mut decos, &border_pool)
             .map_err(HardenedError::Limit)?;
         section.decorations = decos;
-        section.page_number = numbering.decoration(doc.sections.len());
+        numbering.apply_to(&mut section, doc.sections.len());
         if let Some(pg) = parse_page_setup(&text) {
             section.page = pg;
         }
@@ -592,97 +592,75 @@ struct ParaAccum {
     page_number_marks: Vec<PageNumberMark>,
 }
 
-/// 구역 XML 이 말하는 쪽 번호. 구역마다 켤지는 [`SectionNumbering::decoration`] 이 정한다.
-#[derive(Default)]
-pub(crate) struct SectionNumbering {
-    decoration: Option<PageNumberDecoration>,
-    /// 읽을 수 없거나 규칙을 확인하지 못한 꼴 — 그 구역은 쪽 번호를 그리지 않는다(틀린 번호보다
-    /// 없는 번호): 모르는 `pos` · `formatType` · `sideChar`, 같은 구역 안에서 모양이 다른 `pageNum`,
-    /// 머리말 · 꼬리말 · 각주 · 메모 · 글상자 안의 제어, 0 이나 숫자가 아닌 새 번호.
-    off: bool,
-    /// `<hp:startNum page>`(secPr). 0 = 앞 구역에서 이어 센다.
-    start_page: Option<usize>,
-    /// 구역 첫 최상위 문단에 직접 놓인 새 번호 — 구역 첫 쪽의 번호를 확정한다.
-    restart_at_start: bool,
+/// `<hp:pageNum>` → 쪽 번호 위치. 원문자 등은 표기 문자열을 코퍼스로 확인하지 못해 끈다.
+fn read_page_num(facts: &mut PageNumberFacts, e: &BytesStart) -> Option<PageNumberMark> {
+    let unread = |facts: &mut PageNumberFacts| {
+        facts.turn_off(PageNumberOff::UnreadValue);
+        None
+    };
+    let position = match attr_str(e, b"pos").as_deref() {
+        Some("NONE") => PageNumberPosition::None,
+        Some("TOP_LEFT") => PageNumberPosition::TopLeft,
+        Some("TOP_CENTER") => PageNumberPosition::TopCenter,
+        Some("TOP_RIGHT") => PageNumberPosition::TopRight,
+        Some("BOTTOM_LEFT") => PageNumberPosition::BottomLeft,
+        Some("BOTTOM_CENTER") => PageNumberPosition::BottomCenter,
+        Some("BOTTOM_RIGHT") => PageNumberPosition::BottomRight,
+        Some("OUTSIDE_TOP") => PageNumberPosition::OutsideTop,
+        Some("OUTSIDE_BOTTOM") => PageNumberPosition::OutsideBottom,
+        Some("INSIDE_TOP") => PageNumberPosition::InsideTop,
+        Some("INSIDE_BOTTOM") => PageNumberPosition::InsideBottom,
+        _ => return unread(facts),
+    };
+    let format = match attr_str(e, b"formatType").as_deref() {
+        Some("DIGIT") | None => PageNumberFormat::Digit,
+        Some("ROMAN_CAPITAL") => PageNumberFormat::RomanUpper,
+        Some("ROMAN_SMALL") => PageNumberFormat::RomanLower,
+        Some("LATIN_CAPITAL") => PageNumberFormat::LatinUpper,
+        Some("LATIN_SMALL") => PageNumberFormat::LatinLower,
+        Some(_) => return unread(facts),
+    };
+    let side = attr_str(e, b"sideChar").unwrap_or_default();
+    let mut chars = side.chars();
+    let dash = match (chars.next(), chars.next()) {
+        (None, _) => None,
+        (Some(ch), None) => Some(ch),
+        _ => return unread(facts),
+    };
+    facts.add_position(PageNumberDecoration {
+        start: std::num::NonZeroU16::MIN,
+        format,
+        position,
+        prefix: None,
+        suffix: None,
+        dash,
+    });
+    Some(PageNumberMark::Show)
 }
 
-impl SectionNumbering {
-    /// 이 구역에 그릴 쪽 번호 모양. 시작 번호는 1 이고 새 번호 · 감추기 · 보이기는 문단 표지가 맡는다.
-    /// - `startNum page` 가 0 이 아니면 끈다(코퍼스에 그 꼴이 없어 규칙 미확인).
-    /// - 둘째 구역부터는 첫 문단에 새 번호가 있을 때만 켠다. 없으면 앞 구역에서 이어 세는데,
-    ///   구역마다 따로 세는 지금 조판으로는 그 번호를 알 수 없다.
-    pub(crate) fn decoration(&self, section_index: usize) -> Option<PageNumberDecoration> {
-        if self.off || self.start_page.is_some_and(|page| page != 0) {
-            return None;
-        }
-        if section_index > 0 && !self.restart_at_start {
-            return None;
-        }
-        self.decoration
+/// `<hp:newNum numType="PAGE">` → 새 번호. 각주 · 그림 번호 등은 쪽 번호와 무관하다.
+fn read_new_num(facts: &mut PageNumberFacts, e: &BytesStart) -> Option<PageNumberMark> {
+    if attr_str(e, b"numType").as_deref() != Some("PAGE") {
+        return None;
     }
-
-    fn page_num(&mut self, e: &BytesStart) -> Option<PageNumberMark> {
-        let position = match attr_str(e, b"pos").as_deref() {
-            Some("NONE") => PageNumberPosition::None,
-            Some("TOP_LEFT") => PageNumberPosition::TopLeft,
-            Some("TOP_CENTER") => PageNumberPosition::TopCenter,
-            Some("TOP_RIGHT") => PageNumberPosition::TopRight,
-            Some("BOTTOM_LEFT") => PageNumberPosition::BottomLeft,
-            Some("BOTTOM_CENTER") => PageNumberPosition::BottomCenter,
-            Some("BOTTOM_RIGHT") => PageNumberPosition::BottomRight,
-            Some("OUTSIDE_TOP") => PageNumberPosition::OutsideTop,
-            Some("OUTSIDE_BOTTOM") => PageNumberPosition::OutsideBottom,
-            Some("INSIDE_TOP") => PageNumberPosition::InsideTop,
-            Some("INSIDE_BOTTOM") => PageNumberPosition::InsideBottom,
-            _ => return self.turn_off(),
-        };
-        // 원문자 등은 표기 문자열을 코퍼스로 확인하지 못해 끈다.
-        let format = match attr_str(e, b"formatType").as_deref() {
-            Some("DIGIT") | None => PageNumberFormat::Digit,
-            Some("ROMAN_CAPITAL") => PageNumberFormat::RomanUpper,
-            Some("ROMAN_SMALL") => PageNumberFormat::RomanLower,
-            Some("LATIN_CAPITAL") => PageNumberFormat::LatinUpper,
-            Some("LATIN_SMALL") => PageNumberFormat::LatinLower,
-            Some(_) => return self.turn_off(),
-        };
-        let side = attr_str(e, b"sideChar").unwrap_or_default();
-        let mut chars = side.chars();
-        let dash = match (chars.next(), chars.next()) {
-            (None, _) => None,
-            (Some(ch), None) => Some(ch),
-            _ => return self.turn_off(),
-        };
-        let decoration = PageNumberDecoration {
-            start: std::num::NonZeroU16::MIN,
-            format,
-            position,
-            prefix: None,
-            suffix: None,
-            dash,
-        };
-        match self.decoration {
-            Some(existing) if existing != decoration => return self.turn_off(),
-            _ => self.decoration = Some(decoration),
-        }
-        Some(PageNumberMark::Show)
-    }
-
-    fn new_num(&mut self, e: &BytesStart) -> Option<PageNumberMark> {
-        if attr_str(e, b"numType").as_deref() != Some("PAGE") {
-            return None; // 각주 · 그림 번호 등 — 쪽 번호와 무관하다
-        }
-        match attr_usize(e, b"num")
-            .and_then(|num| u16::try_from(num).ok())
-            .and_then(std::num::NonZeroU16::new)
-        {
-            Some(num) => Some(PageNumberMark::Restart(num)),
-            None => self.turn_off(),
+    match attr_usize(e, b"num")
+        .and_then(|num| u16::try_from(num).ok())
+        .and_then(std::num::NonZeroU16::new)
+    {
+        Some(num) => Some(PageNumberMark::Restart(num)),
+        None => {
+            facts.turn_off(PageNumberOff::UnreadValue);
+            None
         }
     }
+}
 
-    fn turn_off(&mut self) -> Option<PageNumberMark> {
-        self.off = true;
-        None
+/// `<hp:startNum page>`(secPr) — 구역 시작 쪽 번호. 없으면 0(이어 세기).
+fn read_start_num(facts: &mut PageNumberFacts, e: &BytesStart) {
+    match attr_usize(e, b"page").map(u16::try_from) {
+        None => facts.start_page = 0,
+        Some(Ok(page)) => facts.start_page = page,
+        Some(Err(_)) => facts.turn_off(PageNumberOff::UnreadValue),
     }
 }
 
@@ -815,9 +793,9 @@ pub(crate) fn parse_section(
     out: &mut Vec<Block>,
     decos: &mut Vec<PageDecoration>,
     borders: &std::collections::BTreeMap<u64, BorderFillDef>,
-) -> std::result::Result<SectionNumbering, DocLimit> {
+) -> std::result::Result<PageNumberFacts, DocLimit> {
     let mut reader = Reader::from_str(xml);
-    let mut numbering = SectionNumbering::default();
+    let mut numbering = PageNumberFacts::default();
     // 닫힌 최상위 문단 수 — 0 이면 지금 구역의 첫 최상위 문단 안이다.
     let mut top_paragraphs_closed = 0usize;
     // Stack of block containers (section, then nested table-cell / header / note sublists).
@@ -1009,7 +987,7 @@ pub(crate) fn parse_section(
                                 at_start,
                             );
                         } else if other == b"startNum" {
-                            numbering.start_page = attr_usize(&e, b"page");
+                            read_start_num(&mut numbering, &e);
                         }
                         if !matches!(other, b"linesegarray" | b"lineseg") {
                             mark_not_simple(&mut paras);
@@ -1073,7 +1051,7 @@ pub(crate) fn parse_section(
                     mark_not_simple(&mut paras);
                 }
                 b"startNum" => {
-                    numbering.start_page = attr_usize(&e, b"page");
+                    read_start_num(&mut numbering, &e);
                     mark_not_simple(&mut paras);
                 }
                 b"t" => {} // empty `<hp:t/>` — keeps an empty run; not a simple-breaker
@@ -1494,7 +1472,7 @@ pub(crate) fn parse_section(
 /// 꼬리말 · 각주 · 메모 · 글상자) 안이면 그 구역의 쪽 번호를 끈다.
 fn read_page_number_control(
     e: &BytesStart,
-    numbering: &mut SectionNumbering,
+    numbering: &mut PageNumberFacts,
     paras: &mut [ParaAccum],
     in_sub_frame: bool,
     at_section_start: bool,
@@ -1505,13 +1483,13 @@ fn read_page_number_control(
         return;
     }
     if in_sub_frame {
-        numbering.turn_off();
+        numbering.turn_off(PageNumberOff::OutsideBody);
         return;
     }
     let mark = match name {
-        b"pageNum" => numbering.page_num(e),
+        b"pageNum" => read_page_num(numbering, e),
         b"newNum" => {
-            let mark = numbering.new_num(e);
+            let mark = read_new_num(numbering, e);
             if mark.is_some() && at_section_start {
                 numbering.restart_at_start = true;
             }
@@ -1523,9 +1501,7 @@ fn read_page_number_control(
     if let Some(mark) = mark {
         match paras.last_mut() {
             Some(paragraph) => paragraph.page_number_marks.push(mark),
-            None => {
-                numbering.turn_off();
-            }
+            None => numbering.turn_off(PageNumberOff::OutsideBody),
         }
     }
 }
@@ -3079,7 +3055,7 @@ pub(crate) mod tests {
         );
     }
 
-    fn numbered_section(body: &str) -> (Vec<Block>, SectionNumbering) {
+    fn numbered_section(body: &str) -> (Vec<Block>, PageNumberFacts) {
         let xml = format!(r#"<hs:sec xmlns:hs="s" xmlns:hp="p">{body}</hs:sec>"#);
         let mut blocks = Vec::new();
         let numbering =
@@ -3115,7 +3091,8 @@ pub(crate) mod tests {
         );
         let (blocks, numbering) = numbered_section(&body);
         let decoration = numbering
-            .decoration(0)
+            .resolve(0)
+            .unwrap()
             .expect("first section keeps its numbering");
         assert_eq!(decoration.position, PageNumberPosition::BottomCenter);
         assert_eq!(decoration.format, PageNumberFormat::Digit);
@@ -3142,72 +3119,76 @@ pub(crate) mod tests {
         assert_eq!(table.cells[1].row, 1, "the hiding mark sits in row 1");
     }
 
-    /// 읽을 수 없거나 규칙을 확인하지 못한 꼴은 그 구역의 쪽 번호를 끈다 — 꼴마다 하나씩.
+    /// 읽을 수 없거나 규칙을 확인하지 못한 꼴은 그 구역의 쪽 번호를 끄고 **이유를 남긴다** — 꼴마다 하나씩.
     #[test]
-    fn unsupported_page_number_shapes_turn_the_section_off() {
-        let on = |body: &str| numbered_section(body).1.decoration(0).is_some();
-        assert!(on(FIRST));
+    fn unsupported_page_number_shapes_turn_the_section_off_with_a_reason() {
+        use PageNumberOff::*;
+        let outcome = |body: &str| numbered_section(body).1.resolve(0).map(|d| d.is_some());
+        assert_eq!(outcome(FIRST), Ok(true));
         let page_num = |attrs: &str| {
             format!(r#"<hp:p><hp:run><hp:ctrl><hp:pageNum {attrs}/></hp:ctrl></hp:run></hp:p>"#)
         };
-        assert!(on(&page_num(
-            r#"pos="BOTTOM_RIGHT" formatType="ROMAN_SMALL" sideChar="""#
-        )));
-        assert!(
-            !on(&page_num(r#"pos="SOMEWHERE" formatType="DIGIT""#)),
-            "unknown pos"
-        );
-        assert!(!on(&page_num(r#"formatType="DIGIT""#)), "missing pos");
-        assert!(
-            !on(&page_num(r#"pos="BOTTOM_CENTER" formatType="IDEOGRAPH""#)),
-            "unread format"
-        );
-        assert!(
-            !on(&page_num(
-                r#"pos="BOTTOM_CENTER" formatType="CIRCLED_DIGIT""#
-            )),
-            "unconfirmed spelling"
-        );
-        assert!(
-            !on(&page_num(r#"pos="BOTTOM_CENTER" sideChar="--""#)),
-            "two side chars"
-        );
+        let ok = page_num(r#"pos="BOTTOM_RIGHT" formatType="ROMAN_SMALL" sideChar="""#);
+        assert_eq!(outcome(&ok), Ok(true));
+        for (attrs, why) in [
+            (r#"pos="SOMEWHERE" formatType="DIGIT""#, "unknown pos"),
+            (r#"formatType="DIGIT""#, "missing pos"),
+            (
+                r#"pos="BOTTOM_CENTER" formatType="IDEOGRAPH""#,
+                "unread format",
+            ),
+            (
+                r#"pos="BOTTOM_CENTER" formatType="CIRCLED_DIGIT""#,
+                "unconfirmed spelling",
+            ),
+            (r#"pos="BOTTOM_CENTER" sideChar="--""#, "two side chars"),
+        ] {
+            assert_eq!(outcome(&page_num(attrs)), Err(UnreadValue), "{why}");
+        }
         let conflicting = format!(
             "{FIRST}{}",
             page_num(r#"pos="TOP_CENTER" formatType="DIGIT" sideChar="-""#)
         );
-        assert!(
-            !on(&conflicting),
-            "a different pageNum later in the section"
-        );
+        assert_eq!(outcome(&conflicting), Err(ConflictingPositions));
         let zero = format!(
             r#"{FIRST}<hp:p><hp:run><hp:ctrl><hp:newNum num="0" numType="PAGE"/></hp:ctrl></hp:run></hp:p>"#
         );
-        assert!(!on(&zero), "restart at zero");
+        assert_eq!(outcome(&zero), Err(UnreadValue), "restart at zero");
         let in_footer = format!(
             r#"{FIRST}<hp:p><hp:run><hp:ctrl><hp:footer id="6" applyPageType="BOTH"><hp:subList><hp:p><hp:run><hp:ctrl><hp:pageHiding hidePageNum="1"/></hp:ctrl></hp:run></hp:p></hp:subList></hp:footer></hp:ctrl></hp:run></hp:p>"#
         );
-        assert!(!on(&in_footer), "a control inside a footer body");
+        assert_eq!(outcome(&in_footer), Err(OutsideBody));
         let explicit_start = FIRST.replace(r#"page="0""#, r#"page="3""#);
-        assert!(!on(&explicit_start), "startNum page other than 0");
+        assert_eq!(outcome(&explicit_start), Err(NonzeroSectionStart));
+        // 쪽 번호 제어가 없는 구역은 끈 것이 아니다 — 이유를 남기지 않는다.
+        assert_eq!(
+            outcome("<hp:p><hp:run><hp:t>본문</hp:t></hp:run></hp:p>"),
+            Ok(false)
+        );
     }
 
     /// 둘째 구역부터는 첫 문단의 새 번호가 첫 쪽 번호를 확정할 때만 켠다(이어 세기 규칙 미확인).
     #[test]
     fn later_sections_need_a_restart_in_their_first_paragraph() {
         let (_, plain) = numbered_section(FIRST);
-        assert!(plain.decoration(0).is_some());
-        assert!(plain.decoration(1).is_none());
+        assert!(plain.resolve(0).unwrap().is_some());
+        assert_eq!(
+            plain.resolve(1),
+            Err(PageNumberOff::ContinuesPreviousSection)
+        );
         let restarted = FIRST.replace(
             "</hp:ctrl></hp:run>",
             r#"</hp:ctrl><hp:ctrl><hp:newNum num="1" numType="PAGE"/></hp:ctrl></hp:run>"#,
         );
         let (_, numbering) = numbered_section(&restarted);
-        assert!(numbering.decoration(1).is_some());
+        assert!(numbering.resolve(1).unwrap().is_some());
         let late = format!(
             r#"{FIRST}<hp:p><hp:run><hp:ctrl><hp:newNum num="1" numType="PAGE"/></hp:ctrl></hp:run></hp:p>"#
         );
-        assert!(numbered_section(&late).1.decoration(1).is_none());
+        assert_eq!(
+            numbered_section(&late).1.resolve(1),
+            Err(PageNumberOff::ContinuesPreviousSection)
+        );
     }
 
     /// 회귀 잠금(2단계): `<hp:header>`/`<hp:footer>` 안의 문단은 **본문 블록이 아니다**.

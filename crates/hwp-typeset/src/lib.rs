@@ -34,8 +34,8 @@ pub mod place;
 pub use place::{
     block_pages, cell_caret_rect, cell_caret_rect_path, cell_text_hit, column_offsets, page_usage,
     place_doc, row_offsets, table_cell_fits, BlockKind, CellAddr, CellCaretRect, CellFit,
-    CellTextHit, PageUsage, PlacedBlock, PlacedCell, PlacedDoc, PlacedGlyph, PlacedGlyphOrigin,
-    PlacedImage, PlacedPage, PlacedRect, PlacedTable,
+    CellTextHit, PageNumberOffNotice, PageUsage, PlacedBlock, PlacedCell, PlacedDoc, PlacedGlyph,
+    PlacedGlyphOrigin, PlacedImage, PlacedPage, PlacedRect, PlacedTable,
 };
 
 /// Half the EM for half-width glyphs.

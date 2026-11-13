@@ -47,10 +47,11 @@ F0(#87/#151)은 이 문서·검증기·코드 경계를 소유한다. F1(#107)�
 경계를 `hwp-hwp5`로 구현했다(`docs/HWP5-NATIVE-PARSER.md`). production decode는 아직 rhwp이며,
 #219는 whole-document strict parse와 section/typed-value 호환이 모두 성립할 때만
 `Section.page_number`를 production 결과에 atomic 보강했다. S2(`docs/HANCOM-PDF-PARITY-ROADMAP.md`)는
-쪽 번호에 한해 이 조건을 「쪽 번호 전용 자체 추출 + rhwp 본문과의 위상 대조」로 바꿨다 — 컨테이너 ·
-레코드 틀은 자체 리더가 모두 검증하고, 받는 자리는 최상위 문단과 그 문단이 품은 표의 칸 두 가지뿐이며,
-하나라도 어긋나면 아무것도 바꾸지 않는다(`docs/HWP5-NATIVE-PARSER.md` Parser modes). 표 앵커 간격 ·
-원본 줄 기하는 여전히 문서 전체 엄격 파싱이 성공할 때만 붙인다. 이는 generic cutover가 아니며,
+**쪽 번호에 한해** 이 조건을 뗐다(#528): 쪽 번호 전용 추출은 문서 전체 엄격 파싱과 독립이다. 컨테이너 ·
+레코드 틀은 자체 리더가 모두 검증하고, 받는 자리는 최상위 문단(X)과 그 문단이 품은 표의 칸(Y) 두 가지이며,
+그 밖의 자리 · 값이나 rhwp 본문과의 위상 불일치는 그 구역의 쪽 번호를 끄고 이유를 남긴다(`docs/HWP5-NATIVE-PARSER.md`
+Parser modes). 이 예외는 쪽 번호에만 적용된다 — 표 앵커 간격 · 원본 줄 기하를 비롯한 다른 자체 사실은 여전히 문서
+전체 엄격 파싱이 성공할 때만 붙인다. 이는 generic cutover가 아니며,
 #94가 DocInfo/text/object semantic slice와 corpus parity를 순차 승격한다. 자체 전용 API는 미지원
 slice에서 fail-closed하고 production route로 fallback하지 않는다. 한 기능씩 corpus와
 lineseg/페이지/PDF 시각 오라클을 통과시킨 뒤에만 rhwp 호출을 제거한다.

@@ -160,6 +160,11 @@ pub struct Section {
     /// Optional page-number decoration scoped to this section. The typesetter derives progression
     /// from the source-neutral section start, format, position, and final page order.
     pub page_number: Option<PageNumberDecoration>,
+    /// Why this section draws no page number although its source carries page-number controls we
+    /// could not read or whose rule is unconfirmed — set by the readers through
+    /// [`PageNumberFacts::resolve`], so the decision is never skipped silently. `None` when
+    /// numbering is on or the source has none.
+    pub page_number_off: Option<PageNumberOff>,
     /// True once `page` was explicitly edited — the serializer then patches the section's `secPr`
     /// (parsed sections leave this false so their original page setup round-trips verbatim).
     pub page_edited: bool,
@@ -189,6 +194,109 @@ pub struct PageNumberDecoration {
     pub prefix: Option<char>,
     pub suffix: Option<char>,
     pub dash: Option<char>,
+}
+
+/// 쪽 번호를 끈 이유. 원칙은 「틀린 번호보다 없는 번호」 — 읽을 수 없거나 규칙을 확인하지 못한 꼴이면 그 구역의
+/// 쪽 번호를 그리지 않고, 이 값으로 이유를 남긴다(PDF 내보내기 진단 · CLI 경고).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageNumberOff {
+    /// 모르는 위치 · 형식 · 줄표, 0 으로 시작하는 새 번호, 모르는 속성 비트.
+    UnreadValue,
+    /// 같은 구역 안에 모양이 다른 쪽 번호 위치가 둘 이상.
+    ConflictingPositions,
+    /// 본문이 아닌 곳(머리말 · 꼬리말 · 각주 · 메모 · 글상자 · 캡션 · 표 속 표)의 쪽 번호 제어.
+    OutsideBody,
+    /// 구역 정의의 시작 쪽 번호가 0(이어 세기)이 아니다 — 그 꼴은 대조 문서가 없어 규칙을 확인하지 못했다.
+    NonzeroSectionStart,
+    /// 둘째 구역 이후인데 첫 문단에 새 번호가 없다 — 앞 구역에서 이어 센 번호를 구역마다 세는 조판이 모른다.
+    ContinuesPreviousSection,
+    /// HWP5: 쪽 번호 전용 추출과 rhwp 본문의 구역 · 문단 · 표 · 칸이 맞지 않는다.
+    SourceMismatch,
+    /// HWP5: 쪽 번호 전용 추출이 컨테이너 · 레코드 틀에서 실패했다(쪽 번호가 있었는지 모른다).
+    SourceUnreadable,
+    /// 조판: 표지가 놓인 쪽을 찾지 못했다(행 조각이 없는 표 등).
+    UnplacedMark,
+}
+
+impl PageNumberOff {
+    /// Stable, content-free code for diagnostics.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::UnreadValue => "page-number.unread-value",
+            Self::ConflictingPositions => "page-number.conflicting-positions",
+            Self::OutsideBody => "page-number.outside-body",
+            Self::NonzeroSectionStart => "page-number.nonzero-section-start",
+            Self::ContinuesPreviousSection => "page-number.continues-previous-section",
+            Self::SourceMismatch => "page-number.source-mismatch",
+            Self::SourceUnreadable => "page-number.source-unreadable",
+            Self::UnplacedMark => "page-number.unplaced-mark",
+        }
+    }
+}
+
+/// 한 구역의 쪽 번호 사실 — HWPX 파서와 HWP5 쪽 번호 추출이 같은 꼴로 채우고, 켤지 끌지는
+/// [`PageNumberFacts::resolve`] **한곳**에서 정한다.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PageNumberFacts {
+    /// 구역 안 쪽 번호 위치(같은 값의 반복은 하나). 시작 번호는 1 — 새 번호는 문단 표지가 맡는다.
+    pub decoration: Option<PageNumberDecoration>,
+    /// 읽는 도중 끈 이유(처음 것).
+    pub off: Option<PageNumberOff>,
+    /// 구역 정의의 시작 쪽 번호. 0 = 앞 구역에서 이어 센다.
+    pub start_page: u16,
+    /// 구역 첫 최상위 문단에 직접 놓인 새 번호 — 구역 첫 쪽의 번호를 확정한다.
+    pub restart_at_start: bool,
+}
+
+impl PageNumberFacts {
+    /// 읽는 도중 끈다(이유는 처음 것만 남긴다).
+    pub fn turn_off(&mut self, reason: PageNumberOff) {
+        self.off.get_or_insert(reason);
+    }
+
+    /// 쪽 번호 위치 하나를 더한다. 같은 값의 반복은 하나로 보고, 모양이 다르면 끈다.
+    pub fn add_position(&mut self, decoration: PageNumberDecoration) {
+        match self.decoration {
+            Some(existing) if existing != decoration => {
+                self.turn_off(PageNumberOff::ConflictingPositions)
+            }
+            _ => self.decoration = Some(decoration),
+        }
+    }
+
+    /// 이 구역에 그릴 쪽 번호 모양, 또는 끈 이유. 쪽 번호 제어가 없으면 `Ok(None)`.
+    pub fn resolve(
+        &self,
+        section_index: usize,
+    ) -> Result<Option<PageNumberDecoration>, PageNumberOff> {
+        if let Some(reason) = self.off {
+            return Err(reason);
+        }
+        let Some(decoration) = self.decoration else {
+            return Ok(None);
+        };
+        if self.start_page != 0 {
+            return Err(PageNumberOff::NonzeroSectionStart);
+        }
+        if section_index > 0 && !self.restart_at_start {
+            return Err(PageNumberOff::ContinuesPreviousSection);
+        }
+        Ok(Some(decoration))
+    }
+
+    /// [`Self::resolve`] 의 결론을 구역에 적는다 — 켜면 모양을, 끄면 이유를.
+    pub fn apply_to(&self, section: &mut Section, section_index: usize) {
+        match self.resolve(section_index) {
+            Ok(decoration) => {
+                section.page_number = decoration;
+                section.page_number_off = None;
+            }
+            Err(reason) => {
+                section.page_number = None;
+                section.page_number_off = Some(reason);
+            }
+        }
+    }
 }
 
 /// One page-number control anchored in a paragraph (see [`Paragraph::page_number_marks`]). It takes
