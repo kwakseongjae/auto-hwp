@@ -215,7 +215,7 @@
   - 조판은 문단 첫 줄의 쪽 · 표 행 조각의 쪽에서 효력을 낸다(쪽 나눔 무변경).
   - HWPX 세 제어를 읽는다.
   - HWP5 는 쪽 번호 전용 자체 추출로 바꿨다(`docs/HWP5-NATIVE-PARSER.md` Parser modes).
-  - 모르는 꼴은 그 구역의 쪽 번호를 끄고 이유를 남긴다(`Section::page_number_off` → PDF 진단 · CLI 경고). 켤지 끌지는
+  - 모르는 꼴은 그 구역의 쪽 번호를 끄고 이유를 남긴다(`Section::page_number_off` → PDF 알림 `notices` · CLI 경고). 켤지 끌지는
     HWPX · HWP5 공용 `PageNumberFacts::resolve` 한곳에서 정한다.
   - 줄표 쪽 번호를 「- N -」로 띄운다. 한컴 PDF 11문서(세 생산자) 모두 줄표와 숫자 사이가 4.9~5.1pt 였고, 우리는 5.0pt 다.
 - **잰 값**(쪽마다 번호 **값**을 대조 — 하네스 `page_number_sequence`):

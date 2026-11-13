@@ -4,7 +4,7 @@
   쪽 번호 표지(`Paragraph::page_number_marks`: 보이기 시작 · 새 번호 · 감추기)를 제어가 놓인 문단에 달고, 조판이 그 쪽에서 효력을 낸다(쪽 나눔 무변경).
   HWPX `<hp:pageNum>` · `<hp:newNum PAGE>` · `<hp:pageHiding>` 파싱, HWP5 는 쪽 번호 전용 자체 추출(문서 전체 엄격 파싱 조건을 뗌 — 계약 문서 2개 고침).
   측정: 번호를 찍는 문서 1 → 11/11, 쪽마다 값까지 같은 문서 1 → 3(공통 쪽 같음 7, 나머지 4는 쪽 나눔 탓). 26쌍 쪽 수 · 누락 · 줄 오차 기준선과 같음. 양식 8종 통과 수 변화 없음(쪽 번호 조건만 6/8 → 8/8).
-  끈 이유는 `PageNumberFacts::resolve` 한곳에서 정하고 `Section::page_number_off` → PDF 진단(`page-number`) · CLI 경고로 남김. 줄표 쪽 번호는 「- N -」(한컴 실측 5pt).
+  끈 이유는 `PageNumberFacts::resolve` 한곳에서 정하고 `Section::page_number_off` → PDF 알림(`PdfExport.notices`, `page-number` — 인쇄 · 검증 관문이 보는 진단과 따로) · CLI 경고로 남김. 줄표 쪽 번호는 「- N -」(한컴 실측 5pt).
 - 2026-11-13 · Claude Opus 5.5(워커) · **#530 한컴 PDF 대비 기준선 · 로드맵 · 측정 하네스** (view clipPath 겹침 고침은 #529 로 따로).
   정본 `docs/HANCOM-PDF-PARITY-ROADMAP.md` · 하네스 `scripts/hancom-parity/sweep.py`(한 줄 재현, 같은 값 확인). 기준선(26쌍): 변환 실패 0 · 쪽 수 일치 10 ·
   PDF 누락 1% 초과 7문서 · 쪽 번호 1/11 · 줄 세로 오차 14.9pt · 잉크 F1 중앙 0.36(156쪽). 첫 목표 = 양식 원본 8종(지금 1/8, `noAdjust` 바닥 실험 2/8).

@@ -57,12 +57,14 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
     (글머리표 확장 · 그림 채우기 등) 때문에 빠지던 문서에도 붙는다.
   - 새 번호 · 감추기는 그 제어가 **놓인 쪽**에서 효력을 낸다(한컴 규칙: 감춘 쪽도 번호는 센다). 쪽 나눔 · 본문 위치는 바뀌지 않는다.
   - 읽을 수 없거나 규칙을 확인하지 못한 꼴(모르는 위치 · 형식, 머리말 안의 제어, 앞 구역에서 이어 세는 둘째 구역 등)은 틀린 번호 대신
-    그 구역의 쪽 번호를 그리지 않고, 이유를 PDF 진단(`kind: "page-number"`)과 CLI 경고로 남긴다.
+    그 구역의 쪽 번호를 그리지 않고, 이유를 PDF 내보내기 알림(`PdfExport.notices`, `kind: "page-number"`)과 CLI 경고로 남긴다. 알림은 그리지 못한 개체를 뜻하는
+    진단(`diagnostics`)과 따로 있어, 진단을 보는 인쇄 · 검증 관문의 동작은 바뀌지 않는다.
   - 줄표가 있는 쪽 번호를 한컴처럼 띄워 찍는다(「-1-」 → 「- 1 -」, 줄표와 숫자 사이 반 칸).
   *(EN — Fixed: own-typeset SVG/PDF missed or misnumbered page numbers. HWPX page-number position / page restart / hide-on-this-page
   controls are read; HWP5 page numbers no longer depend on the whole document passing the strict parser. Restarts and hides apply on
   the page that holds the control; pagination is unchanged. Unsupported shapes turn that section's numbers off instead of guessing and
-  report why (PDF diagnostic `page-number`, CLI warning). Dash-wrapped numbers are spaced like Hancom: `- 1 -`.)*
+  report why (a `page-number` entry in the new report-only `PdfExport.notices`, kept apart from capability `diagnostics` so print and
+  verification gates are unchanged; CLI warning). Dash-wrapped numbers are spaced like Hancom: `- 1 -`.)*
 
 ### 추가 (Added)
 

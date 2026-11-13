@@ -83,7 +83,7 @@ rejected instead of being interpreted as records.
       a control of a cell paragraph of a table that paragraph hosts (level 3, after the `TABLE`
       record).
     - Anything else turns that section's page numbers **off** and records why
-      (`Section.page_number_off`, surfaced as a `page-number` PDF diagnostic): other sites (captions,
+      (`Section.page_number_off`, surfaced as a `page-number` PDF export notice): other sites (captions,
       headers/footers, notes, text boxes, nested tables), unread values, conflicting positions, a
       nonzero section start number, a later section without a first-paragraph restart, or a
       topology mismatch with the rhwp model. The on/off rule is `PageNumberFacts::resolve`, shared

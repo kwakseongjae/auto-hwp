@@ -889,15 +889,15 @@ fn export_pdf(
         })
         .transpose()?;
     std::fs::write(out, &result.bytes).map_err(|e| format!("write {}: {e}", out.display()))?;
-    for diagnostic in result
-        .diagnostics
+    for notice in result
+        .notices
         .iter()
-        .filter(|diagnostic| diagnostic.kind == "page-number")
+        .filter(|notice| notice.kind == "page-number")
     {
         eprintln!(
             "경고: {}쪽부터 시작하는 구역에 쪽 번호를 그리지 않았다 ({})",
-            diagnostic.page_index + 1,
-            diagnostic.code
+            notice.page_index + 1,
+            notice.code
         );
     }
     if let (Some(path), Some(bytes)) = (visual_regions, evidence) {

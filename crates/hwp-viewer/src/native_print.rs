@@ -164,6 +164,7 @@ mod tests {
             font_path: None,
             replay: vec![page],
             diagnostics: Vec::new(),
+            notices: Vec::new(),
         }
     }
 
