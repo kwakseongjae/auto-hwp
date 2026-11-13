@@ -38,7 +38,7 @@ HWP(한글) 자체 엔진: Rust 코어(파싱→IR→조판→렌더→export→
 |---|---|
 | 현재 위치·다음 작업 | `docs/CURRENT_STATE.md` (단일 복원 지점) |
 | 현행 로드맵 | `docs/PRODUCT-DIRECTION-V3.md` (A~D축; V2는 R12 잔여 참고) |
-| 장기 트랙 | `docs/TYPESET-ROADMAP.md`(조판) · `docs/BLOG-ROADMAP.md`(블로그) · `docs/DESKTOP-ROADMAP.md`(데스크톱) |
+| 장기 트랙 | `docs/TYPESET-ROADMAP.md`(조판) · `docs/HANCOM-PDF-PARITY-ROADMAP.md`(한컴 PDF 동등 — 기준선) · `docs/BLOG-ROADMAP.md`(블로그) · `docs/DESKTOP-ROADMAP.md`(데스크톱) |
 | 공통 계약(불변식 전문) | `docs/PRODUCT-DIRECTION.md` §4 — **이슈 착수 전 필독** |
 | 이슈 진행표 | `docs/issues/README.md` (⚠️ 상태 진실은 git log — 복원 스크립트가 대조) |
 | 세션 로그 | `docs/JOURNAL.md` (append-only) |

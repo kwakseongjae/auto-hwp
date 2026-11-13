@@ -1,5 +1,10 @@
 # CURRENT STATE — 단일 복원 지점
 
+- 2026-11-13 · Claude Opus 5.5(워커) · **#530 한컴 PDF 대비 기준선 · 로드맵 · 측정 하네스** (view clipPath 겹침 고침은 #529 로 따로).
+  정본 `docs/HANCOM-PDF-PARITY-ROADMAP.md` · 하네스 `scripts/hancom-parity/sweep.py`(한 줄 재현, 같은 값 확인). 기준선(26쌍): 변환 실패 0 · 쪽 수 일치 10 ·
+  PDF 누락 1% 초과 7문서 · 쪽 번호 1/11 · 줄 세로 오차 14.9pt · 잉크 F1 중앙 0.36(156쪽). 첫 목표 = 양식 원본 8종(지금 1/8, `noAdjust` 바닥 실험 2/8).
+  원본 `.hwp` 기준으로 다시 재니 ▼ 4종은 우리 조판 = 원본에 저장된 한컴 쪽 나눔(5 · 8 · 10 · 7) — 한컴독스 PDF(변환본) 만 1~2쪽 길다(§5).
+  다음 = S2 쪽 번호(#528) → S1 누락 0(칸 안 잘림 신호 · `noAdjust` 바닥 — 한컴 데스크톱 · 독스 합성 확인 먼저) → S3 칸 안 문단 간격.
 - 2026-11-05 · Codex · **#507 구현 완료 · 리드 리뷰/브라우저 QA 대기** (`feat/507-focus-api`, HEAD `e5f31f7`, 전부 미커밋).
   `WorkspaceHandle.focusCell` · `focusParagraph` · `focusNext(direction, {wrap})`, opt-in `tabNavigation` · `onTabNavigate` 구현.
   실패 시 캐럿/선택 불변, 성공 시 스크롤/IME 포커스. 기본 순서·중첩 path·칸 안 para·정책 거절 건너뜀·Tab 직후 입력/연속 콜백 직렬화 포함.
