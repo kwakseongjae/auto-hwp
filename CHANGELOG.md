@@ -40,6 +40,26 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 고침 (Fixed)
+
+- **`auto-hwp view` · `verify-convert` 가 여러 쪽을 한 HTML 에 넣을 때 둘째 쪽부터 내용 일부가 잘려 보이던 것을 고쳤다.**
+  rhwp 의 쪽 SVG 는 잘라내기(`cell-clip-N` · `body-clip-N`) · 무늬 · 화살표 id 를 쪽마다 1부터 다시 매긴다. 한 HTML 안에서는 id 이름공간이
+  하나라 뒤쪽 쪽의 `url(#cell-clip-1)` 이 1쪽의 잘라내기 사각형을 가리켜, 그 범위 밖의 머리 줄 · 상자가 보이지 않았다. 이제 쪽마다(그리고
+  `verify-convert` 의 두 열마다) id 범위를 나눈다. `view` 는 문서를 한 번만 파싱해 모든 쪽을 그린다. CLI 전용 — Rust 워크스페이스는 별도
+  릴리스가 없고 npm 패키지에는 영향이 없다.
+  *(EN — Fixed: `auto-hwp view` / `verify-convert` inlined every page SVG into one HTML document while rhwp restarts clip/pattern/marker
+  ids per page, so later pages resolved `url(#cell-clip-N)` to page 1's clip rect and lost content. Ids are now scoped per page (and per
+  column); `view` parses the document once. CLI only; no npm package change.)*
+
+### 추가 (Added)
+
+- **`hwp_rhwp::scope_svg_ids(svg, prefix)` · `hwp_rhwp::render_document_svgs(bytes, scope)`.** 앞의 것은 조각이 정의한 id 와 태그 안 참조
+  (`url(#X)` · `href="#X"` · `xlink:href="#X"`)에만 접두를 붙인다(정의 안 된 참조 · data URI · `data-id` · 글자 데이터는 그대로). 뒤의 것은
+  한 번 파싱으로 모든 쪽을 그려 `{scope}p{N}-` 로 범위를 나눈다(`--features rhwp`, 패닉은 오류로 바뀐다). 여러 쪽 SVG 를 한 문서에 넣는 호스트
+  (예: MCP 로 쪽을 이어 붙이는 경우)는 이 둘 중 하나를 거치면 같은 충돌을 피한다. Rust 크레이트 공개 함수 — crates.io 발행은 없다.
+  *(EN — Added: `scope_svg_ids` prefixes ids a fragment defines and their in-tag references; `render_document_svgs` renders every page
+  from one parse with per-page id scopes. Use either when inlining several page SVGs into one document.)*
+
 ---
 
 ## [0.0.22] — 2026-11-05

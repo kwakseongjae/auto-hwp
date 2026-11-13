@@ -39,7 +39,7 @@ const NOT_WIRED: &str =
 /// HWP5 parser into an explicit error instead of unwinding through our boundary — the ONLY defense
 /// available since `external/rhwp` must not be patched (#014 step 3).
 ///
-/// FUNNEL: every public rhwp-backed entry point (`page_count`, `render_page_svg`,
+/// FUNNEL: every public rhwp-backed entry point (`page_count`, `render_page_svg`, `render_document_svgs`,
 /// `page_text_anchors`, `page_glyph_boxes`, `layout_fidelity`, `DocumentParser::parse`) and the
 /// shared cached parse (`RenderCache::core_for`) routes its rhwp call through here.
 ///
@@ -116,6 +116,89 @@ pub fn render_page_svg(bytes: &[u8], page: u32) -> Result<String> {
             .map_err(|e| Error::Other(e.to_string()))?;
         Ok(unclip_borders(&svg))
     })
+}
+
+/// Render **every** page for inlining into ONE host document (`auto-hwp view`, `verify-convert`).
+///
+/// rhwp numbers `clipPath`/`pattern`/`marker`/gradient ids per page render tree, so two pages both
+/// define e.g. `cell-clip-1`. Inlined into one HTML document, SVG ids share a single document-wide
+/// namespace: `url(#cell-clip-1)` on page 4 resolves to page 1's rect and clips page 4's content away.
+/// Each page is therefore scoped with [`scope_svg_ids`] under `"{scope}p{N}-"` (N = 1-based page);
+/// `scope` separates several documents in one host (e.g. `verify-convert`'s two columns) and may be
+/// empty. Each page is rendered from one cached parse.
+#[cfg(feature = "rhwp")]
+pub fn render_document_svgs(bytes: &[u8], scope: &str) -> Result<Vec<String>> {
+    // The whole multi-page render runs under the panic funnel: `RenderCache` guards its parse but
+    // not `render_page_svg_native`, which the stateless `render_page_svg` (the old `view` path) did.
+    guarded("render_document_svgs", || {
+        let mut cache = RenderCache::new();
+        let n = cache.page_count(bytes)?;
+        (0..n)
+            .map(|p| {
+                let svg = cache.render_page_svg(bytes, p)?;
+                Ok(scope_svg_ids(&svg, &format!("{scope}p{}-", p + 1)))
+            })
+            .collect()
+    })
+}
+
+/// Prefix every id DEFINED in `svg` with `prefix`, and every in-tag reference to one of those ids
+/// (`url(#X)`, `href="#X"`, `xlink:href="#X"`). References to ids the fragment does not define, data
+/// URIs, `data-id`-style attributes and character data are left untouched. Renderer-neutral: use it
+/// whenever several SVG fragments are inlined into one HTML document, whose id namespace is shared.
+pub fn scope_svg_ids(svg: &str, prefix: &str) -> String {
+    use std::collections::HashSet;
+    const ID: &str = "id=\"";
+    // (1) ids defined by this fragment — only real `id` attributes (preceded by whitespace).
+    let mut ids: HashSet<&str> = HashSet::new();
+    let mut from = 0;
+    while let Some(i) = svg[from..].find(ID).map(|i| from + i) {
+        from = i + ID.len();
+        if i > 0 && svg.as_bytes()[i - 1].is_ascii_whitespace() {
+            if let Some(len) = svg[from..].find('"') {
+                ids.insert(&svg[from..from + len]);
+            }
+        }
+    }
+    if ids.is_empty() || prefix.is_empty() {
+        return svg.to_string();
+    }
+    // (2) rewrite definitions and references, inside tags only.
+    const PATTERNS: [(&str, char); 3] = [(ID, '"'), ("url(#", ')'), ("href=\"#", '"')];
+    let mut out = String::with_capacity(svg.len() + ids.len() * prefix.len() * 2);
+    let mut rest = svg;
+    let mut in_tag = false;
+    loop {
+        let next = PATTERNS
+            .iter()
+            .enumerate()
+            .filter_map(|(k, (pat, _))| rest.find(pat).map(|i| (i, k)))
+            .min();
+        let Some((at, k)) = next else {
+            out.push_str(rest);
+            break;
+        };
+        let (pat, term) = PATTERNS[k];
+        if let Some(i) = rest[..at].rfind(['<', '>']) {
+            in_tag = rest.as_bytes()[i] == b'<';
+        }
+        let start = at + pat.len();
+        out.push_str(&rest[..start]);
+        // `id="` must be a whole attribute name (not `data-id="`); `rest` restarts at a terminator, so
+        // the preceding byte is always inside `rest` except at the very start of the fragment.
+        let boundary = k != 0 || (at > 0 && rest.as_bytes()[at - 1].is_ascii_whitespace());
+        let Some(len) = rest[start..].find(term) else {
+            out.push_str(&rest[start..]);
+            break;
+        };
+        let name = &rest[start..start + len];
+        if in_tag && boundary && ids.contains(name) {
+            out.push_str(prefix);
+        }
+        out.push_str(name);
+        rest = &rest[start + len..];
+    }
+    out
 }
 
 /// Content hash for cache keying (std SipHash) — O(n) over the bytes but far cheaper than a parse.
@@ -715,6 +798,137 @@ mod unclip_tests {
     #[test]
     fn expand_rect_handles_missing_attrs() {
         assert_eq!(expand_rect(r#"<rect x="1"/>"#, 1.0), r#"<rect x="1"/>"#);
+    }
+}
+
+#[cfg(test)]
+mod scope_svg_ids_tests {
+    use super::scope_svg_ids;
+
+    /// Two pages that both define `cell-clip-1` (rhwp numbers per page) stay distinct once scoped.
+    #[test]
+    fn prefixes_definitions_and_references() {
+        let page = r##"<svg><defs><clipPath id="cell-clip-1"><rect x="1"/></clipPath><pattern id="pat1"/></defs><g clip-path="url(#cell-clip-1)"><rect fill="url(#pat1)"/><use href="#pat1" xlink:href="#pat1"/></g></svg>"##;
+        let got = scope_svg_ids(page, "p4-");
+        assert_eq!(
+            got,
+            r##"<svg><defs><clipPath id="p4-cell-clip-1"><rect x="1"/></clipPath><pattern id="p4-pat1"/></defs><g clip-path="url(#p4-cell-clip-1)"><rect fill="url(#p4-pat1)"/><use href="#p4-pat1" xlink:href="#p4-pat1"/></g></svg>"##
+        );
+        assert_ne!(scope_svg_ids(page, "p1-"), got, "pages must differ");
+    }
+
+    /// Undefined targets, data URIs, `data-id`, and character data are not ids of this fragment.
+    #[test]
+    fn leaves_non_definitions_alone() {
+        let svg = r##"<svg><g id="a" data-id="a" clip-path="url(#elsewhere)"><image href="data:image/png;base64,AA"/><text>url(#a) id="a"</text></g></svg>"##;
+        assert_eq!(
+            scope_svg_ids(svg, "p2-"),
+            r##"<svg><g id="p2-a" data-id="a" clip-path="url(#elsewhere)"><image href="data:image/png;base64,AA"/><text>url(#a) id="a"</text></g></svg>"##
+        );
+    }
+
+    #[test]
+    fn no_ids_or_empty_prefix_is_identity() {
+        let svg = r#"<svg><rect x="1" y="2"/><text>안녕</text></svg>"#;
+        assert_eq!(scope_svg_ids(svg, "p1-"), svg);
+        let with_id = r#"<svg><g id="x"/></svg>"#;
+        assert_eq!(scope_svg_ids(with_id, ""), with_id);
+    }
+}
+
+#[cfg(all(test, feature = "rhwp"))]
+mod document_svgs_tests {
+    use super::render_document_svgs;
+    use std::collections::{HashMap, HashSet};
+
+    /// `id="…"` values defined in one SVG (attribute boundary = preceding whitespace).
+    fn defined_ids(svg: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut from = 0;
+        while let Some(i) = svg[from..].find("id=\"").map(|i| from + i) {
+            from = i + 4;
+            if i == 0 || !svg.as_bytes()[i - 1].is_ascii_whitespace() {
+                continue;
+            }
+            if let Some(len) = svg[from..].find('"') {
+                out.push(svg[from..from + len].to_string());
+            }
+        }
+        out
+    }
+
+    /// Every `url(#X)` / `href="#X"` reference in one SVG.
+    fn references(svg: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for (pat, term) in [("url(#", ')'), ("href=\"#", '"')] {
+            let mut from = 0;
+            while let Some(i) = svg[from..].find(pat).map(|i| from + i) {
+                from = i + pat.len();
+                if let Some(len) = svg[from..].find(term) {
+                    out.push(svg[from..from + len].to_string());
+                }
+            }
+        }
+        out
+    }
+
+    /// The pages of one document are inlined into ONE HTML page by `auto-hwp view`. Every id must be
+    /// defined once document-wide, and every reference must resolve to a definition on its OWN page —
+    /// otherwise a later page's `url(#cell-clip-N)` picks page 1's clip rect and its content vanishes.
+    #[test]
+    fn document_svgs_have_document_unique_ids_resolving_on_own_page() {
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        );
+        let bytes = std::fs::read(p).expect("benchmark.hwp at repo root");
+        let pages = render_document_svgs(&bytes, "").unwrap();
+        assert!(pages.len() > 1, "need a multi-page document");
+        let mut owner: HashMap<String, usize> = HashMap::new();
+        let mut clip_pages = 0;
+        for (page, svg) in pages.iter().enumerate() {
+            let ids = defined_ids(svg);
+            if ids.iter().any(|id| id.contains("clip")) {
+                clip_pages += 1;
+            }
+            for id in &ids {
+                if let Some(prev) = owner.insert(id.clone(), page) {
+                    panic!(
+                        "id `{id}` defined on page {} and page {}",
+                        prev + 1,
+                        page + 1
+                    );
+                }
+            }
+            let own: HashSet<&String> = ids.iter().collect();
+            for r in references(svg) {
+                assert!(
+                    own.contains(&r),
+                    "page {}: reference #{r} has no definition on the same page",
+                    page + 1
+                );
+            }
+        }
+        assert!(
+            clip_pages > 1,
+            "fixture must define clip ids on several pages (else the test proves nothing)"
+        );
+    }
+
+    /// A non-empty scope keeps two renders of the SAME page index apart (verify-convert columns).
+    #[test]
+    fn scope_separates_two_documents_in_one_host() {
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        );
+        let bytes = std::fs::read(p).expect("benchmark.hwp at repo root");
+        let a = render_document_svgs(&bytes, "a-").unwrap();
+        let b = render_document_svgs(&bytes, "b-").unwrap();
+        let ids_a: HashSet<String> = a.iter().flat_map(|s| defined_ids(s)).collect();
+        let ids_b: HashSet<String> = b.iter().flat_map(|s| defined_ids(s)).collect();
+        assert!(!ids_a.is_empty());
+        assert!(ids_a.is_disjoint(&ids_b), "two scopes must not share ids");
     }
 }
 

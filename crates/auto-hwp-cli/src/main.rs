@@ -1127,14 +1127,17 @@ fn suffix_path(out: &Path, n: usize) -> PathBuf {
 #[cfg(feature = "rhwp")]
 fn view(file: &PathBuf, out: &PathBuf) -> Result<(), String> {
     let bytes = read(file)?;
-    let n = hwp_core::page_count(&bytes).map_err(|e| e.to_string())?;
     // Faithful "한컴 독스처럼 열어보기" paged preview: each HWP page is rhwp's own pixel-faithful SVG
     // (exact tables + pagination + the doc's footer page numbers), shown as a white A4 sheet on a
     // gray canvas — the layout-preserve VIEW (the JSX/CSS HTML export is the separate semantic-reflow
     // form). rhwp paginates the document exactly (page breaks honored), so this matches 한컴.
+    // All pages share ONE HTML id namespace: `render_document_svgs` scopes each page's clip/pattern ids
+    // (rhwp restarts them per page — unscoped, page 4's `url(#cell-clip-1)` would clip to page 1's rect).
+    let svgs = hwp_rhwp::render_document_svgs(&bytes, "").map_err(|e| e.to_string())?;
+    let n = svgs.len();
     let mut pages = String::new();
-    for p in 0..n {
-        let svg = sanitize_svg(&hwp_core::render_page_svg(&bytes, p).map_err(|e| e.to_string())?);
+    for (p, svg) in svgs.iter().enumerate() {
+        let svg = sanitize_svg(svg);
         pages.push_str(&format!(
             "<div class=\"sheet\"><div class=\"page\">{svg}</div><div class=\"pnum\">{} / {n}</div></div>\n",
             p + 1
@@ -1211,12 +1214,13 @@ fn verify_convert(file: &PathBuf, out: &PathBuf) -> Result<(), String> {
     let (doc, converted) = hwp_core::open_as_hwpx(&bytes).map_err(|e| e.to_string())?;
     let hwpx = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
 
-    // Render every page of a doc via rhwp into a labeled column.
-    let column = |label: &str, b: &[u8]| -> Result<(u32, String), String> {
-        let n = hwp_core::page_count(b).map_err(|e| e.to_string())?;
+    // Render every page of a doc via rhwp into a labeled column. Both columns live in ONE HTML page, so
+    // each column gets its own id scope (and each page its own, via `render_document_svgs`).
+    let column = |label: &str, scope: &str, b: &[u8]| -> Result<(u32, String), String> {
+        let svgs = hwp_rhwp::render_document_svgs(b, scope).map_err(|e| e.to_string())?;
+        let n = svgs.len() as u32;
         let mut pages = String::new();
-        for p in 0..n {
-            let svg = hwp_core::render_page_svg(b, p).map_err(|e| e.to_string())?;
+        for svg in &svgs {
             pages.push_str(&format!("<div class=\"page\">{svg}</div>"));
         }
         Ok((
@@ -1225,8 +1229,8 @@ fn verify_convert(file: &PathBuf, out: &PathBuf) -> Result<(), String> {
         ))
     };
 
-    let (lpages, left) = column("원본 .hwp (rhwp)", &bytes)?;
-    let (rpages, right) = column("변환 .hwpx (rhwp)", &hwpx)?;
+    let (lpages, left) = column("원본 .hwp (rhwp)", "src-", &bytes)?;
+    let (rpages, right) = column("변환 .hwpx (rhwp)", "cvt-", &hwpx)?;
 
     let html = format!(
         "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><title>verify-convert — auto-hwp</title>\
