@@ -299,6 +299,13 @@ class VisualRegionTests(unittest.TestCase):
                 with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, pattern):
                     self.load(document, candidate_sha256)
 
+        self.assertEqual(pdf_visual_check._page_clipped_cells(None, 1), 0)
+        counted = self.manifest(candidate_sha256)
+        counted["pages"][0]["clipped_cell_text"] = [entry(), entry()]
+        self.assertEqual(
+            pdf_visual_check._page_clipped_cells(self.load(counted, candidate_sha256), 1), 2
+        )
+
         older = self.manifest(candidate_sha256)
         older["schema_version"] = 4
         older["pages"][0].pop("clipped_cell_text")
