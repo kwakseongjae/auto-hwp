@@ -1001,6 +1001,8 @@ fn parse_para(el: &JsxElement) -> Result<Paragraph> {
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
         // Structural page/column-zone breaks + table-anchor flag aren't carried through the HTML/JSX
         // projection (own-render gets them from the binary parser); keep them explicitly absent here.
+        // 쪽 번호 표지도 같은 부류다(원본 파서가 채운다).
+        page_number_marks: Vec::new(),
         page_break_before: false,
         column_break_before: false,
         column_layout_before: None,

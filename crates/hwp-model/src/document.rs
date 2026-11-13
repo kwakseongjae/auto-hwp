@@ -191,6 +191,21 @@ pub struct PageNumberDecoration {
     pub dash: Option<char>,
 }
 
+/// One page-number control anchored in a paragraph (see [`Paragraph::page_number_marks`]). It takes
+/// effect on the page where that paragraph's first line (or, inside a table, that cell's row) lands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageNumberMark {
+    /// 쪽 번호 위치 — numbering becomes visible from this page on. Pages of the section before the
+    /// earliest `Show` carry no number — OUR conservative choice (a missing number rather than a guessed
+    /// one): no reference document puts the first position control past page 1, so Hancom's behavior
+    /// there is unconfirmed. A section without any `Show` shows numbers from its first page.
+    Show,
+    /// 새 번호로 시작 — this page shows `n`; later pages count up from it.
+    Restart(NonZeroU16),
+    /// 현재 쪽만 감추기 — no number is drawn on this page; the counter still advances.
+    Hide,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PageNumberFormat {
     #[default]
@@ -305,6 +320,13 @@ pub struct Paragraph {
     /// Requested named style (e.g. "개요 1"); resolved to a `styleIDRef` by the serializer.
     pub style_name: Option<String>,
     pub runs: Vec<Run>,
+    /// 쪽 번호 표지 — page-number controls anchored in THIS paragraph (HWP5 `pgnp`/`nwno`/`pghd`, HWPX
+    /// `<hp:pageNum>`/`<hp:newNum numType="PAGE">`/`<hp:pageHiding hidePageNum="1">`). Hancom applies
+    /// each one on the page that holds it, so it lives on the paragraph (body or table cell) and moves
+    /// with it under edits. The decoration's look stays on [`Section::page_number`]; these only say
+    /// where numbering becomes visible, restarts, or is hidden. Empty by default ⇒ numbering behaves
+    /// exactly as before (visible on every page of a section that has a decoration).
+    pub page_number_marks: Vec<PageNumberMark>,
     /// Source-authored line boxes (HWPUNIT), captured from binary HWP `PARA_LINE_SEG` for true blank
     /// spacer paragraphs in decorative image-fill forms.
     ///

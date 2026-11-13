@@ -476,6 +476,8 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
         let mut vert = 0.0f64; // page-relative vertical cursor (within the body box)
                                // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 강제 개쪽은 이 쪽에서만 실행된다.
         let mut last_drawn = NOTHING_DRAWN;
+        // 쪽 번호 표지가 놓인 쪽(S2). 조판에는 영향이 없고 꾸밈(쪽 번호)만 읽는다.
+        let mut marks = PageNumberMarkPages::default();
 
         for (blk_idx, block) in sec.blocks.iter().enumerate() {
             match block {
@@ -489,6 +491,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     // A pure table anchor reserves NO height + draws nothing — the following Table block
                     // owns the space. Mirrors NaiveLayout + block_pages (skip its line) for lockstep.
                     if p.is_table_anchor {
+                        marks.anchor(sec, blk_idx, p);
                         started = true;
                         continue;
                     }
@@ -497,7 +500,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     }
                     let bstart_page = pages.len() - 1;
                     let bstart_y = mt + vert;
-                    place_paragraph(
+                    let first_line_page = place_paragraph(
                         p,
                         doc,
                         fonts,
@@ -513,6 +516,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         &mut last_drawn,
                         last_draw.is_some_and(|last| blk_idx > last),
                     );
+                    marks.on_page(first_line_page, p);
                     // Provenance band for point-to-scope: the paragraph's row extent on each page it
                     // touched. Tag it IMAGE when it carries an anchored object so the UI can label it.
                     let bend_page = pages.len() - 1;
@@ -625,6 +629,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         );
                     }
                     let end_page = pages.len() - 1;
+                    marks.on_table(&pages, start_page, end_page, sec_idx, blk_idx, block, t);
                     // Provenance bands for point-to-scope: one band per fragment page from its ACTUAL box,
                     // so own_hit_test resolves the table — and the scope pin hugs it — on EVERY page it
                     // touches. A degenerate 0×N table pushes no fragment, so the find simply yields none.
@@ -666,7 +671,8 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                 }
             }
         }
-        place_section_decorations(&mut pages, section_first_page, sec, doc, fonts);
+        marks.finish(pages.len() - 1);
+        place_section_decorations(&mut pages, section_first_page, sec, doc, fonts, &marks);
     }
     PlacedDoc { pages }
 }
@@ -686,6 +692,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
         let section_first_page = pages.len() - 1;
         let breaks = crate::section_page_breaks(section, doc);
         let mut flow = crate::ColumnFlow::new(body_w);
+        let mut marks = PageNumberMarkPages::default();
 
         for (block_index, block) in section.blocks.iter().enumerate() {
             match block {
@@ -703,6 +710,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                         new_page(&mut pages, page);
                     }
                     if paragraph.is_table_anchor {
+                        marks.anchor(section, block_index, paragraph);
                         started = true;
                         continue;
                     }
@@ -713,7 +721,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                     let start_column = flow.column_index();
                     let start_box = flow.box_now();
                     let start_y = body_y + flow.y();
-                    place_paragraph_columns(
+                    let first_line_page = place_paragraph_columns(
                         paragraph,
                         doc,
                         fonts,
@@ -727,6 +735,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                         block_index,
                         None,
                     );
+                    marks.on_page(first_line_page, paragraph);
                     let end_page = pages.len() - 1;
                     let end_y = body_y + flow.y();
                     let kind = if paragraph_has_object(paragraph) {
@@ -832,6 +841,15 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                         );
                     }
                     let end_page = pages.len() - 1;
+                    marks.on_table(
+                        &pages,
+                        start_page,
+                        end_page,
+                        section_index,
+                        block_index,
+                        block,
+                        table,
+                    );
                     for output in pages.iter_mut().take(end_page + 1).skip(start_page) {
                         if let Some(placed) = output.tables.iter().rev().find(|placed| {
                             placed.section == section_index
@@ -876,7 +894,8 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                 emit_column_separators(output, layout, body_x, body_y, body_w, body_h);
             }
         }
-        place_section_decorations(&mut pages, section_first_page, section, doc, fonts);
+        marks.finish(pages.len() - 1);
+        place_section_decorations(&mut pages, section_first_page, section, doc, fonts, &marks);
     }
     PlacedDoc { pages }
 }
@@ -1413,7 +1432,7 @@ fn place_paragraph(
     last_drawn: &mut usize,
     // 이슈 314 — 이 문단이 구역의 「마지막으로 그리는 블록」보다 뒤에 있는가.
     trailing: bool,
-) {
+) -> usize {
     // Flat (char, size, color, underline) over the paragraph's text — same order layout_paragraph
     // breaks on, so line `text_pos` indexes straight into this.
     let atoms = paragraph_atoms(p, doc, fonts);
@@ -1426,6 +1445,8 @@ fn place_paragraph(
     // Paragraph indent: block left/right margins shrink the wrap width; first-line indent shifts line 0.
     let ind = indent_of(p, doc, body_w);
     let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
+    // 첫 줄이 놓인 쪽 — 쪽 번호 표지가 효력을 내는 쪽이다(줄이 없으면 지금 쪽).
+    let mut first_line_page = None;
 
     for (li, ls) in lines.iter().enumerate() {
         // 이슈 302 — 그려질 것이 없는 줄로 쪽을 만들면 그 쪽이 통째로 빈다.
@@ -1436,6 +1457,7 @@ fn place_paragraph(
             new_page(pages, page);
             *vert = 0.0;
         }
+        first_line_page.get_or_insert(pages.len() - 1);
         if ls.horz_size > 0.0 {
             *last_drawn = pages.len() - 1; // 이슈 307
         }
@@ -1481,6 +1503,7 @@ fn place_paragraph(
 
         *vert += ls.vert_size * ratio;
     }
+    first_line_page.unwrap_or(pages.len() - 1)
 }
 
 /// Multi-column twin of [`place_paragraph`]. It uses the shared [`crate::ColumnFlow`] transition
@@ -1500,7 +1523,7 @@ fn place_paragraph_columns(
     section: usize,
     block: usize,
     width_cap: Option<f64>,
-) {
+) -> usize {
     let atoms = paragraph_atoms(p, doc, fonts);
     let align = doc
         .para_shapes
@@ -1514,6 +1537,7 @@ fn place_paragraph_columns(
         .max(1.0);
     let ind = indent_of(p, doc, layout_width);
     let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
+    let mut first_line_page = None;
 
     for (line_index, line) in lines.iter().enumerate() {
         if flow.vert() + line.vert_size > flow.available_height(body_h)
@@ -1522,6 +1546,7 @@ fn place_paragraph_columns(
         {
             new_page(pages, page);
         }
+        first_line_page.get_or_insert(pages.len() - 1);
         let column = flow.box_now();
         let effective_width = width_cap
             .map(|cap| column.width.min(cap))
@@ -1564,6 +1589,7 @@ fn place_paragraph_columns(
         }
         flow.add(line.vert_size * ratio);
     }
+    first_line_page.unwrap_or(pages.len() - 1)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3707,6 +3733,200 @@ fn deco_applies(apply: ApplyPage, page_idx: usize) -> bool {
     }
 }
 
+/// 쪽 번호 표지([`Paragraph::page_number_marks`])가 놓인 쪽을 모은다. 조판 루프가 문단 첫 줄의 쪽과
+/// 표 조각의 행 범위를 알려 주면 그대로 적기만 한다 — 쪽 나눔 · 본문 위치에는 손대지 않는다
+/// (LOCKSTEP · NaiveLayout · `block_pages` 무변경). 놓인 쪽을 찾지 못한 표지가 하나라도 있으면
+/// `unresolved` 가 켜지고, 그 구역은 쪽 번호를 그리지 않는다(틀린 번호보다 없는 번호).
+#[derive(Default)]
+struct PageNumberMarkPages {
+    /// (전역 쪽 번호, 표지) — 문서 순서.
+    placed: Vec<(usize, PageNumberMark)>,
+    /// 표 앵커 문단(높이 없음)의 표지 중 아직 표를 못 만난 것 — 바로 뒤 표의 첫 조각 쪽에서 효력을 낸다.
+    pending: Vec<PageNumberMark>,
+    /// 이미 놓은 표 블록 → 첫 조각의 쪽.
+    table_first_page: std::collections::BTreeMap<usize, usize>,
+    unresolved: bool,
+}
+
+impl PageNumberMarkPages {
+    /// 표 앵커 문단(줄을 예약하지 않는다)의 표지는 그 문단이 품은 표의 첫 조각 쪽에서 효력을 낸다.
+    /// HWPX 는 블록 순서가 `[표, 앵커]`(앵커의 원본 범위가 앞 표를 품는다 — `section_page_breaks` 와
+    /// 같은 판정), HWP5 lift 는 `[앵커, 표]` 다.
+    fn anchor(&mut self, section: &Section, index: usize, paragraph: &Paragraph) {
+        if paragraph.page_number_marks.is_empty() {
+            return;
+        }
+        let owner = crate::hoist_to_owned_table(section, index, paragraph);
+        if owner == index {
+            self.pending.extend_from_slice(&paragraph.page_number_marks);
+            return;
+        }
+        match self.table_first_page.get(&owner) {
+            Some(page) => self.placed.extend(
+                paragraph
+                    .page_number_marks
+                    .iter()
+                    .map(|mark| (*page, *mark)),
+            ),
+            None => self.unresolved = true,
+        }
+    }
+
+    fn on_page(&mut self, page: usize, paragraph: &Paragraph) {
+        self.flush_pending(page);
+        self.placed
+            .extend(paragraph.page_number_marks.iter().map(|mark| (page, *mark)));
+    }
+
+    /// `block` is the section's original block; `placed` is the table actually laid out (the inner
+    /// grid when a 1×1 frame wrapper was promoted). Marks inside cells resolve to the first fragment
+    /// whose row range holds that row; marks deeper in nested tables use the outer cell's row.
+    #[allow(clippy::too_many_arguments)]
+    fn on_table(
+        &mut self,
+        pages: &[PlacedPage],
+        start_page: usize,
+        end_page: usize,
+        section: usize,
+        block_index: usize,
+        block: &Block,
+        placed: &Table,
+    ) {
+        let Block::Table(original) = block else {
+            return;
+        };
+        if let Some(first) = (start_page..=end_page).find(|page| {
+            pages.get(*page).is_some_and(|page| {
+                page.tables.iter().any(|fragment| {
+                    fragment.section == section
+                        && fragment.block == block_index
+                        && fragment.ancestors.is_empty()
+                })
+            })
+        }) {
+            self.table_first_page.insert(block_index, first);
+        }
+        let mut rows = Vec::new();
+        // `placed` is `original` itself unless the caller promoted a 1×1 frame to its inner grid.
+        if std::ptr::eq(original, placed) {
+            collect_cell_marks(original, &mut rows);
+        } else {
+            // 승격된 1×1 틀: 바깥 칸의 (글자 없는) 문단 표지는 안쪽 표의 첫 행에서, 안쪽 표의 표지는 그 행에서.
+            for cell in &original.cells {
+                for child in &cell.blocks {
+                    if let Block::Paragraph(paragraph) = child {
+                        rows.extend(paragraph.page_number_marks.iter().map(|mark| (0, *mark)));
+                    }
+                }
+            }
+            collect_cell_marks(placed, &mut rows);
+        }
+        if self.pending.is_empty() && rows.is_empty() {
+            return;
+        }
+        let row_page = |row: usize| {
+            pages
+                .iter()
+                .enumerate()
+                .take(end_page + 1)
+                .skip(start_page)
+                .find(|(_, page)| {
+                    page.tables.iter().any(|fragment| {
+                        fragment.section == section
+                            && fragment.block == block_index
+                            && fragment.ancestors.is_empty()
+                            && fragment.first_row <= row
+                            && row < fragment.last_row
+                    })
+                })
+                .map(|(index, _)| index)
+        };
+        if !self.pending.is_empty() {
+            match row_page(0) {
+                Some(page) => self.flush_pending(page),
+                None => {
+                    self.pending.clear();
+                    self.unresolved = true;
+                }
+            }
+        }
+        for (row, mark) in rows {
+            match row_page(row) {
+                Some(page) => self.placed.push((page, mark)),
+                None => self.unresolved = true,
+            }
+        }
+    }
+
+    /// 앵커 뒤에 표가 오지 않았으면 지금 쪽에서 효력을 낸다.
+    fn finish(&mut self, current_page: usize) {
+        self.flush_pending(current_page);
+    }
+
+    fn flush_pending(&mut self, page: usize) {
+        self.placed
+            .extend(self.pending.drain(..).map(|mark| (page, mark)));
+    }
+}
+
+/// Every mark inside `table`'s cells as `(row of the cell in THIS table, mark)`, nested tables folded
+/// onto the containing cell's row.
+fn collect_cell_marks(table: &Table, out: &mut Vec<(usize, PageNumberMark)>) {
+    fn nested(blocks: &[Block], row: usize, out: &mut Vec<(usize, PageNumberMark)>) {
+        for child in blocks {
+            match child {
+                Block::Paragraph(paragraph) => {
+                    out.extend(paragraph.page_number_marks.iter().map(|mark| (row, *mark)))
+                }
+                Block::Table(inner) => {
+                    for cell in &inner.cells {
+                        nested(&cell.blocks, row, out);
+                    }
+                }
+            }
+        }
+    }
+    for cell in &table.cells {
+        nested(&cell.blocks, cell.row, out);
+    }
+}
+
+/// 구역의 쪽마다 그릴 번호(`None` = 그리지 않음).
+/// - 한컴 PDF 로 확인한 규칙: 번호는 구역 첫 쪽에서 `start` 로 시작해 쪽마다 1씩 늘고 감춘 쪽도 센다.
+///   `Restart(n)` 이 놓인 쪽은 `n` 이 되고, `Hide` 가 놓인 쪽은 그리지 않는다.
+/// - 우리 선택(확인 전): 한 쪽에 새 번호가 여럿이면 문서 순서의 마지막. `Show` 가 하나라도 있으면 가장 이른
+///   `Show` 쪽부터 보인다 — 첫 쪽 번호 위치가 2쪽 이후에 놓인 대조 문서가 없어, 그 앞 쪽은 틀린 번호 대신 비운다.
+///   `Show` 가 없으면 첫 쪽부터 보인다.
+fn page_number_plan(
+    first_page: usize,
+    page_count: usize,
+    start: std::num::NonZeroU16,
+    marks: &[(usize, PageNumberMark)],
+) -> Vec<Option<usize>> {
+    let show_from = marks
+        .iter()
+        .filter(|(_, mark)| *mark == PageNumberMark::Show)
+        .map(|(page, _)| *page)
+        .min()
+        .unwrap_or(first_page);
+    let mut counter = usize::from(start.get());
+    (first_page..first_page + page_count)
+        .map(|page| {
+            for (at, mark) in marks {
+                if let (true, PageNumberMark::Restart(number)) = (*at == page, mark) {
+                    counter = usize::from(number.get());
+                }
+            }
+            let hidden = marks
+                .iter()
+                .any(|(at, mark)| *at == page && *mark == PageNumberMark::Hide);
+            let shown = (page >= show_from && !hidden).then_some(counter);
+            counter += 1;
+            shown
+        })
+        .collect()
+}
+
 /// Paint lifted 머리말/꼬리말 into the reserved header/footer bands.
 /// Body pagination is unchanged (LOCKSTEP): the bands are already subtracted by `body_box`.
 fn place_section_decorations(
@@ -3715,6 +3935,7 @@ fn place_section_decorations(
     sec: &Section,
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
+    marks: &PageNumberMarkPages,
 ) {
     if sec.decorations.is_empty() && sec.page_number.is_none() {
         return;
@@ -3728,6 +3949,15 @@ fn place_section_decorations(
     let header_h = page.margin_top.max(0) as f64;
     let footer_h = page.margin_bottom.max(0) as f64;
     let footer_y = (ph as f64 - page.margin_footer.max(0) as f64 - footer_h).max(0.0);
+    let numbers = match sec.page_number {
+        Some(number) if !marks.unresolved => page_number_plan(
+            first_page,
+            pages.len().saturating_sub(first_page),
+            number.start,
+            &marks.placed,
+        ),
+        _ => Vec::new(),
+    };
 
     for (i, pg) in pages.iter_mut().enumerate().skip(first_page) {
         for deco in &sec.decorations {
@@ -3740,18 +3970,9 @@ fn place_section_decorations(
             };
             place_deco_blocks(pg, &deco.blocks, doc, fonts, left, y, band_w, h, page);
         }
-        if let Some(number) = sec.page_number {
+        if let (Some(number), Some(Some(value))) = (sec.page_number, numbers.get(i - first_page)) {
             place_page_number(
-                pg,
-                number,
-                usize::from(number.start.get()) + (i - first_page),
-                fonts,
-                left,
-                header_y,
-                footer_y,
-                band_w,
-                header_h,
-                footer_h,
+                pg, number, *value, fonts, left, header_y, footer_y, band_w, header_h, footer_h,
             );
         }
     }
@@ -4422,6 +4643,293 @@ mod tests {
         };
         assert_eq!(footer_text(&placed.pages[0]), "1");
         assert_eq!(footer_text(&placed.pages[1]), "7");
+    }
+
+    fn nz(value: u16) -> std::num::NonZeroU16 {
+        std::num::NonZeroU16::new(value).unwrap()
+    }
+
+    fn digit_number() -> PageNumberDecoration {
+        PageNumberDecoration {
+            start: std::num::NonZeroU16::MIN,
+            format: PageNumberFormat::Digit,
+            position: PageNumberPosition::BottomCenter,
+            prefix: None,
+            suffix: None,
+            dash: None,
+        }
+    }
+
+    /// The page-number glyphs of each page, in order (`""` = none drawn).
+    fn page_number_texts(placed: &PlacedDoc) -> Vec<String> {
+        placed
+            .pages
+            .iter()
+            .map(|page| {
+                page.glyphs
+                    .iter()
+                    .filter(|glyph| glyph.origin == PlacedGlyphOrigin::PageDecoration)
+                    .map(|glyph| glyph.ch)
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn body_glyphs(placed: &PlacedDoc) -> Vec<Vec<(i64, i64, char)>> {
+        placed
+            .pages
+            .iter()
+            .map(|page| {
+                page.glyphs
+                    .iter()
+                    .filter(|glyph| glyph.origin != PlacedGlyphOrigin::PageDecoration)
+                    .map(|glyph| {
+                        (
+                            glyph.x.round() as i64,
+                            glyph.baseline.round() as i64,
+                            glyph.ch,
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn page_number_plan_follows_hancom_restart_hide_and_show_rules() {
+        use PageNumberMark::{Hide, Restart, Show};
+        let one = std::num::NonZeroU16::MIN;
+        let plan =
+            |count, marks: &[(usize, PageNumberMark)]| page_number_plan(10, count, one, marks);
+        assert_eq!(plan(3, &[]), vec![Some(1), Some(2), Some(3)]);
+        // 쪽 중간의 새 번호 + 감춘 쪽도 센다: 한컴 `1 2 1 2 3 4 5 · 7`.
+        assert_eq!(
+            plan(9, &[(12, Restart(one)), (17, Hide)]),
+            [1, 2, 1, 2, 3, 4, 5, 0, 7]
+                .map(|n| (n != 0).then_some(n))
+                .to_vec()
+        );
+        // 표지 · 목차를 감추고 본문에서 1로: 한컴 `· 2 · 1 2`.
+        assert_eq!(
+            plan(5, &[(10, Hide), (12, Hide), (13, Restart(one))]),
+            vec![None, Some(2), None, Some(1), Some(2)]
+        );
+        // 쪽 번호 위치가 셋째 쪽에 놓이면 그 앞 쪽은 비운다(번호는 센다).
+        assert_eq!(plan(4, &[(12, Show)]), vec![None, None, Some(3), Some(4)]);
+        // Show 가 여럿이면 가장 이른 쪽부터. 한 쪽에 새 번호가 여럿이면 문서 순서의 마지막.
+        assert_eq!(
+            plan(
+                3,
+                &[
+                    (12, Show),
+                    (11, Show),
+                    (11, Restart(nz(5))),
+                    (11, Restart(nz(8)))
+                ]
+            ),
+            vec![None, Some(8), Some(9)]
+        );
+        // 시작 번호는 구역 값에서.
+        assert_eq!(page_number_plan(0, 2, nz(7), &[]), vec![Some(7), Some(8)]);
+    }
+
+    #[test]
+    fn page_number_marks_take_effect_on_the_page_holding_the_paragraph() {
+        // 넘침으로 다음 쪽에 밀린 문단 — 표지는 첫 줄이 놓인 쪽(= block_pages 의 쪽)에서 효력을 낸다.
+        let mut marked = para("사");
+        marked.page_number_marks = vec![PageNumberMark::Restart(nz(5))];
+        let mut hidden = para("자");
+        hidden.page_break_before = true;
+        hidden.page_number_marks = vec![PageNumberMark::Hide];
+        let mut doc = doc_with(vec![
+            Block::Paragraph(para("가\n나\n다\n라\n마\n바")),
+            Block::Paragraph(marked),
+            Block::Paragraph(para("아")),
+            Block::Paragraph(hidden),
+            Block::Paragraph(para("차")),
+        ]);
+        doc.sections[0].page = PageSetup {
+            width: 5_000,
+            height: 3_000,
+            margin_left: 500,
+            margin_right: 500,
+            margin_top: 500,
+            margin_bottom: 500,
+            margin_header: 100,
+            margin_footer: 100,
+            ..PageSetup::default()
+        };
+        doc.sections[0].page_number = Some(digit_number());
+        let mut unmarked = doc.clone();
+        for block in &mut unmarked.sections[0].blocks {
+            if let Block::Paragraph(paragraph) = block {
+                paragraph.page_number_marks.clear();
+            }
+        }
+
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let marked_page = block_pages(&doc, &ApproxFontMetrics)[0][1];
+        let hidden_page = block_pages(&doc, &ApproxFontMetrics)[0][3];
+        assert!(
+            marked_page >= 1,
+            "the marked paragraph must start past page 1"
+        );
+        let texts = page_number_texts(&placed);
+        let expected: Vec<String> = (0..placed.pages.len())
+            .map(|page| {
+                if page == hidden_page {
+                    String::new()
+                } else if page < marked_page {
+                    (page + 1).to_string()
+                } else {
+                    (5 + page - marked_page).to_string()
+                }
+            })
+            .collect();
+        assert_eq!(texts, expected);
+
+        // 꾸밈만 바뀐다: 쪽 수 · 본문 글자 위치는 표지가 없을 때와 같고 NaiveLayout 과도 같다.
+        let without = place_doc(&unmarked, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), without.pages.len());
+        assert_eq!(body_glyphs(&placed), body_glyphs(&without));
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .expect("marks keep layout valid");
+        assert_eq!(placed.pages.len(), naive.pages.len());
+        assert_eq!(
+            page_number_texts(&without),
+            (1..=without.pages.len())
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// 다단 흐름(`place_doc_columns`)도 같은 표지 규칙을 따른다.
+    #[test]
+    fn page_number_marks_apply_in_the_column_flow_lane() {
+        let columns = ColumnLayout {
+            widths: vec![2_000, 2_000],
+            gaps: vec![500],
+            ..ColumnLayout::default()
+        };
+        let mut first = para("가\n나\n다\n라\n마\n바\n사\n아\n자\n차\n카\n타");
+        first.column_layout_before = Some(columns);
+        let mut marked = para("표지");
+        marked.page_number_marks = vec![PageNumberMark::Restart(nz(5))];
+        let mut doc = doc_with(vec![
+            Block::Paragraph(first),
+            Block::Paragraph(para("가\n나\n다\n라\n마\n바\n사\n아\n자\n차\n카\n타")),
+            Block::Paragraph(marked),
+        ]);
+        doc.sections[0].page = PageSetup {
+            width: 4_500,
+            height: 3_000,
+            margin_left: 0,
+            margin_right: 0,
+            margin_top: 500,
+            margin_bottom: 500,
+            margin_header: 100,
+            margin_footer: 100,
+            ..PageSetup::default()
+        };
+        doc.sections[0].page_number = Some(digit_number());
+        assert!(crate::uses_column_flow(&doc));
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let marked_page = block_pages(&doc, &ApproxFontMetrics)[0][2];
+        assert!(
+            marked_page >= 1,
+            "the marked paragraph must start past page 1"
+        );
+        let expected: Vec<String> = (0..placed.pages.len())
+            .map(|page| {
+                if page < marked_page {
+                    (page + 1).to_string()
+                } else {
+                    (5 + page - marked_page).to_string()
+                }
+            })
+            .collect();
+        assert_eq!(page_number_texts(&placed), expected);
+    }
+
+    #[test]
+    fn page_number_marks_in_table_cells_use_the_rows_fragment_page() {
+        let marked_table = |row: usize, mark: PageNumberMark| {
+            let mut table = fixed_height_table(6, 3000, false);
+            for cell in &mut table.cells {
+                if cell.row == row {
+                    if let Some(Block::Paragraph(paragraph)) = cell.blocks.first_mut() {
+                        paragraph.page_number_marks = vec![mark];
+                    }
+                }
+            }
+            table
+        };
+        let numbered = |table: Table| {
+            let mut doc = doc_with_page(vec![Block::Table(table)], 10_000);
+            doc.sections[0].page_number = Some(digit_number());
+            page_number_texts(&place_doc(&doc, &ApproxFontMetrics))
+        };
+        assert_eq!(numbered(fixed_height_table(6, 3000, false)), ["1", "2"]);
+        // 넷째 · 다섯째 행은 둘째 쪽 조각에 있다.
+        assert_eq!(
+            numbered(marked_table(4, PageNumberMark::Restart(nz(9)))),
+            ["1", "9"]
+        );
+        assert_eq!(
+            numbered(marked_table(1, PageNumberMark::Restart(nz(9)))),
+            ["9", "10"]
+        );
+        assert_eq!(numbered(marked_table(5, PageNumberMark::Hide)), ["1", ""]);
+
+        // 표 앵커 문단(높이 없음)의 표지는 바로 뒤 표의 첫 조각 쪽에서.
+        let mut anchor = para("");
+        anchor.is_table_anchor = true;
+        anchor.page_number_marks = vec![PageNumberMark::Hide];
+        let mut doc = doc_with_page(
+            vec![
+                Block::Paragraph(anchor),
+                Block::Table(fixed_height_table(6, 3000, false)),
+            ],
+            10_000,
+        );
+        doc.sections[0].page_number = Some(digit_number());
+        assert_eq!(
+            page_number_texts(&place_doc(&doc, &ApproxFontMetrics)),
+            ["", "2"]
+        );
+
+        // HWPX 순서 `[표, 앵커]`: 앵커의 원본 범위가 앞 표를 품으면 그 표의 첫 조각 쪽에서.
+        let mut owned = fixed_height_table(6, 3000, false);
+        owned.src_span = Some((10, 20));
+        let mut host = para("");
+        host.is_table_anchor = true;
+        host.source = Some(ParaSource {
+            span: (0, 30),
+            ..Default::default()
+        });
+        host.page_number_marks = vec![PageNumberMark::Restart(nz(4))];
+        let mut doc = doc_with_page(
+            vec![
+                Block::Paragraph(para("앞")),
+                Block::Table(owned),
+                Block::Paragraph(host),
+            ],
+            10_000,
+        );
+        doc.sections[0].page_number = Some(digit_number());
+        assert_eq!(
+            page_number_texts(&place_doc(&doc, &ApproxFontMetrics)),
+            ["4", "5", "6"]
+        );
+
+        // 놓인 쪽을 찾지 못하는 표지(없는 행)는 그 구역의 쪽 번호를 끈다 — 틀린 번호보다 없는 번호.
+        let mut orphan = fixed_height_table(6, 3000, false);
+        orphan.cells[5].row = 99;
+        if let Some(Block::Paragraph(paragraph)) = orphan.cells[5].blocks.first_mut() {
+            paragraph.page_number_marks = vec![PageNumberMark::Restart(nz(9))];
+        }
+        assert_eq!(numbered(orphan), ["", ""]);
     }
 
     #[test]

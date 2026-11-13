@@ -307,7 +307,7 @@ pub fn section_page_breaks(sec: &Section, doc: &SemanticDoc) -> Vec<bool> {
 /// [`section_page_breaks`] 의 보정 한 줄: 표만 품은 앵커 문단이면 **자기 표들의 첫 블록** 인덱스를,
 /// 아니면 자기 인덱스를 돌려준다. 앵커 자체에서는 같은 break 를 다시 실행하지 않는다(끌어올린
 /// 자리에만 표시된다).
-fn hoist_to_owned_table(sec: &Section, i: usize, p: &Paragraph) -> usize {
+pub(crate) fn hoist_to_owned_table(sec: &Section, i: usize, p: &Paragraph) -> usize {
     if !p.is_table_anchor {
         return i;
     }

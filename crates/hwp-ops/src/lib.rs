@@ -3077,8 +3077,12 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                     ));
                 }
             }
-            let moved = match &mut sec.blocks[*block] {
-                Block::Paragraph(p) => std::mem::take(&mut p.runs),
+            // 쪽 번호 표지도 글과 함께 옮긴다 — 병합으로 제어가 사라지지 않게.
+            let (moved, moved_marks) = match &mut sec.blocks[*block] {
+                Block::Paragraph(p) => (
+                    std::mem::take(&mut p.runs),
+                    std::mem::take(&mut p.page_number_marks),
+                ),
                 _ => unreachable!("검사됨"),
             };
             // The HWPX serializer patches the ORIGINAL section XML: the merged-away paragraph must leave
@@ -3093,6 +3097,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 unreachable!("검사됨")
             };
             prev.runs.extend(moved);
+            prev.page_number_marks.extend(moved_marks);
             // 빈 런은 내용이 없으니 정리한다(앞 문단이 빈 문단이었던 흔한 경우) — 단, 전부 비면 한 개는 남겨
             // 문단이 런 0개가 되지 않게 한다(직렬화/조판이 첫 런의 char_shape 을 읽는다).
             if prev.runs.iter().any(|r| run_char_len(r) > 0) {
@@ -7492,6 +7497,54 @@ mod tests {
             panic!()
         };
         assert_eq!(p.id, Some(NodeId(1)), "살아남는 쪽은 앞 문단");
+    }
+
+    /// 쪽 번호 표지는 나누기에서 꼬리로 복제되지 않고(새 번호가 두 번 걸리면 안 된다), 병합에서 사라지지 않는다.
+    #[test]
+    fn page_number_marks_are_not_duplicated_by_split_nor_lost_by_merge() {
+        let restart = PageNumberMark::Restart(std::num::NonZeroU16::MIN);
+        let mut doc = doc_with(vec![simple_para(1, "가나"), simple_para(2, "다라")]);
+        let marks_of = |doc: &SemanticDoc| -> Vec<Vec<PageNumberMark>> {
+            doc.sections[0]
+                .blocks
+                .iter()
+                .map(|block| match block {
+                    Block::Paragraph(p) => p.page_number_marks.clone(),
+                    Block::Table(_) => Vec::new(),
+                })
+                .collect()
+        };
+        if let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] {
+            p.page_number_marks = vec![restart];
+        }
+        if let Block::Paragraph(p) = &mut doc.sections[0].blocks[1] {
+            p.page_number_marks = vec![PageNumberMark::Hide];
+        }
+        apply(
+            &mut doc,
+            &Op::SplitParagraph {
+                section: 0,
+                block: 0,
+                at: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            marks_of(&doc),
+            vec![vec![restart], vec![], vec![PageNumberMark::Hide]]
+        );
+        apply(
+            &mut doc,
+            &Op::MergeParagraph {
+                section: 0,
+                block: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            marks_of(&doc),
+            vec![vec![restart], vec![PageNumberMark::Hide]]
+        );
     }
 
     #[test]

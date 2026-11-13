@@ -7,7 +7,8 @@ header refusal reasons; issue #161 adds strict column definitions and the shared
 contract. Issues #168–#196 then advanced one content-free control/table boundary at a time through
 strict exact subsets. The bounded public benchmark now parses to the end in the first-party-only lane.
 Issue #219 connects one already-proven decoration to production as a fail-closed enrichment; it is
-not a generic parser cutover.
+not a generic parser cutover. Step S2 of `docs/HANCOM-PDF-PARITY-ROADMAP.md` then decouples that
+page-number enrichment from the whole-document strict parse (see Parser modes).
 
 ## What is owned now
 
@@ -65,10 +66,25 @@ rejected instead of being interpreted as records.
 ## Parser modes
 
 - `Engine::open`: binary HWP5 still uses the governed rhwp bootstrap for the base `SemanticDoc`.
-  After that succeeds, the strict first-party parser may enrich only `Section.page_number`, and only
-  when the complete owned parse succeeds, section topology is identical, and every pre-existing
-  typed page-number value is compatible. Validation precedes mutation, so parse failure, topology
-  mismatch, or any conflict is an atomic no-op. HWP3 remains the unmodified rhwp route.
+  After that succeeds, owned facts are attached, each axis atomically (validation precedes mutation;
+  any failure, topology mismatch, or conflict is a no-op for that axis). HWP3 remains the unmodified
+  rhwp route.
+  - **Page numbers** come from the page-number-only owned extraction
+    (`OwnHwp5Parser::page_numbers`), which does **not** require the whole document to parse strictly.
+    Real forms fail the whole-document parse on records unrelated to page numbers (a DocInfo bullet
+    extension, a section-definition child record, image/gradient border fills), and Hancom places
+    page-number controls where the strict parser does not accept them (a later paragraph, a table
+    cell, `pghd` page hiding). The extraction validates the container and every record frame through
+    the shared probe, reads `pgnp` and page-counter `nwno` with the strict parser's own decoders, adds
+    a strict `pghd` reader (attribute bit 0x20 = hide the page number; unknown bits are refused), and
+    accepts exactly two sites: a control of a top-level paragraph (record level 1), and a control of a
+    cell paragraph of a table that paragraph hosts (level 3, after the `TABLE` record). Captions,
+    headers/footers, notes, text boxes, nested tables, conflicting positions, a nonzero section
+    start number, and a later section without a first-paragraph restart are refused or left off.
+    `hwp-core` then requires the same section count and top-level paragraph count as the rhwp model
+    and resolves every table/cell/paragraph before it sets `Section.page_number` and appends
+    `Paragraph.page_number_marks`.
+  - **Table anchor spacing and source line geometry** still require the complete strict parse.
 - `open_hwp5_own`: explicit first-party-only route. It returns a `SemanticDoc` only for the owned
   text, single-sided page setup, strict column subset, page numbering, and explicitly enumerated
   table subsets. These include exact merged/full-grid forms, bounded depth-1 nested tables, multiple
@@ -162,7 +178,8 @@ on rhwp, `external/rhwp` remains immutable, and eligibility remains false until 
 and cutover gates below are satisfied.
 
 #219 then promoted only that typed page-number fact into `Engine::open`. The base HWP5 document is
-still decoded by rhwp; a complete strict first-party parse acts as the fail-closed evidence source.
+still decoded by rhwp; a complete strict first-party parse acted as the fail-closed evidence source
+until S2 replaced it, for page numbers only, with the bounded page-number extraction above.
 On the canonical eight-page benchmark, production SVG and PDF now match the first-party candidate,
 including three page-number glyphs per page. HWP3, HWPX, the generic cutover eligibility result, and
 vendored rhwp are unchanged. This bounded enrichment does not imply that unsupported first-party

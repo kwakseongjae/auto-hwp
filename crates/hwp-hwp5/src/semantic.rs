@@ -1,6 +1,8 @@
 use crate::{probe, Error, Hwp5Probe, Record, Result, StreamProbe};
 use hwp_model::prelude::*;
 
+pub(crate) mod page_numbers;
+
 const TAG_DOCUMENT_PROPERTIES: u16 = 0x10;
 const TAG_ID_MAPPINGS: u16 = 0x11;
 const TAG_BIN_DATA: u16 = 0x12;

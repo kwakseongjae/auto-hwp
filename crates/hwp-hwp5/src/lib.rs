@@ -21,6 +21,7 @@ pub use probe::{
     StructuralDelta, StructuralInventory,
 };
 pub use record::{walk_records, Record, RecordError, RecordLimits};
+pub use semantic::page_numbers::{OwnedPageNumberMark, OwnedSectionPageNumbers, PageNumberSite};
 
 use hwp_model::document::SemanticDoc;
 use thiserror::Error;
@@ -129,5 +130,11 @@ impl OwnHwp5Parser {
 
     pub fn parse(&self, bytes: &[u8]) -> Result<SemanticDoc> {
         semantic::parse_text_only(bytes)
+    }
+
+    /// 쪽 번호 전용 추출 — 문서 전체 엄격 파싱이 실패하는 문서에서도 쪽 번호 제어만 읽는다.
+    /// 구역마다 하나씩, 모르는 자리 · 값이면 오류(호출부는 아무것도 바꾸지 않는다).
+    pub fn page_numbers(&self, bytes: &[u8]) -> Result<Vec<OwnedSectionPageNumbers>> {
+        semantic::page_numbers::page_number_controls(bytes)
     }
 }

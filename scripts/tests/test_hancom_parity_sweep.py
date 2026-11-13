@@ -93,6 +93,31 @@ class PageNumbers(unittest.TestCase):
         slash = page([(10, "2 / 9")])
         self.assertEqual(sweep.page_numbers([with_number, body_number, slash]), 2)
 
+    def test_reads_values_including_a_number_joined_to_body_text(self):
+        joined = page([(820, "가나다 라마바 사아 -4-")])
+        hidden = page([(100, "본문")])
+        self.assertEqual(sweep.page_number_values([page([(820, "- 3 -")]), joined, hidden]), ["3", "4", None])
+
+    def test_dates_and_phone_numbers_in_the_band_are_not_page_numbers(self):
+        dated = page([(820, "작성일 2026-11-13 문의 02-123-4567")])
+        self.assertEqual(sweep.page_number_values([dated]), [None])
+        self.assertEqual(sweep.page_numbers([dated]), 0)
+
+    def test_sequence_compares_values_not_counts(self):
+        restart = ["1", "2", "1", "2"]
+        straight = ["1", "2", "3", "4"]
+        diff = sweep.page_number_sequence(restart, straight)
+        self.assertEqual((diff["ref"], diff["cand"]), (4, 4))
+        self.assertFalse(diff["equal"])
+        self.assertFalse(diff["common_equal"])
+        self.assertEqual(diff["same_value_pages"], 2)
+        longer = sweep.page_number_sequence(restart, restart + ["3"])
+        self.assertTrue(longer["common_equal"])
+        self.assertFalse(longer["equal"])
+        same = sweep.page_number_sequence([None, "2"], [None, "2"])
+        self.assertTrue(same["equal"] and same["common_equal"])
+        self.assertFalse(sweep.page_number_sequence([], [])["common_equal"])
+
 
 class LineGeometry(unittest.TestCase):
     def test_pairs_unique_lines_and_reports_offsets(self):

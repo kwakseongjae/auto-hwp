@@ -56,16 +56,149 @@ impl Engine {
     }
 }
 
-/// Merge the one bounded HWP5 decoration already owned by the strict parser. The candidate parse
-/// must succeed for the whole document, and this helper validates every section before mutating any
-/// section so a topology mismatch or typed conflict cannot leave a partially enriched document.
+/// Enrich the rhwp bootstrap model with strictly owned HWP5 facts, each axis atomically.
+///
+/// - 쪽 번호(S2): the page-number-only owned extraction ([`hwp_hwp5::OwnHwp5Parser::page_numbers`]),
+///   which does NOT need the whole document to parse strictly — real forms fail that parse on
+///   unrelated records (bullets, image fills, section-definition children).
+/// - Table anchor spacing and source line geometry still require the complete strict parse.
 fn enrich_hwp5_owned_page_numbers(bytes: &[u8], target: &mut SemanticDoc) {
+    if let Ok(numbers) = hwp_hwp5::OwnHwp5Parser::new().page_numbers(bytes) {
+        merge_owned_page_number_marks(target, &numbers);
+    }
     let Ok(owned) = hwp_hwp5::OwnHwp5Parser::new().parse(bytes) else {
         return;
     };
-    merge_owned_page_numbers(target, &owned);
     merge_owned_table_anchor_spacings(target, &owned);
     merge_owned_source_line_geometry(target, &owned);
+}
+
+/// Where an owned page-number mark lands in the rhwp-lifted section: a top-level block, or
+/// `(table block, cell index, block inside the cell)`.
+#[derive(Clone, Copy)]
+enum MarkPath {
+    Top(usize),
+    Cell(usize, usize, usize),
+}
+
+fn paragraph_indices(blocks: &[Block]) -> impl Iterator<Item = usize> + '_ {
+    blocks
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| matches!(block, Block::Paragraph(_)))
+        .map(|(index, _)| index)
+}
+
+/// Resolve an owned site onto the rhwp-lifted blocks: the k-th top-level paragraph, or the cell
+/// paragraph of the t-th table the k-th paragraph hosts (rhwp emits each host paragraph followed by
+/// its tables). `None` when the topology does not line up.
+fn resolve_mark_path(
+    blocks: &[Block],
+    tops: &[usize],
+    site: hwp_hwp5::PageNumberSite,
+) -> Option<MarkPath> {
+    match site {
+        hwp_hwp5::PageNumberSite::Paragraph(paragraph) => {
+            tops.get(paragraph).map(|i| MarkPath::Top(*i))
+        }
+        hwp_hwp5::PageNumberSite::Cell {
+            paragraph,
+            table,
+            row,
+            col,
+            cell_paragraph,
+        } => {
+            let start = *tops.get(paragraph)?;
+            let end = tops.get(paragraph + 1).copied().unwrap_or(blocks.len());
+            let table_index = (start + 1..end)
+                .filter(|index| matches!(blocks[*index], Block::Table(_)))
+                .nth(table)?;
+            let Block::Table(found) = &blocks[table_index] else {
+                return None;
+            };
+            let mut cells = found
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, cell)| cell.active && cell.row == row && cell.col == col);
+            let (cell_index, cell) = cells.next()?;
+            if cells.next().is_some() {
+                return None;
+            }
+            let block_index = paragraph_indices(&cell.blocks).nth(cell_paragraph)?;
+            Some(MarkPath::Cell(table_index, cell_index, block_index))
+        }
+    }
+}
+
+fn mark_paragraph(blocks: &mut [Block], path: MarkPath) -> Option<&mut Paragraph> {
+    let block = match path {
+        MarkPath::Top(index) => blocks.get_mut(index)?,
+        MarkPath::Cell(table, cell, index) => match blocks.get_mut(table)? {
+            Block::Table(found) => found.cells.get_mut(cell)?.blocks.get_mut(index)?,
+            Block::Paragraph(_) => return None,
+        },
+    };
+    match block {
+        Block::Paragraph(paragraph) => Some(paragraph),
+        Block::Table(_) => None,
+    }
+}
+
+/// Attach the owned page-number decoration + marks to the rhwp-lifted document. Every section is
+/// validated (section count, top-level paragraph count, every mark's table/cell/paragraph, no
+/// conflicting decoration, no marks already present) before ANY mutation, so a mismatch leaves the
+/// whole document unchanged.
+fn merge_owned_page_number_marks(
+    target: &mut SemanticDoc,
+    owned: &[hwp_hwp5::OwnedSectionPageNumbers],
+) -> bool {
+    if target.sections.len() != owned.len() {
+        return false;
+    }
+    let mut plan = Vec::new();
+    for (index, (section, facts)) in target.sections.iter().zip(owned).enumerate() {
+        let Some(decoration) = facts.decoration_for(index) else {
+            continue;
+        };
+        if section
+            .page_number
+            .is_some_and(|current| current != decoration)
+        {
+            return false;
+        }
+        let tops: Vec<usize> = paragraph_indices(&section.blocks).collect();
+        if tops.len() != facts.top_level_paragraphs {
+            return false;
+        }
+        let mut marks = Vec::with_capacity(facts.marks.len());
+        for owned_mark in &facts.marks {
+            let Some(path) = resolve_mark_path(&section.blocks, &tops, owned_mark.site) else {
+                return false;
+            };
+            marks.push((path, owned_mark.mark));
+        }
+        plan.push((index, decoration, marks));
+    }
+    for (index, _, marks) in &plan {
+        let blocks = &mut target.sections[*index].blocks;
+        for (path, _) in marks {
+            if mark_paragraph(blocks, *path).is_none_or(|p| !p.page_number_marks.is_empty()) {
+                return false;
+            }
+        }
+    }
+    for (index, decoration, marks) in plan {
+        let section = &mut target.sections[index];
+        section.page_number = Some(decoration);
+        for (path, mark) in marks {
+            mark_paragraph(&mut section.blocks, path)
+                .expect("validated above")
+                .page_number_marks
+                .push(mark);
+        }
+    }
+    true
 }
 
 #[derive(PartialEq, Eq)]
@@ -146,29 +279,6 @@ fn merge_owned_source_line_geometry(target: &mut SemanticDoc, owned: &SemanticDo
             if let (Block::Paragraph(target), Block::Paragraph(owned)) = (target, owned) {
                 target.source_line_geometry = owned.source_line_geometry.clone();
             }
-        }
-    }
-    true
-}
-
-fn merge_owned_page_numbers(target: &mut SemanticDoc, owned: &SemanticDoc) -> bool {
-    if target.sections.len() != owned.sections.len()
-        || !target
-            .sections
-            .iter()
-            .zip(&owned.sections)
-            .all(
-                |(target, owned)| match (target.page_number, owned.page_number) {
-                    (Some(current), Some(candidate)) => current == candidate,
-                    _ => true,
-                },
-            )
-    {
-        return false;
-    }
-    for (target, owned) in target.sections.iter_mut().zip(&owned.sections) {
-        if target.page_number.is_none() {
-            target.page_number = owned.page_number;
         }
     }
     true
@@ -389,19 +499,6 @@ mod hwp5_candidate_tests {
         }
     }
 
-    fn sections(numbers: &[Option<PageNumberDecoration>]) -> SemanticDoc {
-        SemanticDoc {
-            sections: numbers
-                .iter()
-                .map(|page_number| Section {
-                    page_number: *page_number,
-                    ..Section::default()
-                })
-                .collect(),
-            ..SemanticDoc::default()
-        }
-    }
-
     fn table_doc(rows: usize, spacing: HwpUnit) -> SemanticDoc {
         SemanticDoc {
             sections: vec![Section {
@@ -449,45 +546,223 @@ mod hwp5_candidate_tests {
         }
     }
 
-    #[test]
-    fn page_number_merge_is_atomic_for_topology_partial_and_typed_conflicts() {
-        let first = number(1, PageNumberPosition::BottomCenter);
-        let second = number(2, PageNumberPosition::BottomCenter);
-        let conflicting = number(1, PageNumberPosition::TopCenter);
+    fn owned_numbers(
+        decoration: Option<PageNumberDecoration>,
+        top_level_paragraphs: usize,
+        marks: &[(hwp_hwp5::PageNumberSite, PageNumberMark)],
+    ) -> hwp_hwp5::OwnedSectionPageNumbers {
+        hwp_hwp5::OwnedSectionPageNumbers {
+            decoration,
+            top_level_paragraphs,
+            marks: marks
+                .iter()
+                .map(|(site, mark)| hwp_hwp5::OwnedPageNumberMark {
+                    site: *site,
+                    mark: *mark,
+                })
+                .collect(),
+            start_page: 0,
+            restart_at_start: false,
+        }
+    }
 
-        let mut topology = sections(&[None]);
-        assert!(!merge_owned_page_numbers(
-            &mut topology,
-            &sections(&[Some(first), Some(second)])
-        ));
-        assert!(topology.sections[0].page_number.is_none());
+    /// `[문단, 문단(표 호스트), 표(2×1), 문단]` — rhwp lift 의 순서(호스트 문단 뒤에 그 표).
+    fn hosted_table_doc() -> SemanticDoc {
+        let cell = |row| Cell {
+            row,
+            col: 0,
+            blocks: vec![Block::Paragraph(Paragraph::default())],
+            active: true,
+            ..Cell::default()
+        };
+        SemanticDoc {
+            sections: vec![Section {
+                blocks: vec![
+                    Block::Paragraph(Paragraph::default()),
+                    Block::Paragraph(Paragraph::default()),
+                    Block::Table(Table {
+                        rows: 2,
+                        cols: 1,
+                        cells: vec![cell(0), cell(1)],
+                        ..Table::default()
+                    }),
+                    Block::Paragraph(Paragraph::default()),
+                ],
+                ..Section::default()
+            }],
+            ..SemanticDoc::default()
+        }
+    }
 
-        let mut partial = sections(&[None, Some(conflicting)]);
-        assert!(!merge_owned_page_numbers(
-            &mut partial,
-            &sections(&[Some(first), Some(second)])
-        ));
-        assert!(partial.sections[0].page_number.is_none());
-        assert_eq!(partial.sections[1].page_number, Some(conflicting));
+    type MarkView = (Vec<Vec<PageNumberMark>>, Vec<Vec<PageNumberMark>>);
 
-        let mut compatible = sections(&[None, Some(second)]);
-        assert!(merge_owned_page_numbers(
-            &mut compatible,
-            &sections(&[Some(first), Some(second)])
-        ));
-        assert_eq!(compatible.sections[0].page_number, Some(first));
-        assert_eq!(compatible.sections[1].page_number, Some(second));
+    fn marks_at(doc: &SemanticDoc) -> MarkView {
+        let blocks = &doc.sections[0].blocks;
+        let top = blocks
+            .iter()
+            .map(|block| match block {
+                Block::Paragraph(paragraph) => paragraph.page_number_marks.clone(),
+                Block::Table(_) => Vec::new(),
+            })
+            .collect();
+        let Block::Table(table) = &blocks[2] else {
+            unreachable!()
+        };
+        let cells = table
+            .cells
+            .iter()
+            .map(|cell| match &cell.blocks[0] {
+                Block::Paragraph(paragraph) => paragraph.page_number_marks.clone(),
+                Block::Table(_) => Vec::new(),
+            })
+            .collect();
+        (top, cells)
     }
 
     #[test]
-    fn production_hwp5_open_enriches_the_strictly_owned_page_number() {
+    fn page_number_marks_merge_onto_rhwp_blocks_atomically() {
+        use hwp_hwp5::PageNumberSite::{Cell as InCell, Paragraph as Top};
+        let first = number(1, PageNumberPosition::BottomCenter);
+        let one = NonZeroU16::MIN;
+        let in_row = |row| InCell {
+            paragraph: 1,
+            table: 0,
+            row,
+            col: 0,
+            cell_paragraph: 0,
+        };
+        let good = owned_numbers(
+            Some(first),
+            3,
+            &[
+                (in_row(0), PageNumberMark::Show),
+                (in_row(1), PageNumberMark::Hide),
+                (Top(2), PageNumberMark::Restart(one)),
+            ],
+        );
+
+        let mut doc = hosted_table_doc();
+        assert!(merge_owned_page_number_marks(
+            &mut doc,
+            std::slice::from_ref(&good)
+        ));
+        assert_eq!(doc.sections[0].page_number, Some(first));
+        assert_eq!(
+            marks_at(&doc),
+            (
+                vec![vec![], vec![], vec![], vec![PageNumberMark::Restart(one)]],
+                vec![vec![PageNumberMark::Show], vec![PageNumberMark::Hide]],
+            )
+        );
+
+        // 어긋나면 아무것도 바꾸지 않는다: 구역 수 · 최상위 문단 수 · 없는 칸 · 없는 표 · 다른 모양.
+        let untouched = |owned: &[hwp_hwp5::OwnedSectionPageNumbers], mut doc: SemanticDoc| {
+            assert!(!merge_owned_page_number_marks(&mut doc, owned));
+            assert_eq!(marks_at(&doc), marks_at(&hosted_table_doc()));
+            doc.sections[0].page_number
+        };
+        assert_eq!(
+            untouched(&[good.clone(), good.clone()], hosted_table_doc()),
+            None
+        );
+        let mut short = good.clone();
+        short.top_level_paragraphs = 4;
+        assert_eq!(untouched(&[short], hosted_table_doc()), None);
+        let missing_cell = owned_numbers(
+            Some(first),
+            3,
+            &[
+                (Top(0), PageNumberMark::Show),
+                (in_row(5), PageNumberMark::Hide),
+            ],
+        );
+        assert_eq!(untouched(&[missing_cell], hosted_table_doc()), None);
+        let no_hosted_table = InCell {
+            paragraph: 0,
+            table: 0,
+            row: 0,
+            col: 0,
+            cell_paragraph: 0,
+        };
+        let missing_table =
+            owned_numbers(Some(first), 3, &[(no_hosted_table, PageNumberMark::Hide)]);
+        assert_eq!(untouched(&[missing_table], hosted_table_doc()), None);
+        let mut conflicting = hosted_table_doc();
+        let other = number(1, PageNumberPosition::TopCenter);
+        conflicting.sections[0].page_number = Some(other);
+        assert_eq!(
+            untouched(std::slice::from_ref(&good), conflicting),
+            Some(other)
+        );
+
+        // 쪽 시작 번호가 0 이 아니거나, 둘째 구역인데 첫 문단에 새 번호가 없으면 그 구역은 켜지 않는다.
+        let mut explicit_start = good.clone();
+        explicit_start.start_page = 3;
+        let mut doc = hosted_table_doc();
+        assert!(merge_owned_page_number_marks(&mut doc, &[explicit_start]));
+        assert_eq!(doc.sections[0].page_number, None);
+        assert_eq!(marks_at(&doc), marks_at(&hosted_table_doc()));
+        assert!(good.decoration_for(1).is_none());
+    }
+
+    #[test]
+    fn production_hwp5_open_reads_page_numbers_without_a_whole_document_strict_parse() {
         let doc = Engine::open(&benchmark()).expect("production HWP5 open succeeds");
         assert_eq!(doc.sections.len(), 1);
         assert_eq!(
             doc.sections[0].page_number,
             open_hwp5_own(&benchmark()).unwrap().sections[0].page_number
         );
-        assert!(doc.sections[0].page_number.is_some());
+        let first_marks = |doc: &SemanticDoc| {
+            doc.sections[0]
+                .blocks
+                .iter()
+                .enumerate()
+                .find_map(|(index, block)| match block {
+                    Block::Paragraph(p) if !p.page_number_marks.is_empty() => {
+                        Some((index, p.page_number_marks.clone()))
+                    }
+                    _ => None,
+                })
+        };
+        // 쪽 번호 위치 · 새 번호가 첫 문단에 두 번씩(같은 값) — 그대로 표지가 된다.
+        let one = NonZeroU16::MIN;
+        assert_eq!(
+            first_marks(&doc),
+            Some((
+                0,
+                vec![
+                    PageNumberMark::Show,
+                    PageNumberMark::Restart(one),
+                    PageNumberMark::Show,
+                    PageNumberMark::Restart(one),
+                ]
+            ))
+        );
+        // 엄격 파싱은 쪽 번호와 무관한 레코드에서 실패하지만(BULLET 확장 · 구역 정의 자식) 쪽 번호는 읽힌다.
+        for (name, top_paragraph) in [("benchmark1.hwp", 0usize), ("benchmark2.hwp", 4)] {
+            let bytes = std::fs::read(format!(
+                "{}/../../benchmarks/{name}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap();
+            let doc = Engine::open(&bytes).unwrap();
+            assert_eq!(
+                doc.sections[0].page_number,
+                Some(number(1, PageNumberPosition::BottomCenter)),
+                "{name}"
+            );
+            let (index, marks) = first_marks(&doc).expect(name);
+            let ordinal = doc.sections[0].blocks[..index]
+                .iter()
+                .filter(|block| matches!(block, Block::Paragraph(_)))
+                .count();
+            assert_eq!(
+                (ordinal, marks),
+                (top_paragraph, vec![PageNumberMark::Show]),
+                "{name}"
+            );
+        }
     }
 
     #[test]
