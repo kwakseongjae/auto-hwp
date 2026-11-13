@@ -75,8 +75,14 @@ rejected instead of being interpreted as records.
     extension, a section-definition child record, image/gradient border fills), and Hancom places
     page-number controls where the strict parser does not accept them (a later paragraph, a table
     cell, `pghd` page hiding).
-    - The container and every record frame are validated through the shared probe; a broken frame is
-      an error.
+    - The container and every record frame are validated through the shared probe. The extraction is
+      an error whenever the probe refuses the document — a distribution or password document (opaque
+      body), a size / entry-count / decompression limit, non-contiguous section numbering, a CFB,
+      deflate or record frame that does not read strictly — or a record it reads (section definition,
+      cell `LIST_HEADER`, control header) is too short. rhwp may still open some of these (e.g.
+      distribution documents), so an error means "unknown whether page-number controls exist": the
+      first unnumbered section gets one `source-unreadable` reason (one notice per document), not every
+      section.
     - Only `pgnp`, page-counter `nwno` (read with the strict parser's own decoders) and the
       page-number bit of `pghd` (0x20; unknown bits are not read) are interpreted.
     - Accepted sites are exactly two: (X) a control of a top-level paragraph (record level 1) and (Y)
@@ -87,7 +93,11 @@ rejected instead of being interpreted as records.
       headers/footers, notes, text boxes, nested tables), unread values, conflicting positions, a
       nonzero section start number, a later section without a first-paragraph restart, or a
       topology mismatch with the rhwp model. The on/off rule is `PageNumberFacts::resolve`, shared
-      with the HWPX reader.
+      with the HWPX reader, but the accepted sites and values differ from HWPX in three places, kept
+      as they are because no Hancom reference covers them (roadmap §11 open items): a control in a
+      nested table's cell, and one in a text box or caption inside a cell, turns the section off here
+      while HWPX takes it as a mark on that cell paragraph; a circled-digit format is accepted here
+      (the strict parser's decoding) while HWPX turns it off.
     - `hwp-core` requires the same section count and top-level paragraph count as the rhwp model and
       resolves every table/cell/paragraph before it sets `Section.page_number` and appends
       `Paragraph.page_number_marks`.

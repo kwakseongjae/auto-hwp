@@ -79,7 +79,8 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   남기고, JSX 투영은 이 필드를 싣지 않는다(쪽 나누기 · 표 앵커와 같은 부류). Rust 크레이트 공개 타입 — crates.io 발행은 없다.
   *(EN — Added: page-number marks on the paragraph that holds the control; empty by default. Not carried by the JSX projection.)*
 - **`hwp_hwp5::OwnHwp5Parser::page_numbers(bytes)`.** 쪽 번호 제어만 읽는 자체 추출. 받는 자리는 최상위 문단과 그 문단이 품은 표의 칸
-  두 가지이고, 그 밖의 자리 · 값은 그 구역을 끄고 이유를 남긴다. 오류는 레코드 틀이 깨졌을 때뿐이다.
+  두 가지이고, 그 밖의 자리 · 값은 그 구역을 끄고 이유를 남긴다. 오류는 문서를 받지 않을 때(배포용 · 암호 문서, 한도 초과, 구역 번호
+  불연속, CFB · 압축 · 레코드를 엄격하게 읽지 못함)이고, 그때는 번호가 없는 첫 구역 하나에만 이유를 단다(문서 단위 알림 한 건).
   *(EN — Added: page-number-only owned HWP5 extraction; two accepted sites, anything else turns that section off with a reason.)*
 - **`PageNumberFacts` · `PageNumberOff` · `Section::page_number_off` · `PlacedDoc::page_number_off`.** 쪽 번호를 켤지 끌지 정하는 한 규칙
   (`PageNumberFacts::resolve`, HWPX · HWP5 공용)과 끈 이유. Rust 크레이트 공개 타입 — crates.io 발행은 없다.

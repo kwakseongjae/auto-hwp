@@ -143,8 +143,10 @@ fn mark_paragraph(blocks: &mut [Block], path: MarkPath) -> Option<&mut Paragraph
     }
 }
 
-/// 쪽 번호 전용 추출 결과를 붙인다. 추출이 레코드 틀에서 실패하면 쪽 번호가 있었는지 모르므로, 조용히
-/// 건너뛰지 않고 모든 구역에 [`PageNumberOff::SourceUnreadable`] 을 남긴다.
+/// 쪽 번호 전용 추출 결과를 붙인다. 추출이 실패하면(배포용 · 암호 문서, 한도 초과, CFB · 압축 · 레코드를
+/// 엄격하게 읽지 못함 — rhwp 는 이 중 일부를 연다) 쪽 번호 제어가 있었는지 모른다. 조용히 넘기지 않되, 구역마다
+/// 이유를 달면 쪽 번호가 아예 없는 문서에도 구역 수만큼 알림이 쌓이므로, 번호가 없는 **첫 구역 하나에만**
+/// [`PageNumberOff::SourceUnreadable`] 을 단다(문서 단위 알림 한 건).
 fn apply_page_number_extraction(
     target: &mut SemanticDoc,
     extracted: hwp_hwp5::Result<Vec<hwp_hwp5::OwnedSectionPageNumbers>>,
@@ -153,7 +155,7 @@ fn apply_page_number_extraction(
         Ok(numbers) => merge_owned_page_number_marks(target, &numbers),
         Err(_) => {
             turn_unnumbered_sections_off(
-                target.sections.iter_mut(),
+                target.sections.iter_mut().take(1),
                 PageNumberOff::SourceUnreadable,
             );
             false
@@ -788,7 +790,7 @@ mod hwp5_candidate_tests {
             Err(PageNumberOff::ContinuesPreviousSection)
         );
 
-        // 추출이 레코드 틀에서 실패하면 쪽 번호가 있었는지 모른다 — 조용히 넘기지 않고 이유를 남긴다.
+        // 추출이 실패하면 쪽 번호가 있었는지 모른다 — 조용히 넘기지 않고 이유를 남긴다.
         let mut doc = hosted_table_doc();
         assert!(!apply_page_number_extraction(
             &mut doc,
@@ -797,6 +799,21 @@ mod hwp5_candidate_tests {
         assert_eq!(
             doc.sections[0].page_number_off,
             Some(PageNumberOff::SourceUnreadable)
+        );
+        // 배포용처럼 rhwp 는 열고 추출만 실패하는 문서: 구역이 여럿이어도 이유는 문서 단위 한 건이다.
+        let mut doc = hosted_table_doc();
+        let section = doc.sections[0].clone();
+        doc.sections.extend([section.clone(), section]);
+        assert!(!apply_page_number_extraction(
+            &mut doc,
+            Err(hwp_hwp5::Error::OpaqueBody(0x02))
+        ));
+        assert_eq!(
+            doc.sections
+                .iter()
+                .map(|section| section.page_number_off)
+                .collect::<Vec<_>>(),
+            vec![Some(PageNumberOff::SourceUnreadable), None, None]
         );
         // 쪽 번호 제어가 없는 문서는 끈 것이 아니다.
         let mut doc = hosted_table_doc();

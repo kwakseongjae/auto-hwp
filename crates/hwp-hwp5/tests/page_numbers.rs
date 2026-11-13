@@ -185,8 +185,7 @@ fn a_page_restart_in_the_first_paragraph_fixes_the_first_page_number() {
 /// (무엇을 · 기대하는 끈 이유 · 첫 문단 뒤에 붙일 레코드).
 type Case<'a> = (&'a str, PageNumberOff, &'a dyn Fn(&mut Vec<u8>));
 
-/// 받지 않는 자리 · 읽을 수 없는 값은 그 구역을 끄고 이유를 남긴다 — 꼴마다 하나씩.
-/// 오류(`Err`)는 레코드 틀이 깨졌을 때뿐이다.
+/// 받지 않는 자리 · 읽을 수 없는 값은 오류가 아니라 그 구역을 끄고 이유를 남긴다 — 꼴마다 하나씩.
 #[test]
 fn unowned_sites_and_values_turn_the_section_off_with_a_reason() {
     use PageNumberOff::*;
