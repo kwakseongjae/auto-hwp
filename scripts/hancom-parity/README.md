@@ -47,7 +47,7 @@ python3 scripts/hancom-parity/sweep.py --pairs PAIRS.json --out /tmp/parity-$(da
 ## 산출
 
 - `OUT/summary.md` — 문서별 표(쪽 수 · 조판 대 저장 lineseg · 첫 어긋난 쪽 · 한글 누락 IR/PDF · 쪽 번호 · 줄 세로
-  오차 · 잉크 F1 · 표 선 · 잘린 영역)와 전체 합계
+  오차 · 잉크 F1 · 표 선 · 잘림 — 쪽에 잘린 표 수 · 칸 안 잘림 칸 수(그리지 않은 줄 수))와 전체 합계
 - `OUT/summary.json` — 같은 숫자(기계용). 원본 경로 · 하위 도구 오류문은 싣지 않는다(라벨 · sha256).
   `OUT/<label>/pair.json` 의 오류문에는 로컬 경로가 들어갈 수 있다
 - `OUT/<label>/` — `cand.pdf` · `cand.regions.json` · `font-report.json` · `pair.json` · `pages/pNNN/report/`(비교기
@@ -64,5 +64,6 @@ python3 scripts/hancom-parity/sweep.py --pairs PAIRS.json --out /tmp/parity-$(da
 | 잉크 F1            | `scripts/pdf-visual-check.py` 의 `ink.f1`(±3px 정렬 뒤 검은 화소 겹침, 0~1) — 쪽 수가 같으면 모든 쪽, 다르면 글로 짝이 맞는 쪽만 |
 | 표 선              | 72dpi 에서 30px 이상 이어진 세로 · 가로 선 위치가 2px · 6px 안에 있는 비율                                                       |
 | 표 구조 | 세로선 6px 안 평균 · 긴 가로선 개수가 10% 안에서 같은 쪽 수(행 구조가 같은가의 대리 지표) |
+| 잘림 | `cand.regions.json` 의 쪽에 잘린 표(`clipped`) 수 · 고정 높이 칸에서 내용을 다 그리지 못한 칸(`clipped_cell_text`, schema 5) 수와 그리지 않은 줄 수. 합계 `docs_cell_text_clipped` |
 
 한컴독스 PDF 는 라틴 · 숫자 글리프를 텍스트로 뽑을 수 없는 경우가 많아 글자 · 줄 지표는 한글 음절 · 한자만 본다.

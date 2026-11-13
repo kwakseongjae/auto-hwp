@@ -148,6 +148,33 @@ class Summary(unittest.TestCase):
         self.assertIn("| B |", markdown)
 
 
+class ClipSignals(unittest.TestCase):
+    def test_counts_page_cut_tables_and_clipped_cells(self):
+        regions = {"pages": [
+            {"regions": [{"clipped": True}, {"clipped": False}],
+             "clipped_cell_text": [{"hidden_lines": 3, "hidden_tables": 0}, {"hidden_lines": 0, "hidden_tables": 1}]},
+            {"regions": [], "clipped_cell_text": [{"hidden_lines": 2, "hidden_tables": 0}]},
+        ]}
+        self.assertEqual(sweep.clipped_signals(regions), (1, {"cells": 3, "hidden_lines": 5, "hidden_tables": 1}))
+
+    def test_older_evidence_without_cell_signal_counts_none(self):
+        self.assertEqual(sweep.clipped_signals({"pages": [{"regions": [{"clipped": True}]}]}),
+                         (1, {"cells": 0, "hidden_lines": 0, "hidden_tables": 0}))
+
+    def test_summary_counts_documents_with_clipped_cells(self):
+        def result(label, cells):
+            return {"label": label, "group": "g", "status": "ok", "cand_pages": 1, "ref_pages": 1,
+                    "alignment": {"first_divergent_page": None},
+                    "text": {"missing_pdf": 0.0, "missing_ir": 0.0, "cand_replacement_chars": 0,
+                             "cand_private_use_chars": 0},
+                    "page_numbers": {"ref": 0, "cand": 0}, "line_geometry": {}, "visual_pages": [],
+                    "clipped_regions": 0,
+                    "clipped_cell_text": {"cells": cells, "hidden_lines": 2 * cells, "hidden_tables": 0}}
+        totals, markdown = sweep.summarize([result("A", 2), result("B", 0)])
+        self.assertEqual(totals["docs_cell_text_clipped"], 1)
+        self.assertIn("| 0 · 2 (4) |", markdown)
+
+
 class TableStructure(unittest.TestCase):
     def test_counts_pages_with_matching_horizontal_rules(self):
         pages = [

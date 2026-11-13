@@ -146,7 +146,7 @@ class VisualRegionTests(unittest.TestCase):
 
     def manifest(self, candidate_sha256: str):
         return {
-            "schema_version": 4,
+            "schema_version": 5,
             "coordinate_space": "HWPUNIT",
             "candidate_pdf_sha256": candidate_sha256,
             "pages": [
@@ -155,6 +155,7 @@ class VisualRegionTests(unittest.TestCase):
                     "width": 59500.0,
                     "height": 84200.0,
                     "intentional_blank_text_regions": 2,
+                    "clipped_cell_text": [],
                     "regions": [
                         {
                             "id": "text-0001",
@@ -236,6 +237,73 @@ class VisualRegionTests(unittest.TestCase):
                 mutation(document)
                 with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, pattern):
                     self.load(document, candidate_sha256)
+
+    def test_clipped_cell_text_is_counted_report_only_and_strict(self):
+        candidate_sha256 = "a" * 64
+        document = self.manifest(candidate_sha256)
+        document["pages"][0]["clipped_cell_text"] = [
+            {"x": 1000.0, "y": 2000.0, "w": 8000.0, "h": 1000.0, "hidden_lines": 4, "hidden_tables": 0},
+            {"x": 1000.0, "y": 4000.0, "w": 8000.0, "h": 1000.0, "hidden_lines": 0, "hidden_tables": 1},
+        ]
+        loaded = self.load(document, candidate_sha256)
+        self.assertEqual(
+            loaded["clipped_cell_text"],
+            {"pages": 1, "cells": 2, "hidden_lines": 4, "hidden_tables": 1},
+        )
+        self.assertEqual(loaded["total_regions"], 1, "clipped cells are not scored regions")
+        self.assertEqual(
+            self.load(self.manifest(candidate_sha256), candidate_sha256)["clipped_cell_text"],
+            {"pages": 0, "cells": 0, "hidden_lines": 0, "hidden_tables": 0},
+        )
+
+        def entry():
+            return {"x": 1000.0, "y": 2000.0, "w": 8000.0, "h": 1000.0, "hidden_lines": 4, "hidden_tables": 0}
+
+        for mutation, pattern in (
+            (lambda cell: cell.update({"text": "secret"}), "fields differ"),
+            (lambda cell: cell.update({"row": 0}), "fields differ"),
+            (lambda cell: cell.pop("hidden_tables"), "fields differ"),
+            (lambda cell: cell.update({"x": -1}), "outside its page"),
+            (lambda cell: cell.update({"w": 0}), "outside its page or empty"),
+            (lambda cell: cell.update({"y": 84000.0}), "outside its page"),
+            (lambda cell: cell.update({"h": float("inf")}), "non-finite"),
+            (lambda cell: cell.update({"hidden_lines": -1}), "bounded non-negative"),
+            (lambda cell: cell.update({"hidden_lines": True}), "bounded non-negative"),
+            (lambda cell: cell.update({"hidden_tables": 1.5}), "bounded non-negative"),
+            (lambda cell: cell.update({"hidden_lines": 0}), "at least one"),
+        ):
+            with self.subTest(pattern=pattern):
+                document = self.manifest(candidate_sha256)
+                cell = entry()
+                mutation(cell)
+                document["pages"][0]["clipped_cell_text"] = [cell]
+                with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, pattern):
+                    self.load(document, candidate_sha256)
+
+        for mutation, pattern in (
+            (lambda page: page.pop("clipped_cell_text"), "fields differ"),
+            (lambda page: page.update({"clipped_cell_text": {}}), "must be a list"),
+            (
+                lambda page: page.update(
+                    {
+                        "clipped_cell_text": [entry()]
+                        * (pdf_visual_check.MAX_CLIPPED_CELLS_PER_PAGE + 1)
+                    }
+                ),
+                "at most",
+            ),
+        ):
+            with self.subTest(pattern=pattern):
+                document = self.manifest(candidate_sha256)
+                mutation(document["pages"][0])
+                with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, pattern):
+                    self.load(document, candidate_sha256)
+
+        older = self.manifest(candidate_sha256)
+        older["schema_version"] = 4
+        older["pages"][0].pop("clipped_cell_text")
+        with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, "schema_version must be 5"):
+            self.load(older, candidate_sha256)
 
     def test_manifest_rejects_overlapping_regions_that_exhaust_scoring_work(self):
         candidate_sha256 = "a" * 64

@@ -900,6 +900,21 @@ fn export_pdf(
             notice.code
         );
     }
+    // 고정 높이 칸에 들어가지 않아 그리지 않은 내용은 쪽마다 한 줄로 알린다(#534).
+    for page in &result.visual_evidence.pages {
+        if page.clipped_cell_text.is_empty() {
+            continue;
+        }
+        let lines: usize = page.clipped_cell_text.iter().map(|c| c.hidden_lines).sum();
+        let tables: usize = page.clipped_cell_text.iter().map(|c| c.hidden_tables).sum();
+        eprintln!(
+            "경고: {}쪽 — 고정 높이 칸 {}개에서 글 {}줄 · 표 {}개를 그리지 않았다 (cell-text-clipped)",
+            page.page,
+            page.clipped_cell_text.len(),
+            lines,
+            tables
+        );
+    }
     if let (Some(path), Some(bytes)) = (visual_regions, evidence) {
         use std::io::Write as _;
         let mut options = std::fs::OpenOptions::new();
