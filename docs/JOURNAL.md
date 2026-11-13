@@ -3,6 +3,11 @@
 > 세션 시작: 최근 항목 1~2개 확인. 세션 종료: **맨 위에** 5줄 이내 항목 추가. 기존 항목 수정 금지.
 > 결정·증거·계획의 정본이 아니다 — "무엇을 하다 어디서 멈췄나"만 기록한다.
 
+## 2026-11-13 · #530 한컴 PDF 기준선 · 로드맵 · 하네스 (Claude 워커)
+- 한 일: 한컴 PDF 28쌍 대조 기준선 + 로드맵(`docs/HANCOM-PDF-PARITY-ROADMAP.md`) · 측정 하네스(`scripts/hancom-parity`, 시험 17건), 원본 `.hwp` 기준 재측정.
+- 확인: 하네스로 26쌍 다시 재 같은 값, 하네스 시험은 커밋 뒤 주입 빨강, `noAdjust` 바닥 · 칸 안 문단 간격 상한은 실험만(커밋 안 함).
+- 다음: S2 쪽 번호(#528) → S1 칸 안 잘림 신호.
+
 ## 2026-11-05 · #507 — 주소 캐럿 · 편집 가능 자리 이동 (Codex, 미커밋)
 - 한 일: focusCell/focusParagraph/focusNext · Tab/호스트 순서 · IME/스크롤 · 명령 직렬화, 중첩 혼합 순서용 paragraph_blocks, 문서/신규 시험 35건.
 - 확인: quick · wasm/223칸 · 오라클 82 · core 309/react 499/ai 65/lab 252/proxy 11 통과. platform #460 직접 수집 실패/스냅샷 14 통과, 추가 typecheck core 2/react 16 오류는 HEAD와 동일.
