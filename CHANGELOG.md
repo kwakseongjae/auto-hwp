@@ -40,6 +40,16 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 파괴 변경 (Breaking)
+
+- **`auto-hwp export-pdf --visual-regions` 증거가 schema 4 → 5 (#534).** 쪽 객체에 `clipped_cell_text` 목록이 늘었다(아래 「추가」).
+  마이그레이션: 필드를 엄격하게 검사하는 도구는 `schema_version: 5` 와 이 필드를 받아들인다. 저장소의 `scripts/pdf-visual-check.py` 는
+  이제 5 만 받으므로 schema 4 증거는 같은 CLI 로 다시 만든다. Rust 쪽은 `PlacedPage.clipped_cells` · `PdfPageVisualEvidence.clipped_cell_text`
+  · `PdfExport.notices`(#528)가 늘어 구조체를 직접 만드는 코드는 새 필드를 채운다. CLI · Rust 크레이트 전용 — npm 패키지는 그대로다.
+  *(EN — Breaking: `--visual-regions` evidence moves from schema 4 to 5 with a new per-page `clipped_cell_text` list. Strict readers
+  must accept version 5 and the field; the bundled comparator accepts only 5, so regenerate older evidence. New public fields on
+  `PlacedPage`, `PdfPageVisualEvidence` and `PdfExport` (`notices`) must be filled by code that builds those structs. CLI and Rust only.)*
+
 ### 고침 (Fixed)
 
 - **`auto-hwp view` · `verify-convert` 가 여러 쪽을 한 HTML 에 넣을 때 둘째 쪽부터 내용 일부가 잘려 보이던 것을 고쳤다.**
