@@ -4901,6 +4901,75 @@ mod tests {
         assert_eq!(page_number_texts(&placed), expected);
     }
 
+    /// 둘째 구역 첫 문단의 새 번호 표지는 조판 단계에서 그 구역 첫 쪽의 번호가 된다(구역마다 따로 센다).
+    #[test]
+    fn a_restart_mark_on_a_later_sections_first_paragraph_numbers_its_first_page() {
+        let mut doc = doc_with_page(vec![Block::Paragraph(para("가"))], 10_000);
+        doc.sections[0].page_number = Some(digit_number());
+        let mut first = para("나");
+        first.page_number_marks = vec![PageNumberMark::Restart(nz(5))];
+        let mut second = doc.sections[0].clone();
+        second.blocks = vec![
+            Block::Paragraph(first),
+            Block::Paragraph(para("다")),
+            Block::Table(fixed_height_table(6, 3000, false)),
+        ];
+        doc.sections.push(second);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        // 첫 구역 1쪽, 둘째 구역은 5 부터 이어 센다(그 구역이 세 쪽).
+        assert_eq!(page_number_texts(&placed), ["1", "5", "6", "7"]);
+        assert!(placed.page_number_off.is_empty());
+    }
+
+    /// 승격된 1×1 틀(`ptr::eq` 의 else 쪽): 바깥 칸의 글자 없는 문단 표지는 안쪽 표 첫 행의 쪽에서,
+    /// 안쪽 표 칸의 표지는 그 행의 쪽에서 효력을 낸다.
+    #[test]
+    fn page_number_marks_in_a_promoted_frame_table_use_the_inner_rows() {
+        let frame = |outer: Option<PageNumberMark>, inner_row: Option<(usize, PageNumberMark)>| {
+            let mut inner = fixed_height_table(6, 3000, false);
+            if let Some((row, mark)) = inner_row {
+                if let Some(Block::Paragraph(paragraph)) = inner.cells[row].blocks.first_mut() {
+                    paragraph.page_number_marks = vec![mark];
+                }
+            }
+            let mut host = para("");
+            host.page_number_marks = outer.into_iter().collect();
+            let table = Table {
+                rows: 1,
+                cols: 1,
+                cells: vec![Cell {
+                    blocks: vec![Block::Paragraph(host), Block::Table(inner)],
+                    ..Default::default()
+                }],
+                col_widths: vec![1],
+                ..Default::default()
+            };
+            assert!(
+                crate::unwrap_frame_table(&table).is_some(),
+                "a frame wrapper"
+            );
+            let mut doc = doc_with_page(vec![Block::Table(table)], 10_000);
+            doc.sections[0].page_number = Some(digit_number());
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            assert!(
+                placed.page_number_off.is_empty(),
+                "{:?}",
+                placed.page_number_off
+            );
+            page_number_texts(&placed)
+        };
+        assert_eq!(frame(None, None), ["1", "2"]);
+        assert_eq!(
+            frame(Some(PageNumberMark::Restart(nz(9))), None),
+            ["9", "10"]
+        );
+        assert_eq!(
+            frame(None, Some((4, PageNumberMark::Restart(nz(20))))),
+            ["1", "20"]
+        );
+        assert_eq!(frame(None, Some((5, PageNumberMark::Hide))), ["1", ""]);
+    }
+
     #[test]
     fn page_number_marks_in_table_cells_use_the_rows_fragment_page() {
         let marked_table = |row: usize, mark: PageNumberMark| {

@@ -4967,6 +4967,32 @@ mod tests {
         assert!(text(&invalid).contains("invalid render source"));
     }
 
+    /// #528 — 쪽 번호를 끈 구역은 알림(`PdfExport.notices`)이지 그리지 못한 개체가 아니다. 검증 보고의 PDF 진단
+    /// 코드에 들어가지 않으므로 제출 판정(`submission_ready`)을 막지 않는다.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn a_turned_off_page_number_does_not_block_submission_readiness() {
+        let mut s = Session::default();
+        do_open(&mut s, &showcase()).unwrap();
+        let clean = s.doc.as_ref().unwrap().doc().clone();
+        let clean_report = verify_proposal(&clean, &clean, &[]).unwrap();
+        assert!(clean_report.submission_ready, "fixture is submission-ready");
+
+        let mut off = clean;
+        for section in &mut off.sections {
+            section.page_number = None;
+            section.page_number_off = Some(hwp_model::document::PageNumberOff::OutsideBody);
+        }
+        let report = verify_proposal(&off, &off, &[]).unwrap();
+        let pdf = report.pdf.as_ref().expect("pdf evidence in a pdf build");
+        assert!(
+            pdf.diagnostic_codes.is_empty(),
+            "{:?}",
+            pdf.diagnostic_codes
+        );
+        assert!(report.submission_ready, "{report:?}");
+    }
+
     /// Screen/PDF fixture lock: both surfaces receive the same live IR and the same hwp-session font
     /// provider under the `pdf` feature. Page count must agree and the own SVG must carry a glyph from
     /// the applied content while the PDF is a real, non-empty export of that same edited document.

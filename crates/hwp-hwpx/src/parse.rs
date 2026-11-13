@@ -3119,6 +3119,26 @@ pub(crate) mod tests {
         assert_eq!(table.cells[1].row, 1, "the hiding mark sits in row 1");
     }
 
+    /// 열고 닫는 꼴(`<hp:pageNum …></hp:pageNum>`)도 빈 요소 꼴과 같게 읽는다 — 다른 저장기가 그렇게 쓴다.
+    #[test]
+    fn open_and_close_page_number_elements_read_like_empty_ones() {
+        let empty = r#"<hp:p><hp:run><hp:ctrl><hp:pageNum pos="BOTTOM_CENTER" formatType="DIGIT" sideChar="-"/><hp:newNum num="3" numType="PAGE"/><hp:pageHiding hidePageNum="1"/></hp:ctrl><hp:t>가</hp:t></hp:run></hp:p>"#;
+        let paired = r#"<hp:p><hp:run><hp:ctrl><hp:pageNum pos="BOTTOM_CENTER" formatType="DIGIT" sideChar="-"></hp:pageNum><hp:newNum num="3" numType="PAGE"></hp:newNum><hp:pageHiding hidePageNum="1"></hp:pageHiding></hp:ctrl><hp:t>가</hp:t></hp:run></hp:p>"#;
+        let (empty_blocks, empty_facts) = numbered_section(empty);
+        let (paired_blocks, paired_facts) = numbered_section(paired);
+        assert_eq!(
+            marks_of(&paired_blocks),
+            vec![vec![
+                PageNumberMark::Show,
+                PageNumberMark::Restart(std::num::NonZeroU16::new(3).unwrap()),
+                PageNumberMark::Hide,
+            ]]
+        );
+        assert_eq!(marks_of(&paired_blocks), marks_of(&empty_blocks));
+        assert_eq!(paired_facts, empty_facts);
+        assert!(paired_facts.resolve(0).unwrap().is_some());
+    }
+
     /// 읽을 수 없거나 규칙을 확인하지 못한 꼴은 그 구역의 쪽 번호를 끄고 **이유를 남긴다** — 꼴마다 하나씩.
     #[test]
     fn unsupported_page_number_shapes_turn_the_section_off_with_a_reason() {
