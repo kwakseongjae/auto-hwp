@@ -67,6 +67,10 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test (native)
         run: cargo test --workspace
+      # hwp-mcp 의 `pdf` 기능 시험(검증 보고의 PDF 증거 · submission_ready)은 워크스페이스에서 그 기능을
+      # 켜는 멤버가 없어 위 단계에서 돌지 않는다.
+      - name: test (hwp-mcp pdf)
+        run: cargo test -p hwp-mcp --features pdf
       - name: wasm hygiene (pure core compiles to wasm32)
         run: cargo check -p hwp-model -p hwp-ops -p hwp-ingest -p hwp-hwp5 --target wasm32-unknown-unknown
       - uses: actions/setup-node@v4
