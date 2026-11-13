@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "pairs": [
+    {
+      "label": "HD-10",
+      "group": "hancom-docs",
+      "source": "../../benchmarks/benchmark.hwp",
+      "reference": "../../benchmarks/benchmark.pdf",
+      "note": "public benchmark; cairo producer (Hancom-generated per docs/FIDELITY.md)"
+    },
+    {
+      "label": "HQ-01",
+      "group": "hancom-mac-print",
+      "source": "../../benchmarks/benchmark1.hwp",
+      "reference": "../../benchmarks/benchmark1.pdf",
+      "note": "public benchmark; macOS Quartz PDF with HCR fonts embedded"
+    },
+    {
+      "label": "HQ-02",
+      "group": "hancom-mac-print",
+      "source": "../../benchmarks/benchmark2.hwp",
+      "reference": "../../benchmarks/benchmark2.pdf",
+      "note": "public benchmark; macOS Quartz PDF with HCR fonts embedded"
+    }
+  ]
+}
