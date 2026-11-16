@@ -2863,3 +2863,113 @@ mod hwpx_compressed_mimetype_tests {
         assert_eq!(Engine::detect(&buf), SourceFormat::Unknown);
     }
 }
+
+#[cfg(test)]
+mod hwpx_blank_run_tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    /// #536 — 빈 문단의 줄 높이는 그 런의 글자 크기다. 자기 닫힘 꼴 `<hp:run charPrIDRef="1"/>` 과 열고 닫는 꼴이
+    /// 같은 글자 모양 · 같은 빈 줄 높이가 되고, `.hwp` lift(이슈 074)와 같이 10pt 기본값으로 떨어지지 않는다.
+    /// 글자 모양 0 = 10pt, 1 = 5pt.
+    const HEADER: &str = r#"<hh:head xmlns:hh="h"><hh:refList><hh:charProperties itemCnt="2"><hh:charPr id="0" height="1000"><hh:fontRef hangul="0"/></hh:charPr><hh:charPr id="1" height="500"><hh:fontRef hangul="0"/></hh:charPr></hh:charProperties></hh:refList></hh:head>"#;
+
+    fn package(section: &str) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut zw = zip::ZipWriter::new(Cursor::new(&mut bytes));
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zw.start_file("mimetype", opts).unwrap();
+            zw.write_all(b"application/hwp+zip").unwrap();
+            zw.start_file("Contents/header.xml", opts).unwrap();
+            zw.write_all(HEADER.as_bytes()).unwrap();
+            zw.start_file("Contents/section0.xml", opts).unwrap();
+            zw.write_all(section.as_bytes()).unwrap();
+            zw.finish().unwrap();
+        }
+        bytes
+    }
+
+    #[test]
+    fn a_self_closing_blank_run_sizes_the_blank_line_like_the_paired_form() {
+        let section = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run charPrIDRef="1"/></hp:p><hp:p><hp:run charPrIDRef="1"></hp:run></hp:p><hp:p></hp:p></hs:sec>"#;
+        let doc = Engine::open(&package(section)).expect("open synthetic HWPX");
+        let blank_line = |index: usize| {
+            let hwp_model::document::Block::Paragraph(p) = &doc.sections[0].blocks[index] else {
+                panic!("paragraph {index}");
+            };
+            let sizes: Vec<i32> = p
+                .runs
+                .iter()
+                .map(|run| doc.char_shapes[run.char_shape].height)
+                .collect();
+            let lines =
+                hwp_typeset::layout_paragraph(p, &doc, 40_000.0, &hwp_typeset::ApproxFontMetrics);
+            assert_eq!(lines.len(), 1);
+            (sizes, lines[0].vert_size)
+        };
+        let (self_closing, self_closing_height) = blank_line(0);
+        let (paired, paired_height) = blank_line(1);
+        assert_eq!(self_closing, vec![500]);
+        assert_eq!(self_closing, paired);
+        assert_eq!(self_closing_height, paired_height);
+        // 런이 하나도 없는 빈 문단은 그대로 10pt 기본값이다.
+        let (none, none_height) = blank_line(2);
+        assert!(none.is_empty());
+        assert!(
+            self_closing_height < none_height,
+            "{self_closing_height} vs {none_height}"
+        );
+    }
+
+    /// #536 리뷰 — 자기 닫힘 런 하나뿐인 빈 문단에 글을 넣는 편집:
+    /// - 구조가 섞인(simple 이 아닌) 문단은 **거절**된다. 받아 놓고 저장에서 글을 버리면 안 된다
+    /// - simple 빈 문단은 그대로 편집되어 그 문단 자기 글자 모양(5pt)을 받고, 저장 · 다시 열기 뒤에도 글이 남는다
+    #[test]
+    fn a_text_edit_into_a_lone_empty_run_is_refused_when_structural_and_kept_when_simple() {
+        use hwp_ops::{apply, Op};
+        let section = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run charPrIDRef="1"/><hp:unknownStructure/></hp:p><hp:p><hp:run charPrIDRef="1"/></hp:p></hs:sec>"#;
+        let mut doc = Engine::open(&package(section)).expect("open synthetic HWPX");
+        let refused = apply(
+            &mut doc,
+            &Op::SetParagraphText {
+                section: 0,
+                block: 0,
+                text: "가".into(),
+            },
+        );
+        assert!(
+            refused.is_err(),
+            "구조가 섞인 문단의 빈 런은 글 구역이 아니다"
+        );
+        apply(
+            &mut doc,
+            &Op::SetParagraphText {
+                section: 0,
+                block: 1,
+                text: "나".into(),
+            },
+        )
+        .expect("simple 빈 문단은 편집된다");
+        let hwp_model::document::Block::Paragraph(edited) = &doc.sections[0].blocks[1] else {
+            panic!("paragraph 1");
+        };
+        assert_eq!(doc.char_shapes[edited.runs[0].char_shape].height, 500);
+        let saved = serialize_hwpx(&doc).expect("save");
+        let reopened = Engine::open(&saved).expect("reopen");
+        let hwp_model::document::Block::Paragraph(p) = &reopened.sections[0].blocks[1] else {
+            panic!("paragraph 1");
+        };
+        let text: String = p
+            .runs
+            .iter()
+            .flat_map(|r| r.content.iter())
+            .filter_map(|i| match i {
+                hwp_model::document::Inline::Text(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "나");
+    }
+}
