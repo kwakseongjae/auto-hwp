@@ -52,6 +52,21 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 고침 (Fixed)
 
+- **HWPX 빈 문단의 줄 높이를 그 문단 글자 크기로 잡는다.** 한글이 저장한 빈 문단은 대부분 자기 닫힘 런 `<hp:run charPrIDRef="N"/>`
+  하나뿐인데, 파서가 이것을 런으로 만들지 않아 빈 줄이 늘 기본 10pt 높이였다. 이제 그 런의 글자 모양으로 잰다(열고 닫는 꼴 · `.hwp`
+  와 같다). 공개 코퍼스에서 저장 줄이 있는 빈 문단 1,364개 모두 한글의 줄 높이가 그 글자 크기와 같다. 빈 줄이 많은 문서는 쪽 나눔이
+  달라진다: 한컴으로 만든 PDF 와 짝지은 28쌍(쪽 수를 비교할 수 있는 26쌍) 중 쪽 수가 맞는 쌍이 10 → 12. 저장 줄
+  오라클(`corpus/typeset-oracle.json`)은 이 수정으로 네 문서의 쪽 수가 바뀌어 다시 만들었다(근거는 그 커밋 본문).
+  **편집 결과도 달라진다.** 빈 HWPX 문단이나 빈 칸에 글을 넣으면, 이제 이웃 문단이나 기본 글자 모양이 아니라 그 문단 · 칸
+  **자기 글자 모양**을 받는다. `.hwp` 와 같아졌고, `docs/INTENT-SCHEMA.md` 의 기준 run 규칙(문단은 자기 첫 run, 칸은 첫 문단의
+  첫 run)대로이며, 한글에서 빈 줄에 타자할 때와 같다. 그래서 글자 크기가 작은 간격용 빈 칸(예: 5pt 빈 행)을 채우면 그 크기의
+  글이 된다 — 그런 칸을 채울 때는 글자 모양을 함께 정한다.
+  *(EN — Fixed: HWPX blank paragraphs whose only run is self-closing (`<hp:run charPrIDRef="N"/>`, the usual Hancom form) were sized at
+  the 10pt default; they now take that run's character size, like the paired form and `.hwp`. Pagination of blank-heavy documents
+  changes: page-count matches against 28 Hancom-made PDFs (26 comparable) go from 10 to 12. The stored-layout oracle baseline was
+  regenerated. Editing changes too: text typed into a blank HWPX paragraph or empty cell now takes that paragraph's / cell's own
+  character shape (as `.hwp` and the INTENT-SCHEMA base-run rule), not a neighbour's or the default — filling a small spacer cell
+  (e.g. a 5pt blank row) yields 5pt text unless a shape is given.)*
 - **`auto-hwp view` · `verify-convert` 가 여러 쪽을 한 HTML 에 넣을 때 둘째 쪽부터 내용 일부가 잘려 보이던 것을 고쳤다.**
   rhwp 의 쪽 SVG 는 잘라내기(`cell-clip-N` · `body-clip-N`) · 무늬 · 화살표 id 를 쪽마다 1부터 다시 매긴다. 한 HTML 안에서는 id 이름공간이
   하나라 뒤쪽 쪽의 `url(#cell-clip-1)` 이 1쪽의 잘라내기 사각형을 가리켜, 그 범위 밖의 머리 줄 · 상자가 보이지 않았다. 이제 쪽마다(그리고

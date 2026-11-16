@@ -143,6 +143,28 @@ test("regression fails on page/line drop but not on missing GOV", () => {
   assert.ok(err.some((e) => e.includes("line_exact_pct")));
 });
 
+test("regressionErrors catches a page gap that widens on a document already locked as page_gap", () => {
+  const gapDoc = (our, oracle) => ({
+    rel: "gap.hwpx",
+    score_kind: "scorable",
+    verdict: "page_gap",
+    ok: true,
+    page_match: false,
+    our_pages: our,
+    oracle_pages: oracle,
+    line_exact_pct: 99,
+    sha256: "dd",
+  });
+  const base = [gapDoc(3, 2)];
+  assert.deepEqual(regressionErrors(base, [gapDoc(3, 2)]), [], "same gap passes");
+  assert.deepEqual(regressionErrors(base, [gapDoc(2, 2)].map((d) => ({ ...d, page_match: true, verdict: "match" }))), []);
+  assert.deepEqual(regressionErrors(base, [gapDoc(1, 2)]), [], "a narrower gap on the other side passes");
+  const wider = regressionErrors(base, [gapDoc(4, 2)]);
+  assert.ok(wider.some((e) => e.includes("page gap widened")), wider.join("; "));
+  const widerBelow = regressionErrors(base, [gapDoc(5, 9)]);
+  assert.ok(widerBelow.some((e) => e.includes("page gap widened")), widerBelow.join("; "));
+});
+
 test("joinScore marks converted-cache absence via CLI kind, not a 0%", () => {
   const coverage = {
     rel: "corpus/hwpx/Skeleton.hwpx",

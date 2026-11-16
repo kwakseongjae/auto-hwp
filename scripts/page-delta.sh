@@ -6,12 +6,12 @@
 #   일치로는 `31 → 32` 로만 보였다. 문서 하나가 ±3 씩 틀리는 경우가 있어서다.
 #   수리의 기대값을 계산하려면 합이 필요하다.
 #
-# 코퍼스는 **둘이고 목적이 다르다**:
-#   내부 문서  ../business_plan_k/fixtures/kstartup-forms  — 최종 목표(우리 문서 재현)
-#   회귀 감시  corpus/private                              — 합성 synth-146p(−13)가 지배하므로 따로 본다
-#   `corpus/hwp` · `benchmarks` 는 둘 다에 없다 — 거긴 `oracle-sweep` 이 본다.
+# 입력은 **목적마다 따로 준다**:
+#   기본       corpus · benchmarks          — 저장소 안 공개 코퍼스(corpus/private 가 있으면 함께)
+#   회귀 감시  corpus/private               — 합성 synth-146p(−13)가 지배하므로 따로 본다
+#   저장소 밖 문서 묶음(실사용 양식 등)은 인자로만 준다 — 기본값으로 바깥 경로를 두지 않는다.
 #
-# 사용:  scripts/page-delta.sh                      # 내부 문서
+# 사용:  scripts/page-delta.sh                      # 저장소 안 코퍼스
 #        scripts/page-delta.sh corpus/private       # 회귀 감시
 #        scripts/page-delta.sh <디렉터리>...
 set -euo pipefail
@@ -26,7 +26,7 @@ BIN=target/release/auto-hwp
 cargo build --release -q -p auto-hwp-cli --features rhwp,shaper
 
 if [ $# -eq 0 ]; then
-  set -- ../business_plan_k/fixtures/kstartup-forms
+  set -- corpus benchmarks
 fi
 
 TMP=$(mktemp)

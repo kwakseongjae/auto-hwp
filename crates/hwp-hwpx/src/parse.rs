@@ -590,6 +590,9 @@ struct ParaAccum {
     /// 이 문단 안의 쪽 번호 제어(`<hp:pageNum>` · `<hp:newNum numType="PAGE">` · `<hp:pageHiding
     /// hidePageNum="1">`) — 문서 순서. 조판이 이 문단이 놓인 쪽에서 효력을 낸다.
     page_number_marks: Vec<PageNumberMark>,
+    /// 첫 자기 닫힘 런 `<hp:run charPrIDRef="N"/>` 의 글자 모양 참조(#536 — 속성이 없으면 `Some(None)`). 문단이
+    /// 끝날 때까지 다른 런이 없으면(빈 문단) 이 런 하나를 빈 런으로 남긴다 — 빈 줄의 높이는 그 글자 크기다.
+    empty_run: Option<Option<String>>,
 }
 
 /// `<hp:pageNum>` → 쪽 번호 위치. 원문자 등은 표기 문자열을 코퍼스로 확인하지 못해 끈다.
@@ -1162,8 +1165,16 @@ pub(crate) fn parse_section(
                 // 자기 닫힘 런 `<hp:run charPrIDRef="40"/>` — 글자도 개체도 없는 **빈 런**이다(한컴이 빈 간격 문단에 쓴다).
                 // 예전엔 아래 `other` 폴백이 구조 자식으로 보아 문단을 non-simple 로 만들었고, 그 빈 줄이 `own_hit_test` 에서
                 // `editable:false` 라 눌러도 캐럿이 서지 않았다(#506). 구조가 아니니 simple 을 깨지 않는다.
-                // 런을 만들지는 않는다 — 문단 AST 는 그대로라 조판(빈 줄 높이)은 변하지 않는다.
-                b"run" => {}
+                // 글이 있는 문단에서는 런을 만들지 않는다(런 순번이 그대로다). 다만 문단이 끝날 때까지 다른 런이 없으면
+                // (빈 문단) 이 런 하나를 빈 런으로 남긴다 — 한글은 빈 줄의 높이를 그 런의 글자 크기로 잡는다(#536,
+                // 공개 코퍼스 저장 lineseg 1,364/1,364). 열고 닫는 꼴과 `.hwp` lift(이슈 074)가 이미 그렇다.
+                b"run" => {
+                    if let Some(p) = paras.last_mut() {
+                        if p.empty_run.is_none() {
+                            p.empty_run = Some(attr_str(&e, b"charPrIDRef"));
+                        }
+                    }
+                }
                 // `<hp:lineseg/>` (inside linesegarray) is layout cache; everything else structural.
                 other => {
                     if !matches!(other, b"lineseg" | b"linesegarray") {
@@ -1225,6 +1236,7 @@ pub(crate) fn parse_section(
                 b"p" => {
                     if let Some(mut p) = paras.pop() {
                         flush_run(&mut p, None);
+                        keep_lone_empty_run(&mut p);
                         let end = reader.buffer_position() as usize; // just past `</hp:p>`
                                                                      // Top-level iff no enclosing paragraph remains.
                         let top_level = paras.is_empty();
@@ -1555,6 +1567,31 @@ fn flush_run(p: &mut ParaAccum, end: Option<usize>) {
     }
 }
 
+/// A paragraph that closed with no run at all but held a self-closing `<hp:run charPrIDRef="N"/>` keeps
+/// that run as ONE empty run — the same IR as the paired form `<hp:run charPrIDRef="N"></hp:run>` and as
+/// the `.hwp` lift of a blank paragraph (이슈 074). Without it the blank line has no char shape and is
+/// typeset at the 10pt default instead of its own size (#536).
+fn keep_lone_empty_run(p: &mut ParaAccum) {
+    // `flush_run` 이 막 끝났으므로 `pending` 은 비어 있다 — 남은 개체가 있었다면 이미 런이 됐다.
+    if !p.runs.is_empty() {
+        return;
+    }
+    if let Some(char_ref) = p.empty_run.take() {
+        p.runs.push(Run {
+            char_shape: 0,
+            char_ref,
+            content: vec![Inline::Text(String::new())],
+        });
+        // 바이트 범위를 싣지 않는다(합성 런과 같은 취급). 자기 닫힘 `<hp:run …/>` 은 저장 쪽 글 구역
+        // 덮어쓰기가 받는 꼴(`</hp:run>` 으로 끝나는 범위)이 아니라, 범위를 주면 구조가 섞인 문단에서
+        // 글 구역 편집을 받아 놓고 저장에서 글을 버린다. simple 문단은 문단째 다시 쓰므로 범위가 필요 없다.
+        p.run_meta.push(RunMeta {
+            span: None,
+            structural: false,
+        });
+    }
+}
+
 /// The paragraph's editable TEXT window (W4.2), or `None` when a text edit could not be spliced
 /// back without losing or duplicating something.
 ///
@@ -1811,6 +1848,23 @@ pub(crate) mod tests {
             only.source.as_ref().is_some_and(|s| s.simple),
             "빈 런만 있는 문단은 simple"
         );
+        // #536 — 그 런은 빈 런 하나로 남는다(글자 모양 참조 그대로). 열고 닫는 꼴과 같은 IR 이다.
+        let paired = first_para(&sec(
+            r#"<hp:p id="1" paraPrIDRef="35"><hp:run charPrIDRef="40"></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0"/></hp:linesegarray></hp:p>"#,
+        ));
+        assert_eq!(only.runs.len(), 1);
+        assert_eq!(only.runs[0].char_ref.as_deref(), Some("40"));
+        assert_eq!(
+            format!("{:?}", only.runs[0].content),
+            format!("{:?}", paired.runs[0].content)
+        );
+        assert_eq!(only.runs.len(), paired.runs.len());
+        // 자기 닫힘 런이 여럿이면 첫 런의 글자 모양 하나만 남는다.
+        let two = first_para(&sec(
+            r#"<hp:p><hp:run charPrIDRef="7"/><hp:run charPrIDRef="8"/></hp:p>"#,
+        ));
+        assert_eq!(two.runs.len(), 1);
+        assert_eq!(two.runs[0].char_ref.as_deref(), Some("7"));
         // 글이 있는 런과 섞여도 simple(빈 런은 버려진다 — 글 런은 그대로)
         let mixed = first_para(&sec(
             r#"<hp:p><hp:run charPrIDRef="1"/><hp:run charPrIDRef="2"><hp:t>가</hp:t></hp:run></hp:p>"#,
@@ -1829,6 +1883,64 @@ pub(crate) mod tests {
     }
 
     /// Parse one `<hs:sec>` and hand back its first top-level paragraph (W4.2 zone tests).
+    /// #536 리뷰 — 구조가 섞여 simple 이 아닌 문단에서 자기 닫힘 런 하나만 남으면 그 런은 글 구역(text zone)이
+    /// 되지 않는다. 범위를 주면 편집을 받아 놓고 저장(`</hp:run>` 으로 끝나는 범위만 덮어씀)에서 글을 버린다.
+    #[test]
+    fn lone_empty_run_in_a_structural_paragraph_opens_no_text_zone() {
+        let p = first_para(&sec(
+            r#"<hp:p id="1"><hp:run charPrIDRef="1"/><hp:unknownStructure/></hp:p>"#,
+        ));
+        let src = p.source.as_ref().expect("source");
+        assert!(!src.simple, "구조 자식이 있으면 non-simple");
+        assert_eq!(p.runs.len(), 1, "빈 런은 글자 모양 때문에 남는다");
+        assert_eq!(p.runs[0].char_ref.as_deref(), Some("1"));
+        assert!(src.text_zone.is_none(), "자기 닫힘 런은 글 구역이 아니다");
+    }
+
+    /// #536 — 이슈의 재현은 표 간격 행(칸 안 빈 문단)이다. 칸 문단도 자기 닫힘 런의 글자 모양을 갖고, 그 런은 칸을
+    /// 품은 바깥 문단이 아니라 칸 문단에 붙는다.
+    #[test]
+    fn lone_empty_run_in_a_cell_keeps_the_cell_paragraph_char_shape() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run charPrIDRef="3">
+          <hp:tbl rowCnt="1" colCnt="1">
+            <hp:tr><hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:cellSpan colSpan="1" rowSpan="1"/>
+              <hp:subList><hp:p><hp:run charPrIDRef="9"/></hp:p></hp:subList>
+            </hp:tc></hp:tr>
+          </hp:tbl>
+        </hp:run></hp:p></hs:sec>"#;
+        let blocks = parse_sec(xml);
+        let table = blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("table");
+        let Block::Paragraph(cell_para) = &table.cells[0].blocks[0] else {
+            panic!("cell paragraph");
+        };
+        assert_eq!(cell_para.runs.len(), 1);
+        assert_eq!(cell_para.runs[0].char_ref.as_deref(), Some("9"));
+        assert_eq!(format!("{:?}", cell_para.runs[0].content), r#"[Text("")]"#);
+        // 표를 품은 바깥 문단은 칸의 빈 런을 가져가지 않는다.
+        let host_refs: Vec<_> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(
+                    p.runs
+                        .iter()
+                        .map(|r| r.char_ref.clone())
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert!(!host_refs.contains(&Some("9".to_string())), "{host_refs:?}");
+    }
+
     fn first_para(xml: &str) -> Paragraph {
         let mut blocks = Vec::new();
         parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();

@@ -155,6 +155,13 @@ export function regressionErrors(baselineDocs, liveDocs) {
     if (b.page_match === true && live.page_match === false) {
       errors.push(`${b.rel}: page_match true → false (${live.our_pages} vs ${live.oracle_pages})`);
     }
+    // 이미 쪽 수가 어긋나 잠긴 문서도 더 벌어지면 잡는다 — `page_match` 만 보면 false → false 는 회귀로
+    // 보이지 않아, 어긋남이 커져도 기준선 갱신 없이 지나간다.
+    if (b.page_match === false && live.page_match === false && pageGapWidened(b, live)) {
+      errors.push(
+        `${b.rel}: page gap widened (${b.our_pages} vs ${b.oracle_pages} → ${live.our_pages} vs ${live.oracle_pages})`,
+      );
+    }
     if (droppedPct(b.line_exact_pct, live.line_exact_pct)) {
       errors.push(`${b.rel}: line_exact_pct ${b.line_exact_pct} → ${live.line_exact_pct}`);
     }
@@ -163,6 +170,16 @@ export function regressionErrors(baselineDocs, liveDocs) {
     }
   }
   return errors;
+}
+
+function pageGapWidened(base, live) {
+  const gap = (d) =>
+    Number.isFinite(d.our_pages) && Number.isFinite(d.oracle_pages)
+      ? Math.abs(d.our_pages - d.oracle_pages)
+      : null;
+  const before = gap(base);
+  const after = gap(live);
+  return before != null && after != null && after > before;
 }
 
 function droppedPct(base, live) {
