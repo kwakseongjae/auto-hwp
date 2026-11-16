@@ -288,7 +288,8 @@ export interface CellFit {
   line_capacity: number;
   /** Full-width (한글) characters per line in that style at `text_width` (real line breaker). */
   chars_per_line: number;
-  /** Fixed-height rows (HWPX `noAdjust="1"`): the row never grows; overflow is clipped. */
+  /** Fixed-height rows (HWPX `noAdjust="1"`): this engine keeps the saved row height and does not draw
+   *  content below it. Hancom instead grows the row (and moves the table on to the next page). */
   fixed: boolean;
   /** `content_height > available_height`. */
   overflow: boolean;
@@ -334,7 +335,8 @@ export interface RunSpec {
 /** `toHwpx` options. `hwpRowHeights` (tables that came from a binary `.hwp` only — HWPX-input tables
  *  always keep their own `noAdjust`):
  *  - `"exact"` (default, 0.0.6+): `noAdjust="1"` — rows keep the `.hwp`'s saved heights, so the page
- *    count round-trips; text filled beyond a row's height is clipped in Hancom.
+ *    count round-trips in this engine, which does not draw text filled beyond a row's height. Hancom
+ *    grows such a row instead, so a filled table can run longer there.
  *  - `"auto"`: `noAdjust="0"` — rows grow with their content in Hancom (pre-0.0.6 behaviour). Use when
  *    filling a `.hwp` form with generated content. */
 export interface HwpxExportOptions {
@@ -472,7 +474,8 @@ export class HwpDoc {
    *  A SPLIT table returns the per-page FRAGMENT's boundaries (rebased to the fragment top — 023 규칙). */
   tableRowBoundaries(page: number, section: number, block: number): number[] | null;
   /** Per-cell fit / overflow report (#347) of the table at `(section, block)`, or `null` when the block
-   *  is not a placed table. On a `fixed` table an `overflow` cell is clipped (as in Hancom) — re-write it
+   *  is not a placed table. On a `fixed` table an `overflow` cell is not fully drawn by this engine (Hancom
+   *  grows the row instead, so the two layouts part ways) — re-write it
    *  to at most `line_capacity` lines × `chars_per_line` 한글. */
   tableCellFits(section: number, block: number): CellFit[] | null;
   /** Per-page body usage (#347): how full each page's body is. */

@@ -409,15 +409,26 @@ pub struct PdfClippedCellText {
     pub hidden_tables: usize,
 }
 
-/// The page's clipped cells as content-free evidence; cells outside the page box are dropped.
+/// The page's clipped cells as content-free evidence; cells outside the page box are dropped. A page
+/// without a positive finite box (a corrupt or hostile page size) yields no evidence instead of
+/// panicking in `clamp` — the same guard as [`push_visual_region`].
 fn clipped_cell_text(page: &hwp_typeset::PlacedPage) -> Vec<PdfClippedCellText> {
+    let (width, height) = (page.width, page.height);
+    if !(width.is_finite() && height.is_finite()) || width <= 0.0 || height <= 0.0 {
+        return Vec::new();
+    }
     page.clipped_cells
         .iter()
+        .filter(|cell| {
+            [cell.x, cell.y, cell.w, cell.h]
+                .iter()
+                .all(|v| v.is_finite())
+        })
         .filter_map(|cell| {
-            let left = cell.x.clamp(0.0, page.width);
-            let top = cell.y.clamp(0.0, page.height);
-            let right = (cell.x + cell.w).clamp(0.0, page.width);
-            let bottom = (cell.y + cell.h).clamp(0.0, page.height);
+            let left = cell.x.clamp(0.0, width);
+            let top = cell.y.clamp(0.0, height);
+            let right = (cell.x + cell.w).clamp(0.0, width);
+            let bottom = (cell.y + cell.h).clamp(0.0, height);
             (right > left && bottom > top).then_some(PdfClippedCellText {
                 x: left,
                 y: top,
@@ -2371,6 +2382,22 @@ mod tests {
             }]
         );
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+
+        // 쪽 크기가 0 · 음수인 문서(깨졌거나 일부러 만든 파일)는 패닉하지 않고 신호 없이 끝난다.
+        for width in [0, -59_528] {
+            let mut broken = clipped.clone();
+            broken.sections[0].page.width = width;
+            let out = export_pdf(&broken, &ApproxFontMetrics, &PdfOptions::default())
+                .expect("a non-positive page box exports without panicking");
+            assert!(
+                out.visual_evidence
+                    .pages
+                    .iter()
+                    .all(|page| page.clipped_cell_text.is_empty()),
+                "width {width}"
+            );
+            assert!(out.notices.iter().all(|n| n.kind != "cell-text-clipped"));
+        }
 
         let fits = doc_with(vec![Block::Table(table("한 줄"))]);
         let out = export_pdf(&fits, &ApproxFontMetrics, &PdfOptions::default()).unwrap();

@@ -98,8 +98,8 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 - **고정 높이 칸에 들어가지 않아 그리지 않은 내용을 알린다 (#534).** 칸 높이가 고정된 표에서 내용이 칸보다 길면 엔진은 칸 아래로 넘친
   줄 · 중첩 표를 그리지 않는다(쪽 수 · 칸 크기는 그대로). 이제 그 사실이 남는다: `auto-hwp export-pdf` 가 쪽마다 경고 한 줄
   (`cell-text-clipped`)을 내고, PDF 내보내기 알림(`PdfExport.notices`, 진단과 따로 — 인쇄 · 검증 관문은 그대로)에 같은 이름의 항목이 생기며, `--visual-regions` 증거가 schema 5 가 되어 쪽마다
-  `clipped_cell_text`(칸 상자 · 그리지 않은 줄 수 · 중첩 표 수 — 글자 · 칸 주소는 싣지 않는다)를 싣는다. 다음 쪽으로 이어지는 행은 거기서
-  그려지므로, 칸 아래로 넘친 빈 줄은 잃은 것이 없으므로 세지 않는다. `scripts/pdf-visual-check.py` 는 schema 5 만 받고 이 목록을 개수로만 보고한다(점수에 넣지 않는다).
+  `clipped_cell_text`(칸 상자 · 그리지 않은 줄 수 · 중첩 표 수 — 글자 · 칸 주소는 싣지 않는다)를 싣는다. 쪽보다 긴 칸을 나눠 다음 쪽으로
+  이어 그리는 행은 거기서 그려지므로 세지 않는다. 칸 아래로 넘친 빈 줄도 잃은 것이 없으므로 세지 않는다. `scripts/pdf-visual-check.py` 는 schema 5 만 받고 이 목록을 개수로만 보고한다(점수에 넣지 않는다).
   schema 4 증거를 읽던 도구는 새 필드를 받아들이도록 고쳐야 한다. Rust 쪽은 `PlacedPage.clipped_cells`(`PlacedClippedCell`) ·
   `PdfPageVisualEvidence.clipped_cell_text` 가 늘었다. CLI · Rust 크레이트 전용 — npm 패키지에는 영향이 없다.
   *(EN — Added: content left undrawn because it did not fit a fixed-height table cell is now reported — a per-page `cell-text-clipped`

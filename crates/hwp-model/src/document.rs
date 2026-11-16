@@ -740,8 +740,9 @@ pub struct Table {
     /// conversion lifts back the SAME floors (round-trip pagination stability).
     pub row_heights: Vec<HwpUnit>,
     /// RENDER-IR ONLY (never serialized): this table declared `<hp:tbl noAdjust="1">` = **자동 맞춤 안
-    /// 함**, so its stored [`Table::row_heights`] are the EXACT row heights Hancom draws, not a floor —
-    /// content taller than a row is clipped by Hancom, not allowed to grow the row (이슈 080).
+    /// 함**, so this engine uses its stored [`Table::row_heights`] as EXACT row heights, not a floor —
+    /// content taller than a row is not drawn, the row does not grow (이슈 080). Hancom grows such a row
+    /// instead (#534 확인); that difference is the open S1(b) item.
     ///
     /// Only the HWPX parser sets this. The `.hwp` lift/synth paths leave it `false` and keep the
     /// historical FLOOR semantics, so the .hwp 게이트(8==8/18==18/24==24)는 구조적으로 무영향이다.

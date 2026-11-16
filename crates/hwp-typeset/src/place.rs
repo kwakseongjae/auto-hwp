@@ -2222,9 +2222,9 @@ fn flush_fragment(
                 self_block: block,
             };
             let (pad_left, pad_right) = crate::cell_horizontal_padding(t, c);
-            // #347: a fixed-height (`noAdjust="1"`) row never grows, so overflowing text is clipped at
-            // the cell box like Hancom — only when the whole cell lies in this fragment (a cell split
-            // across a page keeps the historical draw).
+            // #347: a fixed-height (`noAdjust="1"`) row never grows here, so overflowing text is clipped
+            // at the cell box (Hancom grows the row instead) — only when the whole cell lies in this
+            // fragment (a cell split across a page keeps the historical draw).
             let clip = t.fixed_row_heights && r1 == c.row + c.row_span.max(1);
             place_cell_content(
                 pg, &c.blocks, cx, cy, cw, ch, pad_left, pad_right, doc, fonts, &ctx, c.row, c.col,
@@ -2530,8 +2530,8 @@ fn place_cell_content(
     clip: bool,
 ) {
     let textw = (cw - pad_left - pad_right).max(1.0);
-    // #347 clip line: with `clip`, a line whose baseline falls below the cell box is not drawn (Hancom
-    // hides overflow in a fixed-height cell instead of painting it over the next row). Line-granular —
+    // #347 clip line: with `clip`, a line whose baseline falls below the cell box is not drawn instead of
+    // being painted over the next row (Hancom grows such a row instead). Line-granular —
     // a line whose baseline is inside the box draws whole. The cursor still advances, so reserve and
     // caret geometry are untouched (LOCKSTEP).
     let clip_y = if clip { cy + ch + 0.5 } else { f64::INFINITY };
@@ -3066,8 +3066,9 @@ pub fn cell_caret_rect_path(
 // ---- Cell fit / overflow signal (#347) ------------------------------------------------------
 //
 // The consumer that writes generated text into a government form needs to know, per cell, how much
-// text fits and whether what it wrote overflows a FIXED-height (`noAdjust="1"`) row — Hancom hides
-// that overflow, so the only safe fix is to re-write the cell shorter. Everything below re-runs the
+// text fits and whether what it wrote overflows a FIXED-height (`noAdjust="1"`) row — this engine does
+// not draw that overflow (Hancom grows the row, so the layouts part ways), so the safe fix is to
+// re-write the cell shorter. Everything below re-runs the
 // SAME helpers the placer and the pagination reserve use (`block_height_for_place`,
 // `layout_cell_paragraph`, `CELL_PAD`), so the numbers agree with what is drawn.
 
@@ -3099,10 +3100,11 @@ pub struct CellFit {
     /// Full-width (한글) characters per line in that style at `text_width` — measured by the real
     /// line breaker, so 장평/자간/들여쓰기 are included.
     pub chars_per_line: usize,
-    /// The table's rows are fixed (`noAdjust="1"`): the row never grows, overflow is clipped.
+    /// The table's rows are fixed (`noAdjust="1"`): this engine never grows the row and does not draw
+    /// the overflow (Hancom grows it).
     pub fixed: bool,
     /// `content_height > available_height` — the content needs more room than the cell gives it. On a
-    /// `fixed` table this text is (partly) clipped in Hancom and in our render; on an auto-fit table it
+    /// `fixed` table this text is (partly) not drawn by our render (Hancom grows the row); on an auto-fit table it
     /// cannot happen (the row grows), except in a row-spanning cell whose rows are pinned elsewhere.
     pub overflow: bool,
 }
@@ -6092,7 +6094,7 @@ mod tests {
     }
 
     /// #347 — a fixed-height (`noAdjust="1"`) row does not grow, and its overflowing text used to be
-    /// painted over the NEXT row. Now it is clipped at the cell box (Hancom hides it) and the fit query
+    /// painted over the NEXT row. Now it is clipped at the cell box (Hancom grows the row instead) and the fit query
     /// flags exactly that cell. Reserve (page count, table height) is untouched.
     fn overfull_fixed_table() -> Table {
         let mut t = fixed_height_table(3, 1500, false);

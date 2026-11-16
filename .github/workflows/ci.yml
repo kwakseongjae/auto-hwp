@@ -71,6 +71,10 @@ jobs:
       # 켜는 멤버가 없어 위 단계에서 돌지 않는다.
       - name: test (hwp-mcp pdf)
         run: cargo test -p hwp-mcp --features pdf
+      # CLI 의 `pdf` 기능 코드(export-pdf 의 경고 · --visual-regions)도 같은 이유로 위 단계들에서
+      # 컴파일되지 않는다 — 컴파일만 확인한다.
+      - name: check (auto-hwp-cli pdf)
+        run: cargo check -p auto-hwp-cli --features pdf
       - name: wasm hygiene (pure core compiles to wasm32)
         run: cargo check -p hwp-model -p hwp-ops -p hwp-ingest -p hwp-hwp5 --target wasm32-unknown-unknown
       - uses: actions/setup-node@v4
