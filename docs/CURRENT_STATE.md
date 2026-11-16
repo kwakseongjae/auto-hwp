@@ -1,5 +1,9 @@
 # CURRENT STATE — 단일 복원 지점
 
+- 2026-11-13 · Claude Opus 5.5(워커) · **#534 칸 안 잘림 신호(S1(a))** — 고정 높이 칸에서 그리지 않은 줄(잉크가 있는 줄만) · 중첩 표를
+  `place_cell_content` 가 그 자리에서 세어 `PlacedPage.clipped_cells` → `--visual-regions` schema 5 `clipped_cell_text` · CLI 경고 · PDF 알림
+  `cell-text-clipped`(진단과 따로). 비교기는 schema 5 만 받고 개수로만 보고(점수 밖). 26쌍: PDF 누락 1% 초과 7문서 모두 잘림 신호(칸 6 · 쪽 잘림 HD-01),
+  누락 ≤0.1% 중 HS-06 · HS-07 은 좁은 칸의 1~4자 줄바꿈 꼬리가 실제로 안 그려진 것. 다음 = S1(b) `noAdjust` 바닥(한컴 합성 확인 먼저).
 - 2026-11-13 · Claude Opus 5.5(워커) · **#528 쪽 번호(S2)** (#530 위에 쌓음).
   쪽 번호 표지(`Paragraph::page_number_marks`: 보이기 시작 · 새 번호 · 감추기)를 제어가 놓인 문단에 달고, 조판이 그 쪽에서 효력을 낸다(쪽 나눔 무변경).
   HWPX `<hp:pageNum>` · `<hp:newNum PAGE>` · `<hp:pageHiding>` 파싱, HWP5 는 쪽 번호 전용 자체 추출(문서 전체 엄격 파싱 조건을 뗌 — 계약 문서 2개 고침).

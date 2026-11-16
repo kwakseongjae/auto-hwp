@@ -414,7 +414,8 @@ export class HwpDoc {
   }
   /** HWPX bytes of the current document. `options.hwpRowHeights` (`"exact"` default | `"auto"`) only
    *  affects tables that came from a binary `.hwp`: `"exact"` writes `noAdjust="1"` (rows keep the
-   *  saved heights — page-count faithful; filled overflow is clipped in Hancom), `"auto"` writes
+   *  saved heights — page-count faithful in this engine, which does not draw filled overflow; Hancom
+   *  grows such rows), `"auto"` writes
    *  `noAdjust="0"` (rows grow with content — the pre-0.0.6 behaviour). HWPX-input tables keep their
    *  own `noAdjust`. */
   toHwpx(options) {

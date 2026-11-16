@@ -473,9 +473,9 @@ def measure_pair(pair: dict, out: Path, cli: str, registry: str, skip_visual: bo
         res["font_glyphs"], candidate_fp = {}, "unknown"
     try:
         regions = json.loads((pair_dir / "cand.regions.json").read_text())
-        res["clipped_regions"] = sum(1 for p in regions["pages"] for r in p["regions"] if r.get("clipped"))
-    except (OSError, ValueError, KeyError):
-        res["clipped_regions"] = None
+        res["clipped_regions"], res["clipped_cell_text"] = clipped_signals(regions)
+    except (OSError, ValueError, KeyError, TypeError):
+        res["clipped_regions"], res["clipped_cell_text"] = None, None
     if not skip_visual and scored_pages:
         _p, info, _e, _ = run(["pdfinfo", pair["reference"]], timeout=60)
         meta = dict(line.split(":", 1) for line in info.decode("utf-8", "replace").splitlines() if ":" in line)
@@ -489,6 +489,17 @@ def measure_pair(pair: dict, out: Path, cli: str, registry: str, skip_visual: bo
     return res
 
 
+def clipped_signals(regions: dict) -> tuple[int, dict]:
+    """Two clip signals from the candidate's `--visual-regions` evidence: table regions cut at a page
+    edge (`clipped`), and fixed-height cells whose content was partly not drawn (`clipped_cell_text`,
+    schema v5 — absent in older evidence, counted as none)."""
+    pages = regions["pages"]
+    page_cut = sum(1 for p in pages for r in p["regions"] if r.get("clipped"))
+    cells = [c for p in pages for c in p.get("clipped_cell_text", [])]
+    return page_cut, {"cells": len(cells), "hidden_lines": sum(c["hidden_lines"] for c in cells),
+                      "hidden_tables": sum(c["hidden_tables"] for c in cells)}
+
+
 # ---------------------------------------------------------------------------------------------
 # summary
 
@@ -499,6 +510,10 @@ def _fmt(value, digits=2, pct=False):
     if pct:
         return f"{100 * value:.1f}%"
     return f"{value:.{digits}f}" if isinstance(value, float) else str(value)
+
+
+def _clipped_cells(signal) -> str:
+    return "–" if signal is None else f"{signal['cells']} ({signal['hidden_lines']})"
 
 
 def quantiles(values, qs=(0.1, 0.25, 0.5, 0.75, 0.9)):
@@ -548,6 +563,7 @@ def summarize(results: list[dict]) -> tuple[dict, str]:
                                              for r in ok),
         "page_number_docs_common_pages_equal": sum(r["page_numbers"]["ref"] > 0
                                                    and bool(r["page_numbers"].get("common_equal")) for r in ok),
+        "docs_cell_text_clipped": sum(bool((r.get("clipped_cell_text") or {}).get("cells")) for r in ok),
         "matched_lines": len(dy),
         "dy_abs_median_pt": statistics.median(dy) if dy else None,
         "dy_within_2pt": (sum(v <= 2 for v in dy) / len(dy)) if dy else None,
@@ -557,7 +573,8 @@ def summarize(results: list[dict]) -> tuple[dict, str]:
     }
     lines = ["| label | group | pages ours/ref | typeset/lineseg pages · body/cell lines exact | first divergent page | "
              "Hangul missing IR · PDF | page numbers ref/ours · same value pages | line dy median | lines within 2pt | "
-             "ink F1 median (min) · pages | v/h rules 2px | v rules 6px · h-rule count same | clipped |",
+             "ink F1 median (min) · pages | v/h rules 2px | v rules 6px · h-rule count same | "
+             "clipped tables · cells (lines) |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         if r.get("status") != "ok":
@@ -584,7 +601,7 @@ def summarize(results: list[dict]) -> tuple[dict, str]:
             f"{_fmt(geo.get('dy_abs_median_pt'), 1)}pt | {_fmt(geo.get('dy_within_2pt'), pct=True)} | {ink} | "
             f"{_fmt(statistics.mean(vr) if vr else None)}/{_fmt(statistics.mean(hr) if hr else None)} | "
             f"{_fmt(ts['v_rule_recall_6px_mean'])} · {ts['h_rule_count_same_pages']}/{ts['h_rule_count_pages']} | "
-            f"{_fmt(r.get('clipped_regions'))} |")
+            f"{_fmt(r.get('clipped_regions'))} · {_clipped_cells(r.get('clipped_cell_text'))} |")
     head = [f"- {k}: {_fmt(v, 3) if isinstance(v, float) else v}" for k, v in totals.items()]
     return totals, "\n".join(["# Hancom-PDF parity sweep (report-only)", "", *head, "", *lines, ""])
 

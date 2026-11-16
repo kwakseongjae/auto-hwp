@@ -85,10 +85,12 @@ HARD_MAX_REPORT_BYTES = 2 * GIB
 HARD_MAX_SUBPROCESS_OUTPUT_BYTES = 4 * MIB
 HARD_SUBPROCESS_TIMEOUT_SECONDS = 300.0
 
-VISUAL_REGION_SCHEMA_VERSION = 4
+VISUAL_REGION_SCHEMA_VERSION = 5
 MAX_VISUAL_REGION_MANIFEST_BYTES = 8 * MIB
 MAX_VISUAL_REGIONS_TOTAL = 10_000
 MAX_VISUAL_REGIONS_PER_PAGE = 2_000
+MAX_CLIPPED_CELLS_PER_PAGE = 2_000
+MAX_CLIPPED_CELL_HIDDEN_COUNT = 1_000_000
 MAX_VISUAL_REGION_PAGE_AREA_MULTIPLIER = 16
 MAX_SOURCE_LINE_GEOMETRY_HWPUNIT = 10_000_000
 VISUAL_REGION_CATEGORIES = frozenset({"text", "table", "image", "object"})
@@ -447,10 +449,18 @@ def _load_visual_regions(
     total_regions = 0
     intentional_blank_text_regions = 0
     category_counts = {category: 0 for category in sorted(VISUAL_REGION_CATEGORIES)}
+    clipped_cell_text = {"pages": 0, "cells": 0, "hidden_lines": 0, "hidden_tables": 0}
     for index, (page, pdf_page) in enumerate(zip(pages, candidate_info.pages), start=1):
         page = _exact_object_keys(
             page,
-            {"page", "width", "height", "intentional_blank_text_regions", "regions"},
+            {
+                "page",
+                "width",
+                "height",
+                "intentional_blank_text_regions",
+                "regions",
+                "clipped_cell_text",
+            },
             f"visual regions page {index}",
         )
         if page["page"] != index:
@@ -477,6 +487,14 @@ def _load_visual_regions(
             raise VisualCheckError(
                 f"visual regions page {index} dimensions do not match candidate PDF MediaBox"
             )
+        page_clipped = _clipped_cell_text(
+            page["clipped_cell_text"], page_width, page_height, f"visual regions page {index}"
+        )
+        if page_clipped:
+            clipped_cell_text["pages"] += 1
+            clipped_cell_text["cells"] += len(page_clipped)
+            clipped_cell_text["hidden_lines"] += sum(c["hidden_lines"] for c in page_clipped)
+            clipped_cell_text["hidden_tables"] += sum(c["hidden_tables"] for c in page_clipped)
         regions = page["regions"]
         if not isinstance(regions, list) or len(regions) > MAX_VISUAL_REGIONS_PER_PAGE:
             raise VisualCheckError(
@@ -728,7 +746,64 @@ def _load_visual_regions(
         "total_regions": total_regions,
         "category_counts": category_counts,
         "intentional_blank_text_regions": intentional_blank_text_regions,
+        "clipped_cell_text": clipped_cell_text,
     }
+
+
+def _clipped_cell_text(
+    value: Any, page_width: float, page_height: float, label: str
+) -> List[Mapping[str, Any]]:
+    """Schema v5 report-only evidence: fixed-height cells whose content was partly not drawn.
+
+    Each entry is a cell box inside its page plus how many lines and nested tables were left
+    undrawn. It carries no text and no cell address, and it never enters scoring.
+    """
+    if not isinstance(value, list) or len(value) > MAX_CLIPPED_CELLS_PER_PAGE:
+        raise VisualCheckError(
+            f"{label}.clipped_cell_text must be a list of at most "
+            f"{MAX_CLIPPED_CELLS_PER_PAGE} entries"
+        )
+    cells: List[Mapping[str, Any]] = []
+    epsilon = 1e-6
+    for cell_index, cell in enumerate(value):
+        cell_label = f"{label}.clipped_cell_text[{cell_index}]"
+        cell = _exact_object_keys(
+            cell, {"x", "y", "w", "h", "hidden_lines", "hidden_tables"}, cell_label
+        )
+        x = _finite_number(cell["x"], f"{cell_label}.x")
+        y = _finite_number(cell["y"], f"{cell_label}.y")
+        width = _finite_number(cell["w"], f"{cell_label}.w")
+        height = _finite_number(cell["h"], f"{cell_label}.h")
+        if (
+            x < -epsilon
+            or y < -epsilon
+            or width <= 0
+            or height <= 0
+            or x + width > page_width + epsilon
+            or y + height > page_height + epsilon
+        ):
+            raise VisualCheckError(f"{cell_label} is outside its page or empty")
+        for key in ("hidden_lines", "hidden_tables"):
+            count = cell[key]
+            if (
+                isinstance(count, bool)
+                or not isinstance(count, int)
+                or count < 0
+                or count > MAX_CLIPPED_CELL_HIDDEN_COUNT
+            ):
+                raise VisualCheckError(
+                    f"{cell_label}.{key} must be a bounded non-negative integer"
+                )
+        if cell["hidden_lines"] + cell["hidden_tables"] == 0:
+            raise VisualCheckError(f"{cell_label} must hide at least one line or table")
+        cells.append(cell)
+    return cells
+
+
+def _page_clipped_cells(visual_regions: Optional[Mapping[str, Any]], page_number: int) -> int:
+    if visual_regions is None:
+        return 0
+    return len(visual_regions["document"]["pages"][page_number - 1]["clipped_cell_text"])
 
 
 def _command_env() -> Dict[str, str]:
@@ -3601,6 +3676,7 @@ def _run_visual_check_from_snapshots(
             "intentional_blank_text_regions": visual_regions[
                 "intentional_blank_text_regions"
             ],
+            "clipped_cell_text": visual_regions["clipped_cell_text"],
         }
         if visual_regions is not None
         else {"provided": False}
@@ -3806,6 +3882,9 @@ def _run_visual_check_from_snapshots(
                         if visual_regions is not None
                         else 0
                     ),
+                    "clipped_cell_text_cells": _page_clipped_cells(
+                        visual_regions, page_number
+                    ),
                     "artifacts": artifacts,
                 }
             )
@@ -3924,6 +4003,7 @@ def _run_visual_check_from_snapshots(
                     if visual_regions is not None
                     else 0
                 ),
+                "clipped_cell_text_cells": _page_clipped_cells(visual_regions, page_number),
                 "artifacts": artifacts,
             }
         )
@@ -3931,6 +4011,9 @@ def _run_visual_check_from_snapshots(
     report["summary"] = _summarize_pages(report["pages"])
     report["summary"]["intentional_blank_text_regions"] = sum(
         page.get("intentional_blank_text_regions", 0) for page in report["pages"]
+    )
+    report["summary"]["clipped_cell_text_cells"] = sum(
+        page.get("clipped_cell_text_cells", 0) for page in report["pages"]
     )
     report["summary"]["pixel_comparison_attempted"] = True
     if report["summary"]["unscorable_pages"]:

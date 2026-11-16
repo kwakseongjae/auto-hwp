@@ -19,6 +19,10 @@ echo "═══ clippy (-D warnings) ═══"
 cargo clippy --workspace --all-targets -- -D warnings
 echo "═══ tests (workspace) ═══"
 cargo test --workspace
+echo "═══ tests (hwp-mcp pdf — 워크스페이스에서 켜지지 않는 기능, CI 와 같은 단계) ═══"
+cargo test -p hwp-mcp --features pdf
+echo "═══ check (auto-hwp-cli pdf — 위와 같은 이유, CI 와 같은 단계) ═══"
+cargo check -p auto-hwp-cli --features pdf
 echo "═══ PDF visual oracle (standard-library unittest) ═══"
 python3 -m unittest discover -s scripts/tests -p 'test_pdf_visual_check.py'
 python3 -m unittest discover -s scripts/tests -p 'test_hancom_parity_sweep.py'

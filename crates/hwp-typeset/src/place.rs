@@ -261,6 +261,31 @@ pub struct PlacedPage {
     /// stretch of a line, covering the glyph EM box. Painted above cell fills, below borders and
     /// glyphs. Empty for a document without shaded runs, so its paint output is unchanged.
     pub text_shades: Vec<PlacedRect>,
+    /// 칸 안 잘림(#534) — cells on this page whose content was partly NOT drawn because it did not fit
+    /// a fixed-height cell (#347 clip). Provenance only; never painted. Empty when nothing was clipped.
+    pub clipped_cells: Vec<PlacedClippedCell>,
+}
+
+/// One table cell whose content did not fit and was partly left undrawn. Counted where the drawing
+/// decides it (`place_cell_content`), not re-measured, so it agrees with the painted page exactly.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlacedClippedCell {
+    /// The `(section, block)` of the OUTERMOST table (nested tables carry their outer table's block,
+    /// like [`PlacedTable`]); `row`/`col` are the cell's address in the table that owns it.
+    pub section: usize,
+    pub block: usize,
+    pub row: usize,
+    pub col: usize,
+    /// The cell box on this page (HWPUNIT, page-top-left origin).
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// Lines with ink (a visible glyph or an object) whose baseline fell below the cell box and were
+    /// not drawn. Blank lines below the box are not counted — nothing is lost.
+    pub hidden_lines: usize,
+    /// Nested tables that started below the cell box and were not drawn.
+    pub hidden_tables: usize,
 }
 
 /// Add `[x, x + advance]` of a shaded glyph's EM box to `page.text_shades`, extending the previous
@@ -2197,9 +2222,9 @@ fn flush_fragment(
                 self_block: block,
             };
             let (pad_left, pad_right) = crate::cell_horizontal_padding(t, c);
-            // #347: a fixed-height (`noAdjust="1"`) row never grows, so overflowing text is clipped at
-            // the cell box like Hancom — only when the whole cell lies in this fragment (a cell split
-            // across a page keeps the historical draw).
+            // #347: a fixed-height (`noAdjust="1"`) row never grows here, so overflowing text is clipped
+            // at the cell box (Hancom grows the row instead) — only when the whole cell lies in this
+            // fragment (a cell split across a page keeps the historical draw).
             let clip = t.fixed_row_heights && r1 == c.row + c.row_span.max(1);
             place_cell_content(
                 pg, &c.blocks, cx, cy, cw, ch, pad_left, pad_right, doc, fonts, &ctx, c.row, c.col,
@@ -2505,11 +2530,12 @@ fn place_cell_content(
     clip: bool,
 ) {
     let textw = (cw - pad_left - pad_right).max(1.0);
-    // #347 clip line: with `clip`, a line whose baseline falls below the cell box is not drawn (Hancom
-    // hides overflow in a fixed-height cell instead of painting it over the next row). Line-granular —
+    // #347 clip line: with `clip`, a line whose baseline falls below the cell box is not drawn instead of
+    // being painted over the next row (Hancom grows such a row instead). Line-granular —
     // a line whose baseline is inside the box draws whole. The cursor still advances, so reserve and
     // caret geometry are untouched (LOCKSTEP).
     let clip_y = if clip { cy + ch + 0.5 } else { f64::INFINITY };
+    let (mut hidden_lines, mut hidden_tables) = (0usize, 0usize);
     // Total content height → start offset for vertical centering within the cell box.
     let content_h: f64 = blocks
         .iter()
@@ -2535,6 +2561,8 @@ fn place_cell_content(
                 };
                 if vy < clip_y {
                     place_nested_table(pg, nt, cx + pad_left, vy, textw, doc, fonts, &child);
+                } else {
+                    hidden_tables += 1;
                 }
             }
             vy += block_height_for_place(b, doc, textw, fonts);
@@ -2569,17 +2597,22 @@ fn place_cell_content(
                     _ => 0.0,
                 };
             let baseline = vy + ls.baseline;
-            if baseline > clip_y {
-                vy += ls.vert_size * ratio;
-                continue;
-            }
             let start = ls.text_pos as usize;
             let end = lines
                 .get(li + 1)
                 .map(|n| n.text_pos as usize)
                 .unwrap_or(atoms.len());
+            let line_atoms = atoms.get(start..end.min(atoms.len())).unwrap_or(&[]);
+            if baseline > clip_y {
+                // A blank line below the box loses nothing; only a line that would have put ink counts.
+                if line_atoms.iter().any(ParagraphAtom::paints) {
+                    hidden_lines += 1;
+                }
+                vy += ls.vert_size * ratio;
+                continue;
+            }
             let mut x = x0;
-            for atom in atoms.get(start..end.min(atoms.len())).unwrap_or(&[]) {
+            for atom in line_atoms {
                 x += place_atom(
                     pg,
                     atom,
@@ -2605,6 +2638,20 @@ fn place_cell_content(
         if let Some(last) = lines.last() {
             vy -= (last.vert_size * (ratio - 1.0)).max(0.0);
         }
+    }
+    if hidden_lines + hidden_tables > 0 {
+        pg.clipped_cells.push(PlacedClippedCell {
+            section: ctx.section,
+            block: ctx.outer_block,
+            row: cell_row,
+            col: cell_col,
+            x: cx,
+            y: cy,
+            w: cw,
+            h: ch,
+            hidden_lines,
+            hidden_tables,
+        });
     }
 }
 
@@ -3019,8 +3066,9 @@ pub fn cell_caret_rect_path(
 // ---- Cell fit / overflow signal (#347) ------------------------------------------------------
 //
 // The consumer that writes generated text into a government form needs to know, per cell, how much
-// text fits and whether what it wrote overflows a FIXED-height (`noAdjust="1"`) row — Hancom hides
-// that overflow, so the only safe fix is to re-write the cell shorter. Everything below re-runs the
+// text fits and whether what it wrote overflows a FIXED-height (`noAdjust="1"`) row — this engine does
+// not draw that overflow (Hancom grows the row, so the layouts part ways), so the safe fix is to
+// re-write the cell shorter. Everything below re-runs the
 // SAME helpers the placer and the pagination reserve use (`block_height_for_place`,
 // `layout_cell_paragraph`, `CELL_PAD`), so the numbers agree with what is drawn.
 
@@ -3052,10 +3100,11 @@ pub struct CellFit {
     /// Full-width (한글) characters per line in that style at `text_width` — measured by the real
     /// line breaker, so 장평/자간/들여쓰기 are included.
     pub chars_per_line: usize,
-    /// The table's rows are fixed (`noAdjust="1"`): the row never grows, overflow is clipped.
+    /// The table's rows are fixed (`noAdjust="1"`): this engine never grows the row and does not draw
+    /// the overflow (Hancom grows it).
     pub fixed: bool,
     /// `content_height > available_height` — the content needs more room than the cell gives it. On a
-    /// `fixed` table this text is (partly) clipped in Hancom and in our render; on an auto-fit table it
+    /// `fixed` table this text is (partly) not drawn by our render (Hancom grows the row); on an auto-fit table it
     /// cannot happen (the row grows), except in a row-spanning cell whose rows are pinned elsewhere.
     pub overflow: bool,
 }
@@ -3519,6 +3568,15 @@ enum ParagraphAtom {
 }
 
 impl ParagraphAtom {
+    /// Whether [`place_atom`] puts ink for this atom: a visible glyph (not a space, tab, or line break)
+    /// or an object.
+    fn paints(&self) -> bool {
+        match self {
+            Self::Glyph(glyph) => glyph_paints(glyph.ch),
+            Self::Object { .. } => true,
+        }
+    }
+
     fn advance(&self, fonts: &dyn FontMetricsProvider) -> f64 {
         match self {
             Self::Glyph(glyph) => {
@@ -3538,6 +3596,11 @@ impl ParagraphAtom {
             }
         }
     }
+}
+
+/// Spaces, tabs, and line breaks advance the pen but place no glyph.
+fn glyph_paints(ch: char) -> bool {
+    !matches!(ch, ' ' | '\t' | '\n')
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3560,7 +3623,7 @@ fn place_atom(
             if glyph.underline && glyph.ch != '\n' {
                 push_underline(page, x, advance, baseline, glyph.size, glyph.color);
             }
-            if glyph.ch != ' ' && glyph.ch != '\t' && glyph.ch != '\n' {
+            if glyph_paints(glyph.ch) {
                 page.glyphs.push(PlacedGlyph {
                     x,
                     baseline,
@@ -5621,6 +5684,140 @@ mod tests {
         }
     }
 
+    /// #534 — 고정 높이 칸에서 그리지 않은 줄을 그 자리에서 센다. 넘친 칸만 기록하고, 쪽 나눔 · 그린 글자는 그대로다.
+    #[test]
+    fn a_clipped_fixed_height_cell_is_recorded_where_lines_are_skipped() {
+        let tall_text = "가\n나\n다\n라\n마\n바\n사\n아\n자\n차";
+        let mut clipped = fixed_height_table(1, 1000, false);
+        clipped.cells[0].blocks = vec![Block::Paragraph(para(tall_text))];
+        let placed = place_doc(
+            &doc_with_page(vec![Block::Table(clipped.clone())], 20_000),
+            &ApproxFontMetrics,
+        );
+        assert_eq!(placed.pages.len(), 1);
+        let records = &placed.pages[0].clipped_cells;
+        assert_eq!(records.len(), 1);
+        let record = records[0];
+        assert_eq!(
+            (record.section, record.block, record.row, record.col),
+            (0, 0, 0, 0)
+        );
+        assert!(
+            record.hidden_lines > 0 && record.hidden_lines < 10,
+            "{record:?}"
+        );
+        assert_eq!(record.hidden_tables, 0);
+        // 그린 줄 + 그리지 않은 줄 = 전체 10줄(줄마다 한 글자).
+        let drawn = placed.pages[0]
+            .glyphs
+            .iter()
+            .filter(|glyph| glyph.origin == PlacedGlyphOrigin::SourceText)
+            .count();
+        assert_eq!(drawn + record.hidden_lines, 10);
+
+        // 같은 내용이라도 자동 높이 행은 늘어나므로 기록이 없다.
+        let mut grown = clipped.clone();
+        grown.fixed_row_heights = false;
+        let placed = place_doc(
+            &doc_with_page(vec![Block::Table(grown)], 20_000),
+            &ApproxFontMetrics,
+        );
+        assert!(placed
+            .pages
+            .iter()
+            .all(|page| page.clipped_cells.is_empty()));
+        // 넘치지 않는 고정 높이 칸도 기록이 없다.
+        let placed = place_doc(
+            &doc_with_page(
+                vec![Block::Table(fixed_height_table(2, 3000, false))],
+                20_000,
+            ),
+            &ApproxFontMetrics,
+        );
+        assert!(placed
+            .pages
+            .iter()
+            .all(|page| page.clipped_cells.is_empty()));
+    }
+
+    /// 쪽을 넘는 행은 조각마다 이어 그리므로(잘림이 아니므로) 기록하지 않는다.
+    #[test]
+    fn a_row_continued_across_pages_is_not_recorded_as_clipped() {
+        let mut table = n_row_table(1);
+        table.split_over_tall_cells = true;
+        table.cells[0].blocks = vec![Block::Paragraph(para(&"줄\n".repeat(60)))];
+        let placed = place_doc(
+            &doc_with_page(vec![Block::Table(table)], 5_000),
+            &ApproxFontMetrics,
+        );
+        assert!(placed.pages.len() >= 2);
+        assert!(placed
+            .pages
+            .iter()
+            .all(|page| page.clipped_cells.is_empty()));
+    }
+
+    /// #534 — 칸 아래로 넘친 줄이 빈 줄뿐이면 잃은 것이 없으므로 기록하지 않는다.
+    #[test]
+    fn blank_lines_below_a_fixed_height_cell_are_not_recorded() {
+        let mut blank_tail = fixed_height_table(1, 1000, false);
+        blank_tail.cells[0].blocks = vec![
+            Block::Paragraph(para("가")),
+            Block::Paragraph(para("")),
+            Block::Paragraph(para(" ")),
+            Block::Paragraph(para("")),
+        ];
+        let placed = place_doc(
+            &doc_with_page(vec![Block::Table(blank_tail.clone())], 20_000),
+            &ApproxFontMetrics,
+        );
+        assert!(placed.pages[0].glyphs.iter().any(|glyph| glyph.ch == '가'));
+        assert!(
+            placed.pages[0].clipped_cells.is_empty(),
+            "{:?}",
+            placed.pages[0].clipped_cells
+        );
+
+        // 같은 자리에 글이 있으면 센다.
+        blank_tail.cells[0].blocks[3] = Block::Paragraph(para("끝"));
+        let placed = place_doc(
+            &doc_with_page(vec![Block::Table(blank_tail)], 20_000),
+            &ApproxFontMetrics,
+        );
+        let records = &placed.pages[0].clipped_cells;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].hidden_lines, 1);
+        assert!(!placed.pages[0].glyphs.iter().any(|glyph| glyph.ch == '끝'));
+    }
+
+    /// #534 — 칸 아래로 밀려 그리지 않은 중첩 표도 센다(글 줄과 따로).
+    #[test]
+    fn a_nested_table_pushed_below_a_fixed_height_cell_is_counted() {
+        let mut clipped = fixed_height_table(1, 1000, false);
+        clipped.cells[0].blocks = vec![
+            Block::Paragraph(para("가\n나\n다\n라\n마")),
+            Block::Table(n_row_table(1)),
+        ];
+        let placed = place_doc(
+            &doc_with_page(vec![Block::Table(clipped.clone())], 20_000),
+            &ApproxFontMetrics,
+        );
+        let records = &placed.pages[0].clipped_cells;
+        assert_eq!(records.len(), 1, "{records:?}");
+        assert_eq!(records[0].hidden_tables, 1);
+        assert!(records[0].hidden_lines > 0);
+        assert!(!placed.pages[0].glyphs.iter().any(|glyph| glyph.ch == '행'));
+
+        let mut grown = clipped;
+        grown.fixed_row_heights = false;
+        let placed = place_doc(
+            &doc_with_page(vec![Block::Table(grown)], 20_000),
+            &ApproxFontMetrics,
+        );
+        assert!(placed.pages[0].clipped_cells.is_empty());
+        assert!(placed.pages[0].glyphs.iter().any(|glyph| glyph.ch == '행'));
+    }
+
     fn fixed_height_table(rows: usize, row_height: HwpUnit, keep_together: bool) -> Table {
         let mut table = n_row_table(rows);
         table.row_heights = vec![row_height; rows];
@@ -5897,7 +6094,7 @@ mod tests {
     }
 
     /// #347 — a fixed-height (`noAdjust="1"`) row does not grow, and its overflowing text used to be
-    /// painted over the NEXT row. Now it is clipped at the cell box (Hancom hides it) and the fit query
+    /// painted over the NEXT row. Now it is clipped at the cell box (Hancom grows the row instead) and the fit query
     /// flags exactly that cell. Reserve (page count, table height) is untouched.
     fn overfull_fixed_table() -> Table {
         let mut t = fixed_height_table(3, 1500, false);

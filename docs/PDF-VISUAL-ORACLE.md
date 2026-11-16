@@ -321,7 +321,7 @@ otherwise white, globally similar page.
 
 ### Semantic regions
 
-When `--candidate-regions` is supplied, visual-region schema v4 divides the candidate placement into
+When `--candidate-regions` is supplied, visual-region schema v5 divides the candidate placement into
 four content-free categories: paint-backed paragraph bands (`text`), placed table boxes (`table`), raster images
 (`image`), and SVG-backed equations/charts/other objects (`object`). IDs and HWPUNIT geometry are
 present; source text, paths, binary identifiers, and font paths are absent.
@@ -349,6 +349,21 @@ non-source-text, missing-placement, non-finite, and non-text cases carry an expl
 geometry. The loader rejects stale/unknown fields, values outside 10,000,000 HWPUNIT, non-positive EM
 boxes, and axis labels that disagree with the horizontal/baseline deltas. This stored geometry is
 untrusted evidence: it never enters reflow, pagination, paint, score, alignment, thresholds, or pass.
+
+Schema v5 (issue #534) adds a per-page `clipped_cell_text` list. Each entry is one table cell whose
+fixed height could not hold its content, so the placement drew part of it and left the rest undrawn: the
+cell box in HWPUNIT (clamped to the page) plus `hidden_lines` and `hidden_tables`, the counts of lines
+and nested tables that fell below the cell's bottom edge. Only a line that would have put ink (a visible
+glyph or an object) counts; blank lines below the edge lose nothing and are not listed. A row that
+continues on the next page is not in this list — its content is drawn there. A table cut at the page edge stays the region's `clipped`
+flag. The entry carries no text, cell address, or source identity. The loader requires exactly these
+six fields, a finite non-empty in-page box, bounded non-negative integer counts, and at least one
+hidden line or table; it rejects a missing list, more than 2,000 entries per page, or schema v4. The
+report counts the entries per page, in the summary, and in the candidate input block. The list never
+enters scoring, alignment, thresholds, status, or `policy.pass`. `auto-hwp export-pdf` also prints one
+`cell-text-clipped` warning per affected page, and the PDF export carries one report-only
+`cell-text-clipped` notice (`PdfExport.notices`, built from this same list) for that page. It is not a
+capability diagnostic, so gates that read `PdfExport.diagnostics` are unaffected.
 
 The manifest must be strict UTF-8 JSON with exactly the known fields, ordered one-based pages, finite
 positive in-page geometry, unique per-page IDs, matching MediaBox dimensions, and an exact SHA-256

@@ -1168,7 +1168,8 @@ pub fn serialize_hwpx(doc: &SemanticDoc) -> Result<Vec<u8>> {
 /// - **`.hwp` input** (converted to HWPX): since 0.0.6 (#247/#275) every lifted table is written with
 ///   `noAdjust="1"`, because a `.hwp`'s stored row heights are the layout Hancom actually saved — that
 ///   keeps a round-trip on the same page count. But a table whose cells you FILL with longer text then
-///   stays at the original height in Hancom and the overflow is clipped.
+///   stays at the original height in this engine and the overflow is not drawn, while Hancom grows the
+///   row (and moves the table on), so the two layouts part ways.
 /// - **Tables inserted by an edit**: always `noAdjust="0"`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HwpRowHeights {

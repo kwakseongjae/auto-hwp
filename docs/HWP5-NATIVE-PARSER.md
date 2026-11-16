@@ -94,7 +94,7 @@ rejected instead of being interpreted as records.
       nonzero section start number, a later section without a first-paragraph restart, or a
       topology mismatch with the rhwp model. The on/off rule is `PageNumberFacts::resolve`, shared
       with the HWPX reader, but the accepted sites and values differ from HWPX in three places, kept
-      as they are because no Hancom reference covers them (roadmap §11 open items): a control in a
+      as they are because no Hancom reference covers them (roadmap §4.3, "쪽 번호 열린 항목"): a control in a
       nested table's cell, and one in a text box or caption inside a cell, turns the section off here
       while HWPX takes it as a mark on that cell paragraph; a circled-digit format is accepted here
       (the strict parser's decoding) while HWPX turns it off.

@@ -393,6 +393,52 @@ pub struct PdfPageVisualEvidence {
     /// not missing-ink regions, and therefore never enter pixel scoring.
     pub intentional_blank_text_regions: usize,
     pub regions: Vec<PdfVisualRegion>,
+    /// 칸 안 잘림(#534, schema v5): table cells on this page whose content did not fit a fixed-height
+    /// cell and was partly not drawn. Report-only — never scored. Carries no text, cell address, or
+    /// source identity; only the cell box (clamped to the page) and how much was left undrawn.
+    pub clipped_cell_text: Vec<PdfClippedCellText>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct PdfClippedCellText {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub hidden_lines: usize,
+    pub hidden_tables: usize,
+}
+
+/// The page's clipped cells as content-free evidence; cells outside the page box are dropped. A page
+/// without a positive finite box (a corrupt or hostile page size) yields no evidence instead of
+/// panicking in `clamp` — the same guard as [`push_visual_region`].
+fn clipped_cell_text(page: &hwp_typeset::PlacedPage) -> Vec<PdfClippedCellText> {
+    let (width, height) = (page.width, page.height);
+    if !(width.is_finite() && height.is_finite()) || width <= 0.0 || height <= 0.0 {
+        return Vec::new();
+    }
+    page.clipped_cells
+        .iter()
+        .filter(|cell| {
+            [cell.x, cell.y, cell.w, cell.h]
+                .iter()
+                .all(|v| v.is_finite())
+        })
+        .filter_map(|cell| {
+            let left = cell.x.clamp(0.0, width);
+            let top = cell.y.clamp(0.0, height);
+            let right = (cell.x + cell.w).clamp(0.0, width);
+            let bottom = (cell.y + cell.h).clamp(0.0, height);
+            (right > left && bottom > top).then_some(PdfClippedCellText {
+                x: left,
+                y: top,
+                w: right - left,
+                h: bottom - top,
+                hidden_lines: cell.hidden_lines,
+                hidden_tables: cell.hidden_tables,
+            })
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -816,10 +862,11 @@ fn visual_evidence(
             height: page.height,
             intentional_blank_text_regions,
             regions,
+            clipped_cell_text: clipped_cell_text(page),
         });
     }
     Ok(PdfVisualEvidence {
-        schema_version: 4,
+        schema_version: 5,
         coordinate_space: "HWPUNIT",
         candidate_pdf_sha256,
         pages,
@@ -957,7 +1004,7 @@ pub fn export_pdf_with_fonts(
     // 쪽 번호를 끈 구역은 조용히 넘기지 않는다 — 그 구역 첫 쪽에 이유 코드를 남긴다. 그리지 못한 것이
     // 아니라 그리지 않기로 한 것이므로 진단(diagnostics)이 아니라 알림(notices)이다 — 인쇄 · 검증 관문은
     // 진단만 본다.
-    let notices = placed
+    let mut notices: Vec<PdfNotice> = placed
         .page_number_off
         .iter()
         .map(|notice| PdfNotice {
@@ -972,6 +1019,20 @@ pub fn export_pdf_with_fonts(
         .map_err(|e| format!("krilla finish: {e:?}"))?;
     let candidate_pdf_sha256 = format!("{:x}", Sha256::digest(&bytes));
     let visual_evidence = visual_evidence(&placed, doc, candidate_pdf_sha256)?;
+    // 칸 안에서 그리지 않은 글이 있는 쪽도 조용히 넘기지 않는다 — 쪽마다 알림 한 건(#534). 시각 증거의 같은
+    // 목록에서 만들어 둘이 어긋나지 않는다.
+    notices.extend(
+        visual_evidence
+            .pages
+            .iter()
+            .filter(|page| !page.clipped_cell_text.is_empty())
+            .map(|page| PdfNotice {
+                page_index: page.page - 1,
+                kind: "cell-text-clipped".into(),
+                code: "cell-text-clipped".into(),
+            }),
+    );
+    notices.sort_by_key(|notice| notice.page_index);
     Ok(PdfExport {
         pages: trees.len(),
         bytes,
@@ -1788,7 +1849,7 @@ mod tests {
             "non-trivial PDF size, got {}",
             out.bytes.len()
         );
-        assert_eq!(out.visual_evidence.schema_version, 4);
+        assert_eq!(out.visual_evidence.schema_version, 5);
         assert_eq!(out.visual_evidence.coordinate_space, "HWPUNIT");
         assert_eq!(out.visual_evidence.pages.len(), out.pages);
         assert_eq!(
@@ -2279,6 +2340,69 @@ mod tests {
             }]
         );
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    }
+
+    /// #534 — 고정 높이 칸에서 그리지 않은 글은 시각 증거 v5 와 알림으로 남는다(진단은 아니다). 글 · 칸 주소는
+    /// 싣지 않는다.
+    #[test]
+    fn clipped_cell_text_is_reported_in_evidence_and_notices() {
+        let table = |text: &str| Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell {
+                blocks: vec![Block::Paragraph(para(text))],
+                ..Default::default()
+            }],
+            col_widths: vec![8_000],
+            row_heights: vec![1_000],
+            fixed_row_heights: true,
+            ..Default::default()
+        };
+        let clipped = doc_with(vec![Block::Table(table(
+            "잘림가\n잘림나\n잘림다\n잘림라\n잘림마\n잘림바",
+        ))]);
+        let out = export_pdf(&clipped, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        assert_eq!(out.visual_evidence.schema_version, 5);
+        let page = &out.visual_evidence.pages[0];
+        assert_eq!(page.clipped_cell_text.len(), 1);
+        assert!(page.clipped_cell_text[0].hidden_lines > 0);
+        let evidence = format!("{:?}", out.visual_evidence);
+        assert!(!evidence.contains("잘림"), "no text in the evidence");
+        let cell = format!("{:?}", page.clipped_cell_text[0]);
+        assert!(
+            !cell.contains("row") && !cell.contains("col"),
+            "no cell address: {cell}"
+        );
+        assert_eq!(
+            out.notices,
+            vec![PdfNotice {
+                page_index: 0,
+                kind: "cell-text-clipped".into(),
+                code: "cell-text-clipped".into(),
+            }]
+        );
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+
+        // 쪽 크기가 0 · 음수인 문서(깨졌거나 일부러 만든 파일)는 패닉하지 않고 신호 없이 끝난다.
+        for width in [0, -59_528] {
+            let mut broken = clipped.clone();
+            broken.sections[0].page.width = width;
+            let out = export_pdf(&broken, &ApproxFontMetrics, &PdfOptions::default())
+                .expect("a non-positive page box exports without panicking");
+            assert!(
+                out.visual_evidence
+                    .pages
+                    .iter()
+                    .all(|page| page.clipped_cell_text.is_empty()),
+                "width {width}"
+            );
+            assert!(out.notices.iter().all(|n| n.kind != "cell-text-clipped"));
+        }
+
+        let fits = doc_with(vec![Block::Table(table("한 줄"))]);
+        let out = export_pdf(&fits, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        assert!(out.visual_evidence.pages[0].clipped_cell_text.is_empty());
+        assert!(out.notices.is_empty(), "{:?}", out.notices);
     }
 
     #[test]
