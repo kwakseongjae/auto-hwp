@@ -8,8 +8,8 @@
 # 쪽수가 맞아도 백지 쪽은 결함이다 — 쪽이 모자란 문서에도 백지가 있어서,
 # 백지를 전부 없애도 총 쪽 격차는 −1 뿐이었다. **쪽수로 판정하지 말 것.**
 #
-# 사용:  scripts/empty-pages.sh                 # 내부 문서 + corpus/private
-#        scripts/empty-pages.sh <디렉터리>...
+# 사용:  scripts/empty-pages.sh                 # 저장소 안 코퍼스(corpus · benchmarks — corpus/private 가 있으면 함께)
+#        scripts/empty-pages.sh <디렉터리>...      # 저장소 밖 문서 묶음은 인자로만 준다
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -22,7 +22,7 @@ BIN=target/release/auto-hwp
 cargo build --release -q -p auto-hwp-cli --features rhwp,shaper
 
 if [ $# -eq 0 ]; then
-  set -- ../business_plan_k/fixtures/kstartup-forms corpus/private
+  set -- corpus benchmarks
 fi
 
 found=0
