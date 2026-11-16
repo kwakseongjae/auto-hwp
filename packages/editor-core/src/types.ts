@@ -665,7 +665,7 @@ export interface CellFit {
   line_capacity: number;
   /** Full-width characters per line at `text_width`. */
   chars_per_line: number;
-  /** Fixed-height row (`noAdjust="1"`): this engine does not draw the overflow (Hancom grows the row). */
+  /** Fixed-height row (`noAdjust="1"`): this engine keeps the row height and does not draw the overflow. */
   fixed: boolean;
   overflow: boolean;
 }
