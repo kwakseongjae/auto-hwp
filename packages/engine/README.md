@@ -229,5 +229,5 @@ the overflow). When the engine writes it:
 | binary `.hwp` input, `hwpRowHeights: "auto"` | `0` — rows grow with filled content in Hancom (pre-0.0.6 behaviour) |
 | table inserted by an edit | `0` |
 
-Filling a `.hwp` form with longer text? Export with `doc.toHwpx({ hwpRowHeights: "auto" })` so Hancom
-grows the rows instead of clipping.
+Filling a `.hwp` form with longer text? Export with `doc.toHwpx({ hwpRowHeights: "auto" })` so the rows
+are written to grow with their content (`noAdjust="0"`).
