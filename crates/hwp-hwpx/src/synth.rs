@@ -217,7 +217,7 @@ fn tag_type_non_none(elem: &str, open: &str) -> bool {
 /// OWPML border `type` token → renderable [`LineStyle`] (inverse of [`border_type_token`], widened to
 /// the full token set the .hwp lift's `lift_line_style` collapses: dash family → Dashed, dot/circle →
 /// Dotted, double/triple family → Double, everything else → Solid).
-fn line_style_from_token(ty: &str) -> LineStyle {
+pub(crate) fn line_style_from_token(ty: &str) -> LineStyle {
     match ty {
         "NONE" => LineStyle::None,
         "DASH" | "LONG_DASH" | "DASH_DOT" | "DASH_DOT_DOT" => LineStyle::Dashed,

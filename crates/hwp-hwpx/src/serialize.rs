@@ -1013,6 +1013,7 @@ fn patch_section_xml(
                             | Inline::FieldBegin(_)
                             | Inline::FieldEnd(_)
                             | Inline::Bookmark(_)
+                            | Inline::Shape(_)
                     )
                 });
                 // #483 — only the open tag changed (`SetParagraphShape` on an untouched body).

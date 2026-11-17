@@ -306,6 +306,8 @@ fn paragraph_inline_identity(paragraph: &Paragraph) -> Vec<ParagraphInlineIdenti
             Inline::Chart(_) => identity.push(ParagraphInlineIdentity::Chart),
             Inline::Note(_) => identity.push(ParagraphInlineIdentity::Note),
             Inline::Raw(_) => identity.push(ParagraphInlineIdentity::Raw),
+            // #542: a 도형 is carried but not consumed — it must not change which paragraphs pair.
+            Inline::Shape(_) => {}
         }
     }
     identity

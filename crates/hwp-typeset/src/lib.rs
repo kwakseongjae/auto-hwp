@@ -265,6 +265,8 @@ fn block_draws_something(block: &Block) -> bool {
         Block::Paragraph(p) => p.runs.iter().any(|run| {
             run.content.iter().any(|inline| match inline {
                 Inline::Text(text) => !text.is_empty(),
+                // #542: a 도형 is carried but not drawn yet — it must not keep a page alive.
+                Inline::Shape(_) => false,
                 _ => true,
             })
         }),

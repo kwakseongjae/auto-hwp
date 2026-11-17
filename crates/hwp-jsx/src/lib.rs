@@ -337,6 +337,10 @@ fn emit_run(r: &Run) -> JsxNode {
         el.attrs.insert("data-cref".into(), cref.clone());
     }
     for inl in &r.content {
+        // #542: a 도형 is carried in the model but not projected yet — the project keeps its old shape.
+        if matches!(inl, Inline::Shape(_)) {
+            continue;
+        }
         el.children.push(emit_inline(inl));
     }
     JsxNode::Element(el)
@@ -404,6 +408,11 @@ fn emit_inline(inl: &Inline) -> JsxNode {
                 .with_attr("data-tag", rp.tag.clone())
                 .with_attr("data-b64", b64(&rp.bytes)),
         ),
+        // Skipped by the caller (#542 — not projected yet); an empty text node if ever reached.
+        Inline::Shape(_) => JsxNode::Text(JsxText {
+            node_key: None,
+            text: String::new(),
+        }),
     }
 }
 

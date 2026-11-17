@@ -286,11 +286,13 @@ fn walk_blocks(
                                 walk_blocks(&n.body, tags, counts, evidence);
                             }
                             Inline::Raw(raw) => scan_raw_tag(&raw.tag, tags, counts, evidence),
+                            // 도형(#542)은 원문 XML 훑기가 이미 센다 — IR 로 두 번 세지 않는다.
                             Inline::Image(_)
                             | Inline::Text(_)
                             | Inline::FieldBegin(_)
                             | Inline::FieldEnd(_)
-                            | Inline::Bookmark(_) => {}
+                            | Inline::Bookmark(_)
+                            | Inline::Shape(_) => {}
                         }
                     }
                 }
