@@ -2874,7 +2874,7 @@ mod hwpx_blank_run_tests {
     /// 글자 모양 0 = 10pt, 1 = 5pt.
     const HEADER: &str = r#"<hh:head xmlns:hh="h"><hh:refList><hh:charProperties itemCnt="2"><hh:charPr id="0" height="1000"><hh:fontRef hangul="0"/></hh:charPr><hh:charPr id="1" height="500"><hh:fontRef hangul="0"/></hh:charPr></hh:charProperties></hh:refList></hh:head>"#;
 
-    fn package(section: &str) -> Vec<u8> {
+    pub(super) fn package(section: &str) -> Vec<u8> {
         let mut bytes = Vec::new();
         {
             let mut zw = zip::ZipWriter::new(Cursor::new(&mut bytes));
@@ -2971,5 +2971,104 @@ mod hwpx_blank_run_tests {
             })
             .collect();
         assert_eq!(text, "나");
+        // #547 — 저장 뒤에도 그 문단 자기 글자 모양(5pt)이다(전에는 저장이 `charPrIDRef="0"` 으로 떨어뜨렸다).
+        assert_eq!(reopened.char_shapes[p.runs[0].char_shape].height, 500);
+    }
+}
+
+/// #547 — `SetParagraphText` 로 고친 문단을 HWPX 로 저장 → 다시 열어도 원래 글자 모양 id · 크기가 남는다.
+/// 새 런은 원래 글자 모양 번호를 받지만 원래 id(`char_ref`)는 없어서, 저장 쪽이 원래 헤더 id 표를 보지 않으면
+/// `charPrIDRef="0"` 으로 떨어졌다.
+#[cfg(test)]
+mod hwpx_settext_char_shape_tests {
+    use super::hwpx_blank_run_tests::package;
+    use super::*;
+    use hwp_model::document::{Block, Inline};
+    use hwp_ops::{apply, Op};
+
+    /// 문단의 글이 있는 런마다 (글, 원래 id, 글자 크기).
+    fn text_runs(doc: &SemanticDoc, block: usize) -> Vec<(String, Option<String>, i32)> {
+        let Block::Paragraph(p) = &doc.sections[0].blocks[block] else {
+            panic!("paragraph {block}");
+        };
+        p.runs
+            .iter()
+            .filter_map(|r| {
+                let text: String = r
+                    .content
+                    .iter()
+                    .filter_map(|i| match i {
+                        Inline::Text(t) => Some(t.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                (!text.is_empty()).then(|| {
+                    (
+                        text,
+                        r.char_ref.clone(),
+                        doc.char_shapes[r.char_shape].height,
+                    )
+                })
+            })
+            .collect()
+    }
+
+    fn set_text(doc: &mut SemanticDoc, block: usize, text: &str) {
+        apply(
+            doc,
+            &Op::SetParagraphText {
+                section: 0,
+                block,
+                text: text.into(),
+            },
+        )
+        .unwrap_or_else(|e| panic!("block {block}: {e:?}"));
+    }
+
+    /// 저장 쪽 두 길: 구역 첫 문단(secPr 런 + 글 런)의 글 구역 덮어쓰기, simple 문단 다시 쓰기.
+    /// 글자 모양 0 = 10pt, 1 = 5pt — 두 문단 모두 1번(5pt)이다.
+    #[test]
+    fn a_text_edit_keeps_its_char_shape_id_through_save_on_both_paths() {
+        let section = concat!(
+            r#"<hs:sec xmlns:hs="s" xmlns:hp="p">"#,
+            r#"<hp:p><hp:run charPrIDRef="0"><hp:secPr id=""><hp:grid lineGrid="0"/></hp:secPr><hp:ctrl><hp:colPr id=""/></hp:ctrl></hp:run>"#,
+            r#"<hp:run charPrIDRef="1"><hp:t>옛 제목</hp:t></hp:run></hp:p>"#,
+            r#"<hp:p><hp:run charPrIDRef="1"><hp:t>옛 글</hp:t></hp:run></hp:p>"#,
+            "</hs:sec>",
+        );
+        let mut doc = Engine::open(&package(section)).expect("open synthetic HWPX");
+        for (block, text) in [(0, "새 제목"), (1, "새 글")] {
+            set_text(&mut doc, block, text);
+            let edited = text_runs(&doc, block);
+            assert_eq!(edited.len(), 1, "{edited:?}");
+            assert_eq!(edited[0].2, 500, "편집 직후(메모리) 크기");
+        }
+        let reopened = Engine::open(&serialize_hwpx(&doc).expect("save")).expect("reopen");
+        for (block, text) in [(0, "새 제목"), (1, "새 글")] {
+            assert_eq!(
+                text_runs(&reopened, block),
+                vec![(text.to_string(), Some("1".to_string()), 500)],
+                "block {block}: 저장 뒤에도 원래 글자 모양(id 1 · 5pt)"
+            );
+        }
+    }
+
+    /// 이슈의 재현 — 공개 코퍼스 `프로젝트 계획서.hwpx` 문단 75(12pt 글).
+    #[test]
+    fn a_text_edit_in_the_public_corpus_keeps_its_12pt_char_shape_through_save() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpxlib_corpus/error/20250523/프로젝트 계획서.hwpx"
+        );
+        let mut doc = Engine::open(&std::fs::read(path).unwrap()).expect("open corpus doc");
+        let before = text_runs(&doc, 75);
+        let (_, original_id, size) = before.first().cloned().expect("문단 75 에 글이 있다");
+        assert_eq!(size, 1200, "{before:?}");
+        set_text(&mut doc, 75, "나");
+        let reopened = Engine::open(&serialize_hwpx(&doc).expect("save")).expect("reopen");
+        assert_eq!(
+            text_runs(&reopened, 75),
+            vec![("나".to_string(), original_id, 1200)]
+        );
     }
 }

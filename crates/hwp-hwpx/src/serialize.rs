@@ -2428,14 +2428,19 @@ fn reemit_paragraph(orig_para: &str, p: &Paragraph, plan: &SynthPlan) -> String 
 const EMPTY_RUN_XML: &str = "<hp:run charPrIDRef=\"0\"><hp:t></hp:t></hp:run>";
 
 /// One AST run → `<hp:run charPrIDRef=…><hp:t>…</hp:t></hp:run>`. The ref is the synthesized charPr
-/// when the run was re-formatted, else its original `charPrIDRef`. Non-text inlines are FILTERED —
-/// callers must keep object-bearing runs off this path.
+/// when the run was re-formatted, else its original `charPrIDRef`, else (#547) the original header id
+/// of its pool shape — a run that never had an open tag (`SetParagraphText` builds a fresh run that
+/// keeps the shape INDEX but not the id) must not fall back to `"0"`. The run's own id stays ahead of
+/// the pool table so an untouched run keeps its exact bytes (the pool maps a value to ONE id; a header
+/// can hold equal-valued duplicates). Non-text inlines are FILTERED — callers must keep object-bearing
+/// runs off this path.
 fn emit_text_run(run: &Run, plan: &SynthPlan) -> String {
     let cref = plan
         .char_ref
         .get(&run.char_shape)
         .cloned()
         .or_else(|| run.char_ref.clone())
+        .or_else(|| plan.pool_char_ref.get(&run.char_shape).cloned())
         .unwrap_or_else(|| "0".to_string());
     let text: String = run
         .content
@@ -4286,6 +4291,35 @@ mod tests {
             content: vec![Inline::Text(text.into())],
             ..Default::default()
         }
+    }
+
+    /// #547 — 원래 id 가 없는 런(`SetParagraphText` 가 만든 새 런)은 원래 헤더 id 표로 찾는다. 원래 id 가 있는
+    /// 런은 그 id 를 그대로 쓴다(같은 값의 다른 id 로 바꾸면 손대지 않은 런의 바이트가 바뀐다). 새로 만든
+    /// 글자 모양 id 는 둘보다 앞선다.
+    #[test]
+    fn emit_text_run_finds_a_header_shape_for_a_run_without_its_own_id() {
+        let mut plan = SynthPlan::default();
+        plan.pool_char_ref.insert(3, "9".into());
+        let fresh = Run {
+            char_shape: 3,
+            content: vec![Inline::Text("가".into())],
+            ..Default::default()
+        };
+        assert_eq!(
+            emit_text_run(&fresh, &plan),
+            r#"<hp:run charPrIDRef="9"><hp:t>가</hp:t></hp:run>"#
+        );
+        let own = Run {
+            char_ref: Some("7".into()),
+            ..fresh.clone()
+        };
+        assert!(
+            emit_text_run(&own, &plan).starts_with(r#"<hp:run charPrIDRef="7">"#),
+            "원래 id 가 헤더 표보다 앞선다"
+        );
+        plan.char_ref.insert(3, "42".into());
+        assert!(emit_text_run(&own, &plan).starts_with(r#"<hp:run charPrIDRef="42">"#));
+        assert!(emit_text_run(&fresh, &plan).starts_with(r#"<hp:run charPrIDRef="42">"#));
     }
 
     /// secPr 호스트: 구조 런과 `<hp:linesegarray>` 를 뺀 **텍스트 런만** 새로 쓴다.
