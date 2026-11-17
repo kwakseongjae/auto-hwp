@@ -460,6 +460,209 @@ struct CellGeom {
     height: i32,
 }
 
+/// OWPML 도형 요소(#542). 그림(`pic`) · 표 · 수식은 따로 다룬다.
+const SHAPE_TAGS: &[&[u8]] = &[
+    b"rect",
+    b"ellipse",
+    b"arc",
+    b"polygon",
+    b"curve",
+    b"line",
+    b"connectLine",
+    b"textart",
+    b"container",
+];
+
+/// One in-progress 도형 (#542). The parser only OBSERVES the shape's elements ([`observe_shape`]) —
+/// every existing branch still runs for them (the host stays non-simple, its run structural, its
+/// `<hp:drawText>` paragraphs stay out of the body stream), so capturing a shape changes nothing else.
+struct ShapeAccum {
+    shape: ShapeRef,
+    /// `<hp:curSz>` — a group member's size (it carries no `<hp:sz>`).
+    cur_size: Option<(HwpUnit, HwpUnit)>,
+    /// Element depth below the shape element: the shape's own properties (`<hp:sz>`, `<hp:pos>`, …)
+    /// are depth 0; anything deeper (a caption's or the text box's content) is not the shape's.
+    depth: usize,
+    /// This shape's own `<hp:drawText>` is open (its `<hp:subList>` / `<hp:textMargin>` are depth 1).
+    in_text_box: bool,
+    /// Its own `<hc:fillBrush>` is open (the `<hc:winBrush>` inside is depth 1).
+    in_fill: bool,
+}
+
+impl ShapeAccum {
+    fn open(e: &BytesStart, kind: &[u8]) -> Self {
+        let kind = match kind {
+            b"rect" => ShapeKind::Rect,
+            b"container" => ShapeKind::Container,
+            other => ShapeKind::Other(String::from_utf8_lossy(other).into_owned()),
+        };
+        ShapeAccum {
+            shape: ShapeRef {
+                kind,
+                text_wrap: attr_str(e, b"textWrap").unwrap_or_default(),
+                ..Default::default()
+            },
+            cur_size: None,
+            depth: 0,
+            in_text_box: false,
+            in_fill: false,
+        }
+    }
+
+    fn finish(mut self) -> ShapeRef {
+        if self.shape.width == 0 && self.shape.height == 0 {
+            if let Some((w, h)) = self.cur_size {
+                self.shape.width = w;
+                self.shape.height = h;
+            }
+        }
+        self.shape
+    }
+
+    /// A self-closing element that is the shape's own property (depth 0).
+    fn own_property(&mut self, e: &BytesStart) {
+        let s = &mut self.shape;
+        match e.local_name().as_ref() {
+            b"sz" => {
+                s.width = attr_i32(e, b"width").unwrap_or(0);
+                s.height = attr_i32(e, b"height").unwrap_or(0);
+            }
+            b"curSz" => {
+                self.cur_size = Some((
+                    attr_i32(e, b"width").unwrap_or(0),
+                    attr_i32(e, b"height").unwrap_or(0),
+                ))
+            }
+            b"offset" => {
+                s.offset = (
+                    attr_i32(e, b"x").unwrap_or(0),
+                    attr_i32(e, b"y").unwrap_or(0),
+                )
+            }
+            b"pos" => {
+                s.treat_as_char = attr_usize(e, b"treatAsChar") == Some(1);
+                s.vert_rel_to = attr_str(e, b"vertRelTo").unwrap_or_default();
+                s.horz_rel_to = attr_str(e, b"horzRelTo").unwrap_or_default();
+                s.vert_align = attr_str(e, b"vertAlign").unwrap_or_default();
+                s.horz_align = attr_str(e, b"horzAlign").unwrap_or_default();
+                s.vert_offset = attr_i32(e, b"vertOffset").unwrap_or(0);
+                s.horz_offset = attr_i32(e, b"horzOffset").unwrap_or(0);
+            }
+            b"outMargin" => s.out_margin = edges(e),
+            b"lineShape" => {
+                s.line_color = attr_str(e, b"color").and_then(|c| Color::from_hex(&c));
+                s.line_width = attr_i32(e, b"width").unwrap_or(0);
+                s.line_style = crate::synth::line_style_from_token(
+                    attr_str(e, b"style").as_deref().unwrap_or("SOLID"),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Watch one event for 도형 capture (#542) — read-only toward the rest of the parse. `shapes` holds
+/// one entry per open shape element; `None` marks a shape that is not captured (inside a table cell,
+/// where the parser already keeps `<hp:drawText>` paragraphs as cell paragraphs — issue 80). A
+/// finished shape becomes an [`Inline::Shape`] of the paragraph it sits in (a top-level shape, or one
+/// inside another shape's text box); a group member joins its group's `children`.
+fn observe_shape(
+    ev: &quick_xml::Result<Event>,
+    shapes: &mut Vec<Option<ShapeAccum>>,
+    paras: &mut [ParaAccum],
+    in_cell: bool,
+) {
+    match ev {
+        Ok(Event::Start(e)) => {
+            let ln = e.local_name();
+            if SHAPE_TAGS.contains(&ln.as_ref()) {
+                let captured = !in_cell && shapes.last().is_none_or(|parent| parent.is_some());
+                shapes.push(captured.then(|| ShapeAccum::open(e, ln.as_ref())));
+                return;
+            }
+            let Some(Some(acc)) = shapes.last_mut() else {
+                return;
+            };
+            match (acc.depth, ln.as_ref()) {
+                (0, b"drawText") => {
+                    acc.in_text_box = true;
+                    acc.shape.text_box = Some(TextBox::default());
+                }
+                (0, b"fillBrush") => acc.in_fill = true,
+                (1, b"subList") if acc.in_text_box => {
+                    if let Some(tb) = acc.shape.text_box.as_mut() {
+                        tb.vert_align = attr_str(e, b"vertAlign").unwrap_or_default();
+                    }
+                }
+                _ => {}
+            }
+            acc.depth += 1;
+        }
+        Ok(Event::Empty(e)) => {
+            let Some(Some(acc)) = shapes.last_mut() else {
+                return;
+            };
+            match (acc.depth, e.local_name().as_ref()) {
+                (0, _) => acc.own_property(e),
+                (1, b"textMargin") if acc.in_text_box => {
+                    if let Some(tb) = acc.shape.text_box.as_mut() {
+                        tb.margin = edges(e);
+                    }
+                }
+                (1, b"winBrush") if acc.in_fill => {
+                    acc.shape.fill = attr_str(e, b"faceColor").and_then(|c| Color::from_hex(&c));
+                }
+                _ => {}
+            }
+        }
+        Ok(Event::End(e)) => {
+            let ln = e.local_name();
+            if SHAPE_TAGS.contains(&ln.as_ref()) {
+                let Some(Some(acc)) = shapes.pop() else {
+                    return;
+                };
+                let shape = acc.finish();
+                match shapes.last_mut() {
+                    Some(Some(parent)) if !parent.in_text_box => parent.shape.children.push(shape),
+                    _ => push_pending(paras, Inline::Shape(shape)),
+                }
+                return;
+            }
+            let Some(Some(acc)) = shapes.last_mut() else {
+                return;
+            };
+            acc.depth = acc.depth.saturating_sub(1);
+            if acc.depth == 0 && ln.as_ref() == b"fillBrush" {
+                acc.in_fill = false;
+            }
+            // `</hp:drawText>` (now depth 0): its body is handed over where the frame is popped.
+        }
+        _ => {}
+    }
+}
+
+/// `<hp:drawText>` closed with its body frame popped: hand the body to the shape that owns it.
+fn take_text_box_body(shapes: &mut [Option<ShapeAccum>], body: Vec<Block>) {
+    if let Some(Some(acc)) = shapes.last_mut() {
+        if acc.in_text_box && acc.depth == 0 {
+            acc.in_text_box = false;
+            if let Some(tb) = acc.shape.text_box.as_mut() {
+                tb.body = body;
+            }
+        }
+    }
+}
+
+/// `left` · `right` · `top` · `bottom` attributes as an array (HWPUNIT, 0 when absent).
+fn edges(e: &BytesStart) -> [HwpUnit; 4] {
+    [
+        attr_i32(e, b"left").unwrap_or(0),
+        attr_i32(e, b"right").unwrap_or(0),
+        attr_i32(e, b"top").unwrap_or(0),
+        attr_i32(e, b"bottom").unwrap_or(0),
+    ]
+}
+
 /// Accumulator for one in-progress `<hp:pic>` — its display size + the referenced binary (D1).
 #[derive(Default)]
 struct PicAccum {
@@ -817,10 +1020,19 @@ pub(crate) fn parse_section(
     // In-progress `<hp:fieldBegin>` + whether we're inside its `Command` `<hp:stringParam>`.
     let mut field: Option<FieldAccum> = None;
     let mut in_field_cmd = false;
+    // 열린 도형 요소 스택(#542) — `observe_shape` 가 본다. 나머지 파싱은 이 스택을 모른다.
+    let mut shapes: Vec<Option<ShapeAccum>> = Vec::new();
 
     loop {
         let pos_before = reader.buffer_position() as usize; // lands on '<' of the upcoming tag (qxml 0.37)
-        match reader.read_event() {
+        let ev = reader.read_event();
+        observe_shape(
+            &ev,
+            &mut shapes,
+            &mut paras,
+            tbls.last().is_some_and(|f| f.cell.is_some()),
+        );
+        match ev {
             Ok(Event::Start(e)) => {
                 let ln = e.local_name();
                 match ln.as_ref() {
@@ -1363,7 +1575,11 @@ pub(crate) fn parse_section(
                 b"drawText" | b"caption" => {
                     if matches!(subs.last(), Some(SubFrame::Overlay)) {
                         let _ = subs.pop();
-                        let _ = blocks.pop();
+                        let body = blocks.pop().unwrap_or_default();
+                        // #542: 글상자 본문은 버리지 않고 그 도형이 가진다 — 본문 흐름에는 여전히 넣지 않는다.
+                        if e.local_name().as_ref() == b"drawText" {
+                            take_text_box_body(&mut shapes, body);
+                        }
                     }
                 }
                 b"tc" => {
@@ -3458,5 +3674,173 @@ pub(crate) mod tests {
             std::io::Write::write_all(&mut zw, data).unwrap();
         }
         zw.finish().unwrap().into_inner()
+    }
+
+    /// #542 — 본문 문단의 첫 `Inline::Shape` 를 꺼낸다(런 순서대로).
+    fn shapes_of(p: &Paragraph) -> Vec<&ShapeRef> {
+        p.runs
+            .iter()
+            .flat_map(|r| &r.content)
+            .filter_map(|i| match i {
+                Inline::Shape(s) => Some(s),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn para_text(blocks: &[Block]) -> String {
+        body_text(blocks)
+    }
+
+    /// #542: 글자처럼 취급 글상자 — 상자 · 자리 · 테두리 · 채우기 · 안쪽 여백과 글상자 문단을 도형이 가진다.
+    /// 글상자 문단은 여전히 본문 흐름에 없고(이슈 80), 호스트는 non-simple · 그 런은 구조 런 그대로다.
+    #[test]
+    fn a_text_box_rect_is_carried_with_its_box_and_body() {
+        let xml = sec(concat!(
+            r#"<hp:p id="1"><hp:run charPrIDRef="3"><hp:rect id="9" textWrap="TOP_AND_BOTTOM">"#,
+            r#"<hp:offset x="0" y="0"/><hp:orgSz width="9000" height="3000"/><hp:curSz width="9000" height="3000"/>"#,
+            r##"<hp:lineShape color="#FF0000" width="33" style="SOLID"/>"##,
+            r##"<hc:fillBrush><hc:winBrush faceColor="#00FF00" hatchColor="#000000" alpha="0"/></hc:fillBrush>"##,
+            r#"<hp:drawText lastWidth="8000"><hp:textMargin left="283" right="284" top="141" bottom="142"/>"#,
+            r#"<hp:subList vertAlign="CENTER"><hp:p><hp:run><hp:t>상자 글</hp:t></hp:run></hp:p></hp:subList></hp:drawText>"#,
+            r#"<hp:sz width="9000" widthRelTo="ABSOLUTE" height="3000" heightRelTo="ABSOLUTE"/>"#,
+            r#"<hp:pos treatAsChar="1" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="10" horzOffset="20"/>"#,
+            r#"<hp:outMargin left="1" right="2" top="3" bottom="4"/>"#,
+            r#"</hp:rect><hp:t/></hp:run></hp:p>"#,
+        ));
+        let blocks = parse_sec(&xml);
+        assert_eq!(blocks.len(), 1, "글상자 문단은 본문 블록이 아니다");
+        assert!(
+            !para_text(&blocks).contains("상자 글"),
+            "본문 글로 새지 않는다"
+        );
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!("paragraph")
+        };
+        assert!(
+            !p.source.as_ref().unwrap().simple,
+            "호스트는 non-simple 그대로"
+        );
+        let shapes = shapes_of(p);
+        assert_eq!(shapes.len(), 1);
+        let s = shapes[0];
+        assert_eq!(s.kind, ShapeKind::Rect);
+        assert_eq!((s.width, s.height), (9000, 3000));
+        assert!(s.treat_as_char);
+        assert_eq!(
+            (s.vert_rel_to.as_str(), s.horz_rel_to.as_str()),
+            ("PARA", "PARA")
+        );
+        assert_eq!((s.vert_offset, s.horz_offset), (10, 20));
+        assert_eq!(s.text_wrap, "TOP_AND_BOTTOM");
+        assert_eq!(s.out_margin, [1, 2, 3, 4]);
+        assert_eq!(s.line_color, Color::from_hex("#FF0000"));
+        assert_eq!((s.line_width, s.line_style), (33, LineStyle::Solid));
+        assert_eq!(s.fill, Color::from_hex("#00FF00"));
+        let tb = s.text_box.as_ref().expect("글상자");
+        assert_eq!(tb.margin, [283, 284, 141, 142]);
+        assert_eq!(tb.vert_align, "CENTER");
+        assert!(
+            para_text(&tb.body).contains("상자 글"),
+            "글상자 문단은 도형이 가진다"
+        );
+    }
+
+    /// #542: 묶음 개체 — 멤버 도형은 묶음의 `children` 이고, 멤버의 글상자 문단은 그 멤버가 가진다.
+    /// 묶음 자신의 크기 · 자리는 멤버 뒤에 오는 자기 `<hp:sz>` · `<hp:pos>` 에서 읽는다.
+    #[test]
+    fn a_group_keeps_its_members_and_their_text_boxes() {
+        let xml = sec(concat!(
+            r#"<hp:p id="1"><hp:run><hp:container textWrap="TOP_AND_BOTTOM">"#,
+            r#"<hp:rect><hp:offset x="100" y="200"/><hp:curSz width="4000" height="1000"/>"#,
+            r#"<hp:drawText><hp:subList><hp:p><hp:run><hp:t>멤버 글</hp:t></hp:run></hp:p></hp:subList></hp:drawText></hp:rect>"#,
+            r#"<hp:ellipse><hp:curSz width="500" height="500"/></hp:ellipse>"#,
+            r#"<hp:sz width="4218" height="4218"/><hp:pos treatAsChar="1" vertRelTo="PARA" horzRelTo="PARA"/>"#,
+            r#"</hp:container><hp:t/></hp:run></hp:p>"#,
+        ));
+        let blocks = parse_sec(&xml);
+        assert_eq!(blocks.len(), 1);
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!("paragraph")
+        };
+        let shapes = shapes_of(p);
+        assert_eq!(shapes.len(), 1, "멤버는 따로 인라인이 되지 않는다");
+        let g = shapes[0];
+        assert_eq!(g.kind, ShapeKind::Container);
+        assert_eq!((g.width, g.height, g.treat_as_char), (4218, 4218, true));
+        assert_eq!(g.children.len(), 2);
+        let m = &g.children[0];
+        assert_eq!((m.offset, m.width, m.height), ((100, 200), 4000, 1000));
+        let body = &m.text_box.as_ref().expect("멤버 글상자").body;
+        assert!(para_text(body).contains("멤버 글"));
+        assert_eq!(g.children[1].kind, ShapeKind::Other("ellipse".into()));
+    }
+
+    /// #542: 글상자 안 그림 · 표의 `<hp:sz>` · `<hp:pos>` 는 도형의 것이 아니다(깊이로 가른다).
+    #[test]
+    fn objects_inside_a_text_box_do_not_overwrite_the_shape_box() {
+        let xml = sec(concat!(
+            r#"<hp:p id="1"><hp:run><hp:rect><hp:drawText><hp:subList><hp:p><hp:run>"#,
+            r#"<hp:pic><hp:sz width="111" height="222"/><hp:pos treatAsChar="0" vertRelTo="PAPER"/><hc:img binaryItemIDRef="image1"/></hp:pic>"#,
+            r#"</hp:run></hp:p></hp:subList></hp:drawText>"#,
+            r#"<hp:sz width="7000" height="2000"/><hp:pos treatAsChar="1" vertRelTo="PARA" horzRelTo="PARA"/>"#,
+            r#"</hp:rect><hp:t/></hp:run></hp:p>"#,
+        ));
+        let blocks = parse_sec(&xml);
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!("paragraph")
+        };
+        let s = shapes_of(p)[0];
+        assert_eq!((s.width, s.height, s.treat_as_char), (7000, 2000, true));
+        assert_eq!(s.vert_rel_to, "PARA");
+        let body = &s.text_box.as_ref().unwrap().body;
+        let Block::Paragraph(inner) = &body[0] else {
+            panic!("body paragraph")
+        };
+        assert!(
+            inner
+                .runs
+                .iter()
+                .flat_map(|r| &r.content)
+                .any(|i| matches!(i, Inline::Image(im) if im.width == 111)),
+            "글상자 안 그림은 글상자 문단에 남는다"
+        );
+    }
+
+    /// #542: 표 칸 안의 도형은 싣지 않는다 — 그 글상자 문단은 지금처럼 칸 문단이다(이슈 80).
+    #[test]
+    fn a_shape_inside_a_table_cell_is_not_carried() {
+        let xml = sec(concat!(
+            r#"<hp:p id="1"><hp:run><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc>"#,
+            r#"<hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/>"#,
+            r#"<hp:subList><hp:p><hp:run><hp:rect><hp:drawText><hp:subList>"#,
+            r#"<hp:p><hp:run><hp:t>칸 상자 글</hp:t></hp:run></hp:p></hp:subList></hp:drawText>"#,
+            r#"<hp:sz width="5000" height="1000"/></hp:rect></hp:run></hp:p></hp:subList>"#,
+            r#"</hp:tc></hp:tr></hp:tbl></hp:run></hp:p>"#,
+        ));
+        let blocks = parse_sec(&xml);
+        let table = blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("table");
+        let cell_paras: Vec<&Paragraph> = table.cells[0]
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            cell_paras.iter().all(|p| shapes_of(p).is_empty()),
+            "칸 안 도형은 싣지 않는다"
+        );
+        assert!(
+            para_text(&table.cells[0].blocks).contains("칸 상자 글"),
+            "칸 문단은 지금 그대로"
+        );
     }
 }

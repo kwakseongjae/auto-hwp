@@ -566,6 +566,67 @@ pub enum Inline {
     /// Verbatim un-modeled inline content (shape, chart, …) — the raw `<hp:…>` XML, preserved on
     /// export, even before an edit op exists.
     Raw(crate::types::RawPart),
+    /// A 도형 (rectangle, group, …) with its optional 글상자 (text box) body — see [`ShapeRef`].
+    Shape(ShapeRef),
+}
+
+/// A 도형 anchored in a paragraph (#542): its box, placement, outline / fill and — for a 글상자 — the
+/// text-box paragraphs (`<hp:drawText><hp:subList>`), which are NOT body paragraphs (issue 80: they
+/// stay out of the section's paragraph stream and the stored-layout pairing).
+///
+/// Carried, not yet consumed: typesetting, painting, caret offsets, text extraction and editing all
+/// ignore it, so adding it changed no output. The host paragraph is never `simple`, so a save re-emits
+/// the shape's original XML verbatim — this struct is never serialized.
+#[derive(Clone, Debug, Default)]
+pub struct ShapeRef {
+    pub kind: ShapeKind,
+    /// Box size (`<hp:sz>`, HWPUNIT). For a member of a group, the current size (`<hp:curSz>`).
+    pub width: HwpUnit,
+    pub height: HwpUnit,
+    /// Placement (`<hp:pos>`): a 글자처럼 취급 shape is one inline atom of the host line; otherwise it
+    /// floats relative to `vert_rel_to` / `horz_rel_to` (OWPML tokens: `PARA`, `PAPER`, `COLUMN`, …).
+    pub treat_as_char: bool,
+    pub vert_rel_to: String,
+    pub horz_rel_to: String,
+    pub vert_align: String,
+    pub horz_align: String,
+    pub vert_offset: HwpUnit,
+    pub horz_offset: HwpUnit,
+    /// `textWrap` of the shape element (`TOP_AND_BOTTOM`, `IN_FRONT_OF_TEXT`, …).
+    pub text_wrap: String,
+    /// `<hp:outMargin>` — left, right, top, bottom.
+    pub out_margin: [HwpUnit; 4],
+    /// A group member's position inside its group (`<hp:offset>`).
+    pub offset: (HwpUnit, HwpUnit),
+    /// Outline (`<hp:lineShape>`): `None` style means no stroke. Width in HWPUNIT.
+    pub line_color: Option<crate::types::Color>,
+    pub line_width: HwpUnit,
+    pub line_style: LineStyle,
+    /// Solid fill (`<hc:winBrush faceColor>`); `None` = no fill.
+    pub fill: Option<crate::types::Color>,
+    /// The text box (`<hp:drawText>`), when the shape has one.
+    pub text_box: Option<TextBox>,
+    /// The members of a group (`ShapeKind::Container`).
+    pub children: Vec<ShapeRef>,
+}
+
+/// What kind of 도형. Kinds without their own variant keep the OWPML element name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ShapeKind {
+    #[default]
+    Rect,
+    /// 묶음 개체 (`<hp:container>`) — its members are [`ShapeRef::children`].
+    Container,
+    Other(String),
+}
+
+/// A shape's text box: inner margins (`<hp:textMargin>` — left, right, top, bottom), the vertical
+/// alignment of its body (`<hp:subList vertAlign>`), and the body itself.
+#[derive(Clone, Debug, Default)]
+pub struct TextBox {
+    pub margin: [HwpUnit; 4],
+    pub vert_align: String,
+    pub body: Vec<Block>,
 }
 
 /// 각주 vs 미주.
@@ -1260,7 +1321,25 @@ impl SemanticDoc {
                 Inline::Bookmark(b) => b.len(),
                 Inline::Note(n) => blocks(&n.body),
                 Inline::Raw(r) => r.tag.len() + r.bytes.len(),
+                Inline::Shape(s) => shape(s),
             }
+        }
+        fn shape(s: &ShapeRef) -> usize {
+            os_str(&s.vert_rel_to)
+                + os_str(&s.horz_rel_to)
+                + os_str(&s.vert_align)
+                + os_str(&s.horz_align)
+                + os_str(&s.text_wrap)
+                + s.text_box
+                    .as_ref()
+                    .map_or(0, |t| os_str(&t.vert_align) + blocks(&t.body))
+                + s.children
+                    .iter()
+                    .map(|c| size_of::<ShapeRef>() + shape(c))
+                    .sum::<usize>()
+        }
+        fn os_str(s: &str) -> usize {
+            s.len()
         }
         fn para(p: &Paragraph) -> usize {
             os(&p.style_name)

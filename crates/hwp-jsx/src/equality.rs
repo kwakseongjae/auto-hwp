@@ -109,13 +109,20 @@ fn para_eq(a: &Paragraph, b: &Paragraph) -> bool {
 }
 
 fn run_eq(a: &Run, b: &Run) -> bool {
+    let (x, y) = (projected(a), projected(b));
     a.char_shape == b.char_shape
         && a.char_ref == b.char_ref
-        && a.content.len() == b.content.len()
-        && a.content
-            .iter()
-            .zip(&b.content)
-            .all(|(x, y)| inline_eq(x, y))
+        && x.len() == y.len()
+        && x.iter().zip(&y).all(|(x, y)| inline_eq(x, y))
+}
+
+/// A run's inlines the project carries. #542: a 도형 is in the model but not projected yet (the
+/// projection skips it), so it is outside the codec's round-trip contract for now.
+fn projected(r: &Run) -> Vec<&Inline> {
+    r.content
+        .iter()
+        .filter(|i| !matches!(i, Inline::Shape(_)))
+        .collect()
 }
 
 fn inline_eq(a: &Inline, b: &Inline) -> bool {

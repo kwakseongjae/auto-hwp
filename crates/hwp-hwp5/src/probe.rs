@@ -660,6 +660,7 @@ fn hash_v2_blocks_without_empty_runs(blocks: &[Block], hash: &mut Fnv1a) {
                             Inline::FieldEnd(_) => hash.marker(33, 0),
                             Inline::Bookmark(_) => hash.marker(34, 0),
                             Inline::Raw(_) => hash.marker(35, 0),
+                            Inline::Shape(_) => hash.marker(36, 0),
                         }
                     }
                 }
@@ -707,6 +708,7 @@ fn hash_v2_blocks(blocks: &[Block], hash: &mut Fnv1a) {
                             Inline::FieldEnd(_) => hash.marker(33, 0),
                             Inline::Bookmark(_) => hash.marker(34, 0),
                             Inline::Raw(_) => hash.marker(35, 0),
+                            Inline::Shape(_) => hash.marker(36, 0),
                         }
                     }
                 }
@@ -936,6 +938,8 @@ fn visit_typed_blocks(blocks: &[Block], scope: SemanticScope, projection: &mut S
                             }
                             Inline::Bookmark(_) => projection.controls.bookmarks += 1,
                             Inline::Raw(_) => projection.controls.raw += 1,
+                            // #542: HWP5 lift 는 도형을 싣지 않는다 — HWPX 전용.
+                            Inline::Shape(_) => {}
                         }
                     }
                 }
@@ -1172,6 +1176,8 @@ fn visit_blocks(blocks: &[Block], inventory: &mut StructuralInventory, hash: &mu
                                 inventory.controls += 1;
                                 hash.marker(11, 0);
                             }
+                            // #542: HWP5 lift 는 도형을 싣지 않는다 — HWPX 전용.
+                            Inline::Shape(_) => hash.marker(12, 0),
                         }
                     }
                 }
