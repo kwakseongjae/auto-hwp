@@ -5,19 +5,30 @@
 /// 이걸 문서로만 적어 두면 다음 사람이(또는 다음 나가) 급할 때 한 줄 import 하고 지나간다. 그러면
 /// 패키지는 남지만 규율은 사라지고, #260 같은 일이 다시 생긴다 — 호스트 능력이 한쪽 셸에만 붙는 일.
 /// **테스트가 실패해야 규칙이다.**
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** `.git` 을 만날 때까지 올라가 저장소 뿌리를 찾는다. */
-function repoRoot(): string {
-  let dir = dirname(fileURLToPath(import.meta.url));
+/// `dir/.git` 이 저장소 표지인가. 일반 클론은 디렉터리이고, `git worktree add` 로 만든 작업 폴더는
+/// `gitdir: <본 저장소>/.git/worktrees/<이름>` 한 줄이 든 **파일**이다(#548 — 디렉터리만 받던 탓에 워크트리에서
+/// 이 시험이 불러오기부터 죽었다). 그 밖의 `.git` 이름 파일은 표지로 받지 않는다 — 상위 폴더의 엉뚱한 파일에서
+/// 멈추면 검사 범위가 조용히 바뀐다.
+function isRepoMarker(gitPath: string): boolean {
+  try {
+    const st = statSync(gitPath);
+    if (st.isDirectory()) return true;
+    return st.isFile() && readFileSync(gitPath, "utf8").startsWith("gitdir:");
+  } catch {
+    return false; // 없거나 읽을 수 없으면 표지가 아니다 — 계속 올라간다
+  }
+}
+
+/** `start` 에서 위로 올라가며 저장소 뿌리(`.git` 표지가 있는 폴더)를 찾는다. */
+function findRepoRoot(start: string): string {
+  let dir = start;
   for (let i = 0; i < 10; i++) {
-    try {
-      if (statSync(join(dir, ".git")).isDirectory()) return dir;
-    } catch {
-      /* 계속 올라간다 */
-    }
+    if (isRepoMarker(join(dir, ".git"))) return dir;
     const up = resolve(dir, "..");
     if (up === dir) break;
     dir = up;
@@ -25,7 +36,7 @@ function repoRoot(): string {
   throw new Error("저장소 뿌리를 찾지 못했다 (.git)");
 }
 
-const ROOT = repoRoot();
+const ROOT = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 
 /// 검사 대상 — 우리가 쓰는 TS/TSX 소스 전부.
 const SCAN = [
@@ -78,5 +89,40 @@ describe("호스트 경계", () => {
 
   it("허용 파일은 실제로 존재한다 — 예외가 유령이 되지 않게", () => {
     for (const rel of ALLOWED) expect(statSync(join(ROOT, rel)).isFile()).toBe(true);
+  });
+});
+
+describe("저장소 뿌리 찾기 (#548)", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "auto-hwp-repo-root-"));
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  /** `root/.git` 표지와 그 아래 `packages/platform/src` 를 만들고, 그 시작 폴더를 돌려준다. */
+  function tree(root: string, marker: "dir" | { file: string }): string {
+    const start = join(root, "packages", "platform", "src");
+    mkdirSync(start, { recursive: true });
+    if (marker === "dir") mkdirSync(join(root, ".git"));
+    else writeFileSync(join(root, ".git"), marker.file);
+    return start;
+  }
+
+  it("일반 클론 — `.git` 디렉터리", () => {
+    const root = join(tmp, "clone");
+    expect(findRepoRoot(tree(root, "dir"))).toBe(root);
+  });
+
+  it("git 워크트리 — `gitdir:` 로 시작하는 `.git` 파일", () => {
+    const root = join(tmp, "wt");
+    expect(findRepoRoot(tree(root, { file: "gitdir: /somewhere/repo/.git/worktrees/wt\n" }))).toBe(root);
+  });
+
+  it("`gitdir:` 가 아닌 `.git` 파일은 건너뛰고 위의 진짜 뿌리를 찾는다", () => {
+    const outer = join(tmp, "outer");
+    mkdirSync(join(outer, ".git"), { recursive: true });
+    expect(findRepoRoot(tree(join(outer, "inner"), { file: "not a git pointer\n" }))).toBe(outer);
   });
 });
