@@ -1083,7 +1083,7 @@ fn walk_block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<V
                             last_drawn = page_idx; // 이슈 307
                         }
                         line_pages.push(page_idx); // the block starts where its first line lands
-                        vert += ls.vert_size * ratio;
+                        vert += crate::line_advance(ls, ratio);
                     }
                     if line_pages.is_empty() {
                         line_pages.push(page_idx);
@@ -1243,7 +1243,7 @@ fn advance_caption_block_pages(
                         *page_index += 1;
                         *vert = 0.0;
                     }
-                    *vert += line.vert_size * ratio;
+                    *vert += crate::line_advance(&line, ratio);
                 }
                 *vert += shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64;
             }
@@ -1289,7 +1289,7 @@ fn advance_caption_columns_pages(
                     {
                         *page_index += 1;
                     }
-                    flow.add(line.vert_size * ratio);
+                    flow.add(crate::line_advance(&line, ratio));
                 }
                 flow.add(shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64);
             }
@@ -1359,7 +1359,7 @@ fn block_pages_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Ve
                             section_pages.push(page_index);
                             recorded = true;
                         }
-                        flow.add(line.vert_size * ratio);
+                        flow.add(crate::line_advance(line, ratio));
                     }
                     if !recorded {
                         section_pages.push(page_index);
@@ -1588,7 +1588,7 @@ fn place_paragraph(
         // table/cell borders are drawn. Line-level hit geometry can come back behind a flag if the
         // own surface ever becomes editable.)
 
-        *vert += ls.vert_size * ratio;
+        *vert += crate::line_advance(ls, ratio);
     }
     first_line_page.unwrap_or(pages.len() - 1)
 }
@@ -1674,7 +1674,7 @@ fn place_paragraph_columns(
         for atom in atoms.get(start..end.min(atoms.len())).unwrap_or(&[]) {
             x += place_atom(page_out, atom, x, line_top, baseline, fonts, section, block);
         }
-        flow.add(line.vert_size * ratio);
+        flow.add(crate::line_advance(line, ratio));
     }
     first_line_page.unwrap_or(pages.len() - 1)
 }
@@ -2627,7 +2627,7 @@ fn place_cell_content(
                 if line_atoms.iter().any(ParagraphAtom::paints) {
                     hidden_lines += 1;
                 }
-                vy += ls.vert_size * ratio;
+                vy += crate::line_advance(ls, ratio);
                 continue;
             }
             let mut x = x0;
@@ -2643,7 +2643,7 @@ fn place_cell_content(
                     ctx.outer_block,
                 );
             }
-            vy += ls.vert_size * ratio;
+            vy += crate::line_advance(ls, ratio);
         }
         // Trailing-leading trim — LOCKSTEP with `crate::cell_paragraph_height` (the reserve helper this
         // cell's box height was sized by). Line-spacing leading sits BETWEEN lines, not below a
@@ -2857,7 +2857,7 @@ fn walk_cell_lines(
             if stop {
                 return;
             }
-            vy += ls.vert_size * ratio;
+            vy += crate::line_advance(ls, ratio);
         }
         // Trailing-leading trim — LOCKSTEP with place_cell_content (see its comment).
         if let Some(last) = lines.last() {
@@ -3231,7 +3231,7 @@ fn style_probe(
         return (0.0, 0, 0);
     };
     let ratio = crate::line_spacing_ratio(&probe, doc);
-    let advance = l0.vert_size * ratio;
+    let advance = crate::line_advance(l0, ratio);
     let ps = doc.para_shapes.get(probe.para_shape);
     let space = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64
         + ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;

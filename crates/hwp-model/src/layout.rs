@@ -75,6 +75,11 @@ pub struct LineSeg {
     pub baseline: f64,
     pub horz_pos: f64,
     pub horz_size: f64,
+    /// Set only when an inline object (a 글자처럼 취급 picture, equation, …), not text, sets the line
+    /// height in a percent-spaced paragraph: the line's font size (HWPUNIT). Percent spacing then adds
+    /// (ratio − 1) × this to the height instead of scaling the whole height — what Hangul stores
+    /// (#556). 0 = the height is the font's own, and percent spacing scales it.
+    pub font_size: f64,
 }
 
 /// We pin the paint IR to this schema version and assert on it (additive-only).
