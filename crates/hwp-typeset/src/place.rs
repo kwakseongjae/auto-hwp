@@ -1636,8 +1636,10 @@ fn place_paragraph(
     // #542 — 떠 있는 「자리 차지」 도형의 띠. NaiveLayout · block_pages · 캐럿과 같은 계획.
     let band = crate::float_band_plan(p, &lines, ratio, *vert, body_h).filter(|_| float_band);
     let (band_page, band_top) = (pages.len() - 1, *vert);
-    // 문단 위 — 떠 있는 도형의 문단 기준 자리. 첫 줄이 다음 쪽으로 넘어가면 그 쪽 맨 위다.
+    // 문단 위 — 떠 있는 도형의 문단 기준 자리. 첫 줄이 다음 쪽으로 넘어가면 그 쪽 맨 위다 — 단, 첫 줄이
+    // 띠에 밀려 넘어간 것이면 문단(과 띠)은 이 쪽에 남는다(띠는 이 쪽에 들어간다고 정해진 `Here` 다).
     let mut para_anchor = (band_page, band_top);
+    let first_line_pushed = band.is_some_and(|plan| plan.pushes_line(0));
 
     for (li, ls) in lines.iter().enumerate() {
         if let Some(crate::FloatBandPlan::Here {
@@ -1657,7 +1659,7 @@ fn place_paragraph(
         {
             new_page(pages, page);
             *vert = 0.0;
-            if li == 0 {
+            if li == 0 && !first_line_pushed {
                 para_anchor = (pages.len() - 1, 0.0);
             }
         }
@@ -1782,6 +1784,7 @@ fn place_paragraph_columns(
     let band_lane = (pages.len(), flow.column_index(), flow.vert());
     // 문단 위(쪽 번호 · 쪽 위 y · 단 상자) — 떠 있는 도형의 문단 · 단 기준 자리.
     let mut para_anchor = (pages.len() - 1, mt + flow.y(), flow.box_now());
+    let first_line_pushed = band.is_some_and(|plan| plan.pushes_line(0));
 
     for (line_index, line) in lines.iter().enumerate() {
         if let Some(crate::FloatBandPlan::Here {
@@ -1801,8 +1804,12 @@ fn place_paragraph_columns(
         {
             new_page(pages, page);
         }
-        // 첫 줄이 다음 단 · 쪽으로 넘어가면 문단 위도 거기다(띠로 내린 양은 문단 위가 아니다).
-        if line_index == 0 && (pages.len(), flow.column_index()) != lane_before {
+        // 첫 줄이 다음 단 · 쪽으로 넘어가면 문단 위도 거기다(띠로 내린 양은 문단 위가 아니다). 첫 줄이 띠에
+        // 밀려 넘어간 것이면 문단(과 띠)은 이 단에 남는다.
+        if line_index == 0
+            && !first_line_pushed
+            && (pages.len(), flow.column_index()) != lane_before
+        {
             para_anchor = (pages.len() - 1, mt + flow.y(), flow.box_now());
         }
         first_line_page.get_or_insert(pages.len() - 1);
@@ -4051,7 +4058,8 @@ fn place_text_box(
 }
 
 /// The boxes a floating 도형's `<hp:pos>` can be relative to (HWPUNIT, page-top-left origin):
-/// `PAGE` = the body box, `COLUMN` = the anchor's column, `PARA` = the paragraph's indented width with
+/// `PAGE` = the body box (⚠️ an assumption — no public floating 도형 is `PAGE`-relative; and in a 머리말 /
+/// 꼬리말 paragraph `place_deco_blocks` passes the header band here, so `PAGE` there means that band), `COLUMN` = the anchor's column, `PARA` = the paragraph's indented width with
 /// its top at `para_top`. `PAPER` is the whole page.
 #[derive(Clone, Copy, Debug)]
 struct FloatFrame {
@@ -8783,7 +8791,7 @@ mod tests {
     /// #542 PR-3 — 문단 기준 「자리 차지」(위아래) 떠 있는 도형은 흐름을 민다. ⚠️ 기대값은 **도형의 한글 저장
     /// 값이 아니라, 같은 배치의 떠 있는 표에서 온 값을 도형에 옮긴 가정**이다 — 공개 코퍼스의 그런 도형 표본은
     /// 마지막 문단 하나(mot.hwpx)뿐이라 규칙을 가를 수 없다. 표는 서로 다른 31개 중 18개를 줄 단위로 맞춰 모두
-    /// 일치(설명 못 한 1개 · 대조 안 한 12개). 쓴 표 값: SimpleTable(0 + 283 + 8,657 + 283 = 9,223) · test.hwpx
+    /// 일치(쪽을 넘는 표 1개 — 도형과 무관 · 대조 안 한 12개). 쓴 표 값: SimpleTable(0 + 283 + 8,657 + 283 = 9,223) · test.hwpx
     /// (20251107) 구역 1 문단 74(오프셋 45) · 75(오프셋 1,130 — 1,000 높이 빈 줄이 띠 위에 든다) · 82(글 한
     /// 칸 줄은 띠 아래로 내려간다: 38,339 뒤 + 1,600). 글 앞 · 글 뒤 · 어울림 · 종이 기준은 밀지 않는다.
     #[test]
@@ -9089,5 +9097,200 @@ mod tests {
                 g.baseline
             );
         }
+    }
+
+    /// #542 리뷰 1 — 띠에 밀린 첫 글 줄이 남은 자리에 안 들어가 다음 쪽(단)으로 넘어가도, 띠는 이 쪽에 들어간다고
+    /// 정해졌으므로(`Here`) 도형은 **이 쪽**의 문단 위에 그리고, 넘어간 글은 덮지 않는다. 세 걸음의 줄 쪽도 같다
+    /// (리뷰 M1 — `block_line_pages` 가 글 줄을 안 내리면 이 시험이 빨개진다). 한 단 · 다단 두 길.
+    #[test]
+    fn a_pushed_first_line_that_moves_on_leaves_the_shape_on_the_band_page() {
+        use crate::LayoutEngine;
+        let tb = "TOP_AND_BOTTOM";
+        for columns in [false, true] {
+            let mut lead = floating_para(floating_shape(tb, "PARA", 0, 9_000, 0), "");
+            if columns {
+                lead.column_layout_before = Some(ColumnLayout::default());
+            }
+            let mut shape = floating_shape(tb, "PARA", 0, 16_500, 0);
+            shape.fill = Color::from_hex("#FFFFFF");
+            let mut doc = shape_doc(vec![
+                Block::Paragraph(lead),
+                Block::Paragraph(floating_para(shape, "가가가")),
+                Block::Paragraph(para("끝")),
+            ]);
+            doc.sections[0].page.height = 26_000;
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+            assert_eq!(
+                placed.pages.len(),
+                naive.pages.len(),
+                "columns={columns}: LOCKSTEP"
+            );
+            assert_eq!(placed.pages.len(), 2, "columns={columns}: 쪽 수");
+            // 도형: 첫 쪽, 문단 위 9,000.
+            let fills: Vec<_> = placed
+                .pages
+                .iter()
+                .enumerate()
+                .flat_map(|(i, pg)| {
+                    pg.rects
+                        .iter()
+                        .filter(|r| r.fill.is_some())
+                        .map(move |r| (i, r.y))
+                })
+                .collect();
+            assert_eq!(
+                fills,
+                vec![(0, 9_000.0)],
+                "columns={columns}: 도형은 띠를 잡은 쪽에"
+            );
+            // 글: 둘째 쪽 맨 위.
+            let g = placed.pages[1]
+                .glyphs
+                .iter()
+                .find(|g| g.ch == '가')
+                .expect("넘어간 글");
+            assert!(
+                (g.baseline - 1_000.0 * BASELINE_RATIO).abs() < 1e-6,
+                "columns={columns}: 글 기준선 {}",
+                g.baseline
+            );
+            if !columns {
+                let walked = block_line_pages(&doc, &ApproxFontMetrics).expect("한 단");
+                assert_eq!(
+                    walked[0][1],
+                    vec![1],
+                    "block_line_pages: 밀린 글 줄은 둘째 쪽"
+                );
+                assert_eq!(walked[0][2], vec![1], "block_line_pages: 「끝」");
+            } else {
+                assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0], vec![0, 1, 1]);
+            }
+        }
+    }
+
+    /// #542 리뷰 M5 · M6 — 다음 쪽으로 넘기지 않는 두 갈래: 쪽 맨 위의 띠(오프셋 때문에 쪽 끝을 넘어도)와 한 쪽보다
+    /// 큰 띠. 둘 다 `Here` 로 이 쪽에 두고, `FloatingObject` 쪽 넘김은 없다.
+    #[test]
+    fn a_band_at_the_page_top_or_taller_than_a_page_never_moves_to_the_next_page() {
+        use crate::LayoutEngine;
+        let tb = "TOP_AND_BOTTOM";
+        // 쪽 맨 위: 띠 [70,000, 85,000] 이 80,000 쪽을 넘지만 넘기지 않는다 → 「끝」은 줄이 넘겨 둘째 쪽 맨 위.
+        let top = shape_doc(vec![
+            Block::Paragraph(floating_para(
+                floating_shape(tb, "PARA", 70_000, 15_000, 0),
+                "",
+            )),
+            Block::Paragraph(para("끝")),
+        ]);
+        // 한 쪽보다 큰 띠(90,000): 앞 문단 뒤라도 넘기지 않는다.
+        let tall = shape_doc(vec![
+            Block::Paragraph(para("앞")),
+            Block::Paragraph(floating_para(floating_shape(tb, "PARA", 0, 90_000, 0), "")),
+            Block::Paragraph(para("끝")),
+        ]);
+        for (name, doc) in [("쪽 맨 위", &top), ("쪽보다 큰 띠", &tall)] {
+            let naive = crate::NaiveLayout.layout(doc, &ApproxFontMetrics).unwrap();
+            assert!(
+                !naive
+                    .breaks
+                    .iter()
+                    .any(|b| b.reason == BreakReason::FloatingObject),
+                "{name}: FloatingObject 넘김 없음"
+            );
+            let placed = place_doc(doc, &ApproxFontMetrics);
+            assert_eq!(placed.pages.len(), naive.pages.len(), "{name}: LOCKSTEP");
+            let end = placed.pages[1]
+                .glyphs
+                .iter()
+                .find(|g| g.ch == '끝')
+                .expect("둘째 쪽 「끝」");
+            assert!(
+                (end.baseline - 1_000.0 * BASELINE_RATIO).abs() < 1e-6,
+                "{name}: 「끝」은 둘째 쪽 맨 위 — 기준선 {}",
+                end.baseline
+            );
+        }
+    }
+
+    /// #542 리뷰 M8 — 도형이 여럿이면 띠는 가장 이른 위 · 가장 늦은 끝, 넘어갈 때의 높이는 가장 큰 것.
+    #[test]
+    fn a_band_of_several_shapes_spans_them_all() {
+        let tb = "TOP_AND_BOTTOM";
+        let mut p = floating_para(floating_shape(tb, "PARA", 0, 5_000, 0), "");
+        p.runs[0]
+            .content
+            .push(Inline::Shape(floating_shape(tb, "PARA", 4_000, 3_000, 0)));
+        p.runs[0].content.push(Inline::Shape(floating_shape(
+            "IN_FRONT_OF_TEXT",
+            "PARA",
+            0,
+            50_000,
+            0,
+        )));
+        let band = crate::floating_flow_band(&p).expect("띠");
+        assert_eq!(
+            (band.top, band.bottom, band.height),
+            (0.0, 7_000.0, 5_000.0)
+        );
+    }
+
+    /// #542 리뷰 M14 — 띠만 있는 쪽도 「그린 쪽」이다(이슈 307): 다음 문단의 쪽 나누기가 실행된다. 저장 표본(표):
+    /// test.hwpx(20251107) 구역 1 문단 78 의 띠 쪽 뒤 문단 79 가 쪽 나누기로 새 쪽에서 시작한다.
+    #[test]
+    fn a_page_holding_only_a_band_still_honours_the_next_page_break() {
+        use crate::LayoutEngine;
+        let mut end = para("끝");
+        end.page_break_before = true;
+        let doc = shape_doc(vec![
+            Block::Paragraph(floating_para(
+                floating_shape("TOP_AND_BOTTOM", "PARA", 0, 9_000, 0),
+                "",
+            )),
+            Block::Paragraph(end),
+        ]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+        assert_eq!(placed.pages.len(), 2, "place_doc");
+        assert_eq!(naive.pages.len(), 2, "NaiveLayout");
+        assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0], vec![0, 1]);
+    }
+
+    /// #542 리뷰 M11 · M15 — 정렬별 자리. 세로 `PAPER` · `CENTER` 는 가로와 같은 식(`(쪽 높이 − 높이) / 2 + 오프셋`).
+    /// ⚠️ RIGHT/BOTTOM(먼 쪽에서 안으로 오프셋)과 `PAGE` = 본문 상자는 공개 표본이 없는 **가정의 잠금**이다.
+    #[test]
+    fn floating_box_alignment_follows_each_reference_box() {
+        let frame = FloatFrame {
+            body: (3_000.0, 4_000.0, 50_000.0, 70_000.0),
+            column: (3_000.0, 50_000.0),
+            para: (3_000.0, 50_000.0),
+            para_top: 4_000.0,
+        };
+        let shape = |hrel: &str, halign: &str, vrel: &str, valign: &str| ShapeRef {
+            kind: ShapeKind::Rect,
+            width: 10_000,
+            height: 6_000,
+            horz_rel_to: hrel.into(),
+            horz_align: halign.into(),
+            vert_rel_to: vrel.into(),
+            vert_align: valign.into(),
+            horz_offset: 500,
+            vert_offset: 700,
+            ..Default::default()
+        };
+        let at = |s: ShapeRef| floating_box(&s, 60_000.0, 80_000.0, &frame).expect("자리");
+        assert_eq!(
+            at(shape("PAPER", "CENTER", "PAPER", "CENTER")),
+            (25_500.0, 37_700.0)
+        );
+        assert_eq!(
+            at(shape("PAPER", "RIGHT", "PAPER", "BOTTOM")),
+            (49_500.0, 73_300.0)
+        );
+        assert_eq!(
+            at(shape("PAGE", "RIGHT", "PAGE", "BOTTOM")),
+            (42_500.0, 67_300.0)
+        );
+        assert_eq!(at(shape("PARA", "LEFT", "PARA", "TOP")), (3_500.0, 4_700.0));
     }
 }

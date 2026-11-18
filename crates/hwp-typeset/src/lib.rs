@@ -2294,9 +2294,9 @@ pub struct FloatBand {
 /// ONE paragraph-relative 「자리 차지」 shape in the public corpus, on a document's last paragraph, so its
 /// push cannot be seen. The rule is the one Hangul's stored lineseg shows for floating TABLES with the
 /// same placement: of 31 distinct such tables, 18 were checked line by line and all 18 agree (about 14 pin
-/// the value; the rest only show the next paragraph on a new page), 1 is unexplained (the next paragraph
-/// starts on a new page though the band fits — possibly a stale stored table size) and 12 were not
-/// checked (split across pages or on a last paragraph). The content after the paragraph starts at
+/// the value; the rest only show the next paragraph on a new page), 1 runs over several pages (37 rows whose
+/// per-row cell heights add up to 298,147 while its stored `sz` height is 31,502 — a table-only property, a
+/// shape has no rows) and 12 were not checked (split across pages or on a last paragraph). The content after the paragraph starts at
 /// `문단 위 + offset + 바깥 위 + 높이 + 바깥 아래` (e.g. 0 + 283 + 8,657 + 283 = 9,223; a 45 offset →
 /// 20,953 + 45 + 20,277 = 41,275). How each line of the paragraph itself moves is [`float_band_plan`].
 pub fn floating_flow_band(p: &Paragraph) -> Option<FloatBand> {
@@ -2347,8 +2347,20 @@ pub enum FloatBandPlan {
     /// next page (its offset dropped) and the flow there resumes `height` down. Stored-lineseg sample (a
     /// 위아래 table again): host line kept at 74,178, next paragraph at 19,994 = 141 + 19,712 + 141 on the
     /// next page. ⚠️ An assumption not confirmed by a stored sample for shapes — ONE table sample, assumed
-    /// to hold for shapes (like the outer-margin assumption of `shape_box`).
+    /// to hold for shapes (like the outer-margin assumption of `shape_box`). ⚠️ The plan is made before the
+    /// lines are laid: if the host's own text lines then run over the page (a line overflow), the band still
+    /// moves one page further after them — so a page holding only those lines comes before the shape. No
+    /// sample shows what Hangul does there (an assumption on top of an assumption).
     NextPage { height: f64 },
+}
+
+impl FloatBandPlan {
+    /// Whether line `index` of the paragraph is the one the band pushes down (the first text line it
+    /// overlaps). Such a line may then not fit and move to the next page / column — the band and the
+    /// paragraph's anchor stay where the band was placed.
+    pub fn pushes_line(&self, index: usize) -> bool {
+        matches!(self, Self::Here { shift_line: Some(at), .. } if *at == index)
+    }
 }
 
 /// The [`FloatBandPlan`] for paragraph `p` laid out as `lines`, starting `vert` down a page (or column)

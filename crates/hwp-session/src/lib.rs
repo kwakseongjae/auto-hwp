@@ -3690,6 +3690,53 @@ mod tests {
         }
     }
 
+    /// #542 PR-3(리뷰 M13) — 쪽 끝 근처의 띠 문단: 띠가 남은 자리에 안 들어가 도형이 다음 쪽으로 가면(NextPage)
+    /// 글 줄은 제자리다. 캐럿은 문단이 실제로 시작하는 자리(쪽 맨 위가 아님)로 계획을 세워야 글 줄을 짚는다.
+    #[test]
+    fn body_caret_near_the_page_end_follows_the_next_page_band_plan() {
+        use hwp_model::document::{Block, Inline, Paragraph, Run};
+        let mut doc = shape_text_para_doc(10_000, "가나다", None);
+        let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] else {
+            panic!("문단");
+        };
+        let Inline::Shape(shape) = &mut p.runs[0].content[0] else {
+            panic!("도형");
+        };
+        shape.treat_as_char = false;
+        shape.text_wrap = "TOP_AND_BOTTOM".into();
+        shape.vert_rel_to = "PARA".into();
+        shape.height = 20_000;
+        let lead = vec!["앞"; 42].join("\n");
+        doc.sections[0].blocks.insert(
+            0,
+            Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text(lead)],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+        );
+        let placed = place(&doc, &[]);
+        let fonts = own_render_fonts();
+        let host_glyph_page = placed
+            .pages
+            .iter()
+            .position(|pg| pg.glyphs.iter().any(|g| g.ch == '가'))
+            .expect("놓인 글자");
+        assert_eq!(
+            host_glyph_page, 0,
+            "전제: 글 줄은 띠에 밀리지 않고 첫 쪽에 남는다(NextPage)"
+        );
+        assert_eq!(placed.pages.len(), 2, "전제: 도형은 다음 쪽으로 간다");
+        for offset in 0..3 {
+            let c = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 0, 0, 1, offset)
+                .unwrap_or_else(|| panic!("오프셋 {offset} 캐럿 없음"));
+            assert_eq!(c.page, 0, "오프셋 {offset}: 캐럿 쪽");
+        }
+    }
+
     /// #542 PR-3 — 빈 문단이 문단 기준 위아래 도형을 품으면 문단 띠는 도형 높이까지 늘지만, 캐럿은 빈 줄 하나의
     /// 높이다(문단 띠 높이가 아니다).
     #[test]
