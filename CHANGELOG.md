@@ -127,11 +127,13 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   21줄 모두). 그런 도형이 있는 문서는 쪽 나눔이 달라진다. 아직 그리지 않는 도형(묶음 개체 · 타원 등 · 떠 있는 도형 · 본문에 표가 든
   글상자)은 PDF 알림 `text-box`(`PdfExport.notices`, 쪽마다 이유별 한 건)와 CLI 경고 한 줄로 알린다. 알림 범위는 **본문 문단의
   도형**이다 — 표 칸 안의 도형과 글상자 본문 안의 떠 있는 도형은 아직 알림 없이 빠지고, 웹(wasm) PDF 내보내기는 알림을 넘기지 않는다.
-  편집기 캐럿은 도형 뒤 글자도 모델 글자 번호로 짚는다(여러 줄 문단 포함).
+  편집기 캐럿은 도형 뒤 글자도 모델 글자 번호로 짚는다(여러 줄 문단 포함). 라이브러리: `hwp_typeset::inline_object_slot`(어떤 인라인이 줄 칸을
+  갖는지 — `layout_paragraph` 와 캐럿이 함께 쓰는 규칙)을 공개한다.
   *(EN — Added: inline (treat-as-char) text-box rectangles are drawn — fill, outline and body with its vertical alignment. Every
   inline shape now takes its line space, as Hangul stores it, so such documents paginate differently. Shapes of body paragraphs
   that are not drawn yet are reported as `text-box` notices and one CLI warning; shapes inside table cells or floating inside a
-  text box are still dropped without a notice, and the wasm PDF export does not pass notices on.)*
+  text box are still dropped without a notice, and the wasm PDF export does not pass notices on. `hwp_typeset::inline_object_slot` is
+  now public — the one rule for which inline takes a line slot.)*
 
 - **`auto-hwp layout-check --page-starts` — 쪽이 어디서 시작하는지를 파일에 저장된 줄 배치와 맞댄다 (#559).** 쪽 수는 우연히 맞을 수 있다(여기서
   한 쪽 더, 저기서 한 쪽 덜). 본문 줄이 이어지는 자리마다 「저장 배치가 여기서 쪽을 넘기는가 · 우리도 넘기는가」를 보고, 같은 줄에서 넘긴 수 ·
