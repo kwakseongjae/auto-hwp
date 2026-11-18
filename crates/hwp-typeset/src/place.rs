@@ -4108,7 +4108,8 @@ fn floating_box(
 /// its body top), a 「자리 차지」 paragraph-relative shape is drawn there, its offset dropped.
 ///
 /// What is not drawn is recorded on the anchor page (`floating-shape-not-drawn`): another kind than
-/// `rect` (a group, an ellipse, …) or a placement token not handled. The drawing order cannot follow
+/// `rect` (a group, an ellipse, …), a placement token not handled, or a wrap whose text flow is not laid
+/// out yet (어울림 · paper/page-relative 「자리 차지」). The drawing order cannot follow
 /// 글 앞 / 글 뒤 yet: a fill always paints under the text.
 #[allow(clippy::too_many_arguments)]
 fn place_floating_shapes(
@@ -4140,7 +4141,13 @@ fn place_floating_shapes(
             ),
             _ => (anchor_page, frame),
         };
-        let at = (shape.kind == ShapeKind::Rect)
+        // Drawn only where the text around it is laid out as Hangul does: 글 앞 · 글 뒤 never move the text,
+        // and a paragraph-relative 「자리 차지」 one has its band. An 어울림 (`SQUARE`) or paper/page-relative
+        // 「자리 차지」 box would sit over text Hangul moves aside (a drop cap over its own line), so it
+        // stays undrawn and reported until that flow exists.
+        let wrap_honoured =
+            matches!(shape.text_wrap.as_str(), "IN_FRONT_OF_TEXT" | "BEHIND_TEXT") || pushes_flow;
+        let at = (shape.kind == ShapeKind::Rect && wrap_honoured)
             .then(|| floating_box(shape, pages[page_idx].width, pages[page_idx].height, &frame))
             .flatten();
         match at {
@@ -8941,7 +8948,7 @@ mod tests {
             s.horz_offset = 5_000;
             s
         };
-        let cases: [(&str, ShapeRef, (f64, f64)); 5] = [
+        let cases: [(&str, ShapeRef, (f64, f64)); 4] = [
             (
                 "종이",
                 rect("IN_FRONT_OF_TEXT", "PAPER", "PAPER", "LEFT"),
@@ -8961,11 +8968,6 @@ mod tests {
                 "종이 가운데",
                 rect("IN_FRONT_OF_TEXT", "PAPER", "PAPER", "CENTER"),
                 (20_000.0 + 5_000.0, 7_000.0),
-            ),
-            (
-                "어울림도 자리는 그대로",
-                rect("SQUARE", "PAPER", "PAPER", "LEFT"),
-                (5_000.0, 7_000.0),
             ),
         ];
         for (name, shape, (x, y)) in cases {
@@ -9014,10 +9016,15 @@ mod tests {
         ellipse.kind = ShapeKind::Other("ellipse".into());
         let mut unknown = floating_shape("IN_FRONT_OF_TEXT", "PAPER", 0, 5_000, 0);
         unknown.horz_rel_to = String::new();
+        // 어울림 · 종이 기준 위아래는 글 흐름(줄 좁히기 · 밀기)이 아직 없어 그리지 않는다.
+        let square = floating_shape("SQUARE", "PARA", 0, 5_000, 0);
+        let paper_band = floating_shape("TOP_AND_BOTTOM", "PAPER", 0, 5_000, 0);
         let doc = shape_doc(vec![
             Block::Paragraph(floating_para(group, "")),
             Block::Paragraph(floating_para(ellipse, "")),
             Block::Paragraph(floating_para(unknown, "")),
+            Block::Paragraph(floating_para(square, "")),
+            Block::Paragraph(floating_para(paper_band, "")),
             Block::Paragraph(para("끝")),
         ]);
         let placed = place_doc(&doc, &ApproxFontMetrics);
@@ -9033,6 +9040,8 @@ mod tests {
                 (0, UndrawnShape::Floating),
                 (1, UndrawnShape::Floating),
                 (2, UndrawnShape::Floating),
+                (3, UndrawnShape::Floating),
+                (4, UndrawnShape::Floating),
             ]
         );
         assert!(
@@ -9040,7 +9049,7 @@ mod tests {
             "그린 것 없음"
         );
         let end = page.glyphs.iter().find(|g| g.ch == '끝').expect("끝");
-        let top = 5_000.0 + 1_600.0 + 1_600.0;
+        let top = 5_000.0 + 1_600.0 * 4.0;
         assert!((end.baseline - (top + 1_000.0 * BASELINE_RATIO)).abs() < 1e-6);
     }
 
