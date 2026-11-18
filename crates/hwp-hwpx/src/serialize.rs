@@ -481,11 +481,7 @@ fn mark_block_dirty(block: &mut Block) {
                     mark_block_dirty(cb);
                 }
             }
-            if let Some(caption) = t.caption.as_mut() {
-                for cb in &mut caption.blocks {
-                    mark_block_dirty(cb);
-                }
-            }
+            // #543 — 캡션 블록은 표시하지 않는다: `emit_table` 이 고침 표지와 무관하게 모델에서 통째로 쓴다.
         }
     }
 }
@@ -866,6 +862,8 @@ fn collect_bf_specs(doc: &SemanticDoc) -> BTreeMap<String, BfSpec> {
                         }
                         walk(&c.blocks, out);
                     }
+                    // #543 — 캡션 안 표 · 각주의 테두리. ⚠️ 표본 없음 · 가정: 코퍼스 캡션에 표 · 각주가 0이라
+                    // 시험이 없다 — 칸과 같은 규칙(내보내는 블록의 테두리는 모두 모은다)을 따른다.
                     if let Some(caption) = &t.caption {
                         walk(&caption.blocks, out);
                     }
