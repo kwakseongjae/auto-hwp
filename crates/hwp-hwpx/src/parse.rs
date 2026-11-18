@@ -581,8 +581,8 @@ impl ShapeAccum {
                 s.horz_rel_to = attr_str(e, b"horzRelTo").unwrap_or_default();
                 s.vert_align = attr_str(e, b"vertAlign").unwrap_or_default();
                 s.horz_align = attr_str(e, b"horzAlign").unwrap_or_default();
-                s.vert_offset = attr_i32(e, b"vertOffset").unwrap_or(0);
-                s.horz_offset = attr_i32(e, b"horzOffset").unwrap_or(0);
+                s.vert_offset = attr_offset(e, b"vertOffset");
+                s.horz_offset = attr_offset(e, b"horzOffset");
             }
             b"outMargin" => s.out_margin = edges(e),
             b"lineShape" => {
@@ -2030,6 +2030,15 @@ fn attr_i32(e: &BytesStart, name: &[u8]) -> Option<i32> {
         }
     }
     None
+}
+
+/// `<hp:pos vertOffset horzOffset>` (#542): 한글은 음수 오프셋을 부호 없는 32비트로 쓴다
+/// (`4294967146` = −150). i32 로 바로 읽으면 실패해 0 이 되므로, 넓게 읽어 32비트로 감는다.
+fn attr_offset(e: &BytesStart, name: &[u8]) -> i32 {
+    attr_str(e, name)
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .map(|v| v as i32)
+        .unwrap_or(0)
 }
 
 /// 각주 장식 문자(`prefixChar`/`suffixChar`) → WChar 코드포인트. OWPML 은 보통 숫자 코드
@@ -3807,6 +3816,23 @@ pub(crate) mod tests {
 
     fn para_text(blocks: &[Block]) -> String {
         body_text(blocks)
+    }
+
+    /// #542: 한글이 부호 없는 32비트로 쓴 음수 오프셋(`4294967146` = −150)을 음수로 읽는다 — 0 이 아니다.
+    #[test]
+    fn a_shape_offset_written_as_unsigned_reads_negative() {
+        let xml = sec(concat!(
+            r#"<hp:p id="1"><hp:run charPrIDRef="3"><hp:rect id="9" textWrap="IN_FRONT_OF_TEXT">"#,
+            r#"<hp:sz width="9000" widthRelTo="ABSOLUTE" height="3000" heightRelTo="ABSOLUTE"/>"#,
+            r#"<hp:pos treatAsChar="0" vertRelTo="PAPER" horzRelTo="PAPER" vertAlign="TOP" horzAlign="LEFT" vertOffset="4294967146" horzOffset="25"/>"#,
+            r#"</hp:rect><hp:t/></hp:run></hp:p>"#,
+        ));
+        let blocks = parse_sec(&xml);
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!("paragraph")
+        };
+        let s = shapes_of(p)[0];
+        assert_eq!((s.vert_offset, s.horz_offset), (-150, 25));
     }
 
     /// #542: 글자처럼 취급 글상자 — 상자 · 자리 · 테두리 · 채우기 · 안쪽 여백과 글상자 문단을 도형이 가진다.
