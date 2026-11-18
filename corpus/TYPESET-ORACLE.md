@@ -83,7 +83,7 @@
 | `corpus/hwpxlib_corpus/error/20240919/테스트문서.hwpx` | hwpxlib | 일치 | 1 | 1 | 100 | — | — |
 | `corpus/hwpxlib_corpus/error/20241104/mot.hwpx` | hwpxlib | 일치 | 2 | 2 | 100 | 100 | multipage_table, shape_ole |
 | `corpus/hwpxlib_corpus/error/20250523/프로젝트 계획서.hwpx` | hwpxlib | 채점불가 | — | — | — | — | multipage_table |
-| `corpus/hwpxlib_corpus/error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx` | hwpxlib | 쪽격차 | 73 | 76 | 98.8 | 99.5 | header_footer, nested_table, shape_ole |
+| `corpus/hwpxlib_corpus/error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx` | hwpxlib | 쪽격차 | 74 | 76 | 98.8 | 99.5 | header_footer, nested_table, shape_ole |
 | `corpus/hwpxlib_corpus/error/20251107/test_re.hwpx` | hwpxlib | 줄격차 | 15 | 15 | 98.1 | 87.3 | multipage_table |
 | `corpus/hwpxlib_corpus/error/20251107/test.hwpx` | hwpxlib | 줄격차 | 15 | 15 | 98.1 | 87.3 | multipage_table |
 | `corpus/hwpxlib_corpus/error/20260805/고정폭빈칸_문서.hwpx` | hwpxlib | 일치 | 1 | 1 | 100 | — | — |

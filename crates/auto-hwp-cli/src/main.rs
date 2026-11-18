@@ -952,6 +952,14 @@ fn export_pdf(
             notice.code
         );
     }
+    // 그리지 않은 표 캡션(#543) — 옆(왼 · 오른) 캡션 · 떠 있는 표 · 칸 안 표의 캡션. 쪽마다 한 줄.
+    for notice in result.notices.iter().filter(|n| n.kind == "table-caption") {
+        eprintln!(
+            "경고: {}쪽 — 표 캡션을 그리지 않았다(옆 캡션 · 떠 있는 표 · 칸 안 표) ({})",
+            notice.page_index + 1,
+            notice.code
+        );
+    }
     if let (Some(path), Some(bytes)) = (visual_regions, evidence) {
         use std::io::Write as _;
         let mut options = std::fs::OpenOptions::new();

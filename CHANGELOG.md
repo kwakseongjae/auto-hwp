@@ -42,6 +42,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 파괴 변경 (Breaking)
 
+- **`UndrawnShape::TableCaption` 변형이 늘었다 (#543).** 배치하지 않는 표 캡션(옆 — 왼 · 오른 — 캡션, 글 앞 · 글 뒤로 띄운
+  표의 캡션, 칸 안 표의 캡션)이 있으면 그 표가 시작하는 쪽의 `PlacedPage.undrawn_shapes` 에 이 이유로 한 건 실린다(`(section, block)`
+  = 표 블록 · 칸 안이면 바깥 표 블록). 마이그레이션: `UndrawnShape` 를 빠짐없이 `match` 하는 코드는 이 팔을 더한다. Rust 크레이트 전용.
+  *(EN — Breaking: new `UndrawnShape::TableCaption` variant for a table caption that is not laid out (side caption, caption of a
+  floating or nested table); exhaustive matches add an arm. Rust only.)*
+
 - **`UndrawnShape::FloatingTableRows` 변형이 늘었다 (#544).** 글 앞 · 글 뒤로 띄운 표의 행 가운데 보이지 않는 것(흐름이 다음 쪽을
   만들지 않아 이을 곳이 없음 · 종이 아래로 넘침)이 있으면 그 표가 마지막으로 닿은 쪽의 `PlacedPage.undrawn_shapes` 에 이 이유로
   한 건 실린다(`(section, block)` = 표 블록). 마이그레이션: `UndrawnShape` 를 빠짐없이 `match` 하는 코드는 이 팔을 더한다. Rust 크레이트 전용.
@@ -76,6 +82,24 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   `PlacedPage`, `PdfPageVisualEvidence` and `PdfExport` (`notices`) must be filled by code that builds those structs. CLI and Rust only.)*
 
 ### 고침 (Fixed)
+
+- **HWPX 표 캡션을 읽고 그린다 (#543).** HWPX 파서가 `<hp:caption>` 을 본문 흐름 밖으로 떼어 낸 뒤 버려(이슈 80 격리), 같은 서식이
+  `.hwp` 로는 캡션이 그려지고 HWPX 로는 빠졌다. 이제 `side` · `gap` · `width` · `lastWidth` · `fullSz` 와 캡션 문단을 `Table.caption`
+  으로 읽고(.hwp 리프트와 같은 값 대응 · 본문 흐름 격리는 그대로), `.hwp` 가 이미 타는 위 · 아래 캡션 흐름으로 그린다. 캡션 높이 ·
+  간격을 예약하므로 그런 문서는 쪽 나눔이 바뀐다: 공개 코퍼스 재난안전 문서(위 캡션 10개, 캡션 글 325자가 이제 모두 그려짐) 73 → 74쪽
+  (오라클 76 · 다른 프로그램 PDF 75), 비공개 코퍼스 1문서 21 → 22쪽(오라클 23). 다른 문서 · `.hwp` · 게이트 문서는 그대로다.
+  - 1×1 틀 표가 안쪽 표로 올려 그려질 때 틀의 캡션이 두 형식 모두 알림 없이 빠지던 것도 고쳤다 — 캡션이 올려진 표와 함께 간다.
+    안쪽 표도 캡션을 가지면 안쪽 캡션을 그리고 틀의 캡션은 아래 알림으로 알린다.
+  - 표 캡션 안의 그림 · 수식이 자기 캡션을 가질 때 그 글이 표 캡션 자리를 차지하던 경우가 없게 했다 — 표 캡션은 늘 표 자신의 글이다.
+  - 캡션 블록의 높이는 줄 높이의 합이다 — 마지막 줄의 줄 간격은 쓰지 않는다(`.hwp` · HWPX 모두). 공개 · 비공개 코퍼스에서 저장 줄이
+    있는 캡션 30개(.hwp 17 · HWPX 13 · 위 24 · 아래 6) 모두 한글이 이렇게 저장한다. 전에는 캡션마다 줄 간격만큼(1,300 줄이면 780) 표를
+    아래로 밀었다. 쪽 안 자리만 바뀌고, 코퍼스 문서의 쪽 나눔 · 게이트 문서 쪽 수(8 · 18 · 24)는 그대로다.
+  - 배치하지 않는 캡션(옆 캡션 · 떠 있는 표 · 칸 안 표)은 PDF 알림(`kind: "table-caption"` · `code: "table-caption-not-drawn"`)과
+    `auto-hwp export-pdf` 경고로 알린다(코퍼스에는 0개).
+  *(EN — Fixed: HWPX table captions are now read into `Table.caption` (they were isolated from the body flow and then dropped) and
+  drawn through the same top/bottom caption flow `.hwp` uses. Pages change where captions take room: a public sample goes 73 → 74
+  (oracle 76). A 1×1 frame table's caption is no longer lost when the frame is promoted. Captions not laid out (side captions, captions
+  of floating or nested tables) are reported as a `table-caption` PDF notice and an `export-pdf` warning.)*
 
 - **글 앞 · 글 뒤로 띄운 표가 흐름 높이를 쓰지 않는다 (#544).** 한글은 그런 표(`textWrap="IN_FRONT_OF_TEXT"` ·
   `"BEHIND_TEXT"`, 글자처럼 취급 아님)가 없는 것처럼 글을 흘리고, 표만 품은 호스트 문단도 보통 빈 줄 하나를 쓴다. 엔진은 표를 흐름

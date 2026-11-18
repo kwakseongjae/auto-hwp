@@ -293,6 +293,10 @@ pub enum UndrawnShape {
     /// table never adds a page), or they run past the paper edge (a `keep_together` table, or one row taller
     /// than the room). Recorded on the last page the table touches.
     FloatingTableRows,
+    /// A table caption that is not laid out (#543): a side (left / right) caption — no horizontal lane yet —,
+    /// the caption of a 글 앞 · 글 뒤 table, or of a table nested in a cell. `(section, block)` is the table
+    /// block (the outer table's for a nested one); recorded on the page where the table starts.
+    TableCaption,
 }
 
 impl UndrawnShape {
@@ -304,6 +308,7 @@ impl UndrawnShape {
             Self::Floating => "floating-shape-not-drawn",
             Self::TableInTextBox => "text-box-table-not-drawn",
             Self::FloatingTableRows => "floating-table-rows-not-drawn",
+            Self::TableCaption => "table-caption-not-drawn",
         }
     }
 }
@@ -708,6 +713,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     // splits at row granularity instead of bumping whole; the outer box rides along as
                     // `frame` and is redrawn per page fragment. Identical predicate in NaiveLayout +
                     // block_pages → lockstep.
+                    let frame_caption_shadowed = crate::frame_caption_shadowed(t);
                     let unwrapped = crate::unwrap_frame_table(t);
                     let (t, frame) = match &unwrapped {
                         Some((inner, f)) => (inner, *f),
@@ -754,6 +760,17 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         vert += t.caption.as_ref().unwrap().spacing.max(0) as f64;
                     }
                     let start_page = pages.len() - 1;
+                    // #543 — 옆(왼 · 오른) 캡션은 아직 배치하지 않는다 — 알린다.
+                    report_unplaced_caption(&mut pages[start_page], t, sec_idx, blk_idx, false);
+                    if frame_caption_shadowed {
+                        // #543 — 틀과 올려진 안쪽 표가 둘 다 캡션을 가지면 안쪽 것만 그린다 — 틀의 것은 알린다.
+                        report_undrawn(
+                            &mut pages[start_page],
+                            sec_idx,
+                            blk_idx,
+                            UndrawnShape::TableCaption,
+                        );
+                    }
                     // place_table SPLITS the table across pages itself (한글식 row-level break): a
                     // first-row reserve, then a new page whenever the next row crosses the body bottom,
                     // emitting one bordered fragment per page. Returns the final page-relative cursor.
@@ -997,6 +1014,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                         started = true;
                         continue;
                     }
+                    let frame_caption_shadowed = crate::frame_caption_shadowed(table);
                     let promoted = crate::unwrap_frame_table(table);
                     let (table, frame) = match &promoted {
                         Some((inner, frame)) => (inner, *frame),
@@ -1041,6 +1059,21 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                         flow.add(table.caption.as_ref().unwrap().spacing.max(0) as f64);
                     }
                     let start_page = pages.len() - 1;
+                    report_unplaced_caption(
+                        &mut pages[start_page],
+                        table,
+                        section_index,
+                        block_index,
+                        false,
+                    );
+                    if frame_caption_shadowed {
+                        report_undrawn(
+                            &mut pages[start_page],
+                            section_index,
+                            block_index,
+                            UndrawnShape::TableCaption,
+                        );
+                    }
                     place_table_columns(
                         table,
                         doc,
@@ -1503,6 +1536,7 @@ fn advance_caption_block_pages(
             }
         }
     }
+    *vert -= crate::caption_trailing_leading(caption, doc, fonts, width);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1552,6 +1586,7 @@ fn advance_caption_columns_pages(
             }
         }
     }
+    flow.add(-crate::caption_trailing_leading(caption, doc, fonts, width));
 }
 
 fn block_pages_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Vec<usize>> {
@@ -2181,7 +2216,7 @@ fn place_caption(
             }
         }
     }
-    vert
+    vert - crate::caption_trailing_leading(caption, doc, fonts, width)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2227,6 +2262,14 @@ fn place_caption_columns(
             ),
         }
     }
+    // #543 — 캡션 블록의 마지막 줄은 줄 간격을 쓰지 않는다(`caption_trailing_leading`).
+    let width = if caption.max_width > 0 {
+        flow.min_width().min(caption.max_width as f64)
+    } else {
+        flow.min_width()
+    }
+    .max(1.0);
+    flow.add(-crate::caption_trailing_leading(caption, doc, fonts, width));
 }
 
 /// Place a table, SPLITTING it across pages at row boundaries when it doesn't fit (한글식 표 나눔).
@@ -2868,6 +2911,8 @@ fn place_nested_table(
     // AFTER the outer table's own `PlacedTable` in `pg.tables`, `rfind` (topmost) picks the innermost hit.
     // `table_idx` pins this exact fragment so the deeper `PlacedTable`s that the recursion below appends
     // (yet-more-nested tables) don't get our `cells` mis-attached.
+    // #543 — 칸 안 표의 캡션은 그리지 않는다(자리도 없다). 조용히 넘기지 않는다.
+    report_unplaced_caption(pg, t, ctx.section, ctx.outer_block, true);
     let table_idx = pg.tables.len();
     pg.tables.push(PlacedTable {
         x: ox,
@@ -4399,6 +4444,8 @@ fn place_floating_table(
         block,
         kind: BlockKind::Table,
     });
+    // #543 — 떠 있는 표의 캡션은 아직 그리지 않는다.
+    report_unplaced_caption(&mut pages[page_idx], t, section, block, true);
     report_rows_past_paper(&mut pages[page_idx], y + drawn_h, section, block);
     (end < t.rows).then_some(FloatTableRest {
         block,
@@ -4466,13 +4513,32 @@ fn continue_floating_table(
 
 /// Record [`UndrawnShape::FloatingTableRows`] on `page` for table block `block` (once per page and table).
 fn report_floating_table_rows(page: &mut PlacedPage, section: usize, block: usize) {
+    report_undrawn(page, section, block, UndrawnShape::FloatingTableRows);
+}
+
+/// Record `reason` for `(section, block)` on `page`, once.
+fn report_undrawn(page: &mut PlacedPage, section: usize, block: usize, reason: UndrawnShape) {
     let undrawn = PlacedUndrawnShape {
         section,
         block,
-        reason: UndrawnShape::FloatingTableRows,
+        reason,
     };
     if !page.undrawn_shapes.contains(&undrawn) {
         page.undrawn_shapes.push(undrawn);
+    }
+}
+
+/// #543 — a caption table `t` has that the drawing at hand does not lay out: any caption of a floating or
+/// nested table (`all`), else a side caption (top / bottom ones flow with the table).
+fn report_unplaced_caption(
+    page: &mut PlacedPage,
+    t: &Table,
+    section: usize,
+    block: usize,
+    all: bool,
+) {
+    if t.caption.is_some() && (all || !crate::has_flow_caption(t)) {
+        report_undrawn(page, section, block, UndrawnShape::TableCaption);
     }
 }
 
@@ -10287,6 +10353,288 @@ mod tests {
                 vec![(0, 0.0, 3.0 * 1_600.0 + 300.0, 5_000.0)],
                 "columns={columns}"
             );
+        }
+    }
+
+    /// #543 — 캡션 하나(문단 「캡션」 · 간격 850)를 단 표.
+    fn captioned(mut t: Table, position: TableCaptionPosition) -> Table {
+        t.caption = Some(TableCaption {
+            position,
+            blocks: vec![Block::Paragraph(para("캡션"))],
+            spacing: 850,
+            width: 8_504,
+            ..Default::default()
+        });
+        t
+    }
+
+    fn caption_reports(placed: &PlacedDoc) -> Vec<(usize, usize)> {
+        placed
+            .pages
+            .iter()
+            .enumerate()
+            .flat_map(|(pi, pg)| {
+                pg.undrawn_shapes
+                    .iter()
+                    .filter(|u| u.reason == UndrawnShape::TableCaption)
+                    .map(move |u| (pi, u.block))
+            })
+            .collect()
+    }
+
+    fn caption_glyphs(placed: &PlacedDoc) -> usize {
+        placed
+            .pages
+            .iter()
+            .flat_map(|pg| &pg.glyphs)
+            .filter(|g| g.ch == '캡')
+            .count()
+    }
+
+    /// #543 — 그리지 않는 표 캡션은 조용히 넘기지 않는다: 옆(왼 · 오른) 캡션 · 떠 있는 표의 캡션 · 칸 안 표의 캡션은
+    /// `TableCaption` 으로 표가 시작하는 쪽에 알린다. 위 · 아래 캡션은 그려지고 알리지 않는다.
+    #[test]
+    fn table_captions_that_are_not_laid_out_are_reported() {
+        let flow = |position| {
+            let doc = shape_doc(vec![
+                Block::Table(captioned(fixed_height_table(1, 3_000, false), position)),
+                Block::Paragraph(para("끝")),
+            ]);
+            place_doc(&doc, &ApproxFontMetrics)
+        };
+        for position in [TableCaptionPosition::Top, TableCaptionPosition::Bottom] {
+            let placed = flow(position);
+            assert_eq!(caption_reports(&placed), vec![], "{position:?}");
+            assert_eq!(caption_glyphs(&placed), 1, "{position:?} 그려짐");
+        }
+        for position in [TableCaptionPosition::Left, TableCaptionPosition::Right] {
+            let placed = flow(position);
+            assert_eq!(caption_reports(&placed), vec![(0, 0)], "{position:?}");
+            assert_eq!(caption_glyphs(&placed), 0, "{position:?}");
+        }
+        // 떠 있는 표의 캡션(#544 길은 캡션을 그리지 않는다).
+        let floating = captioned(front_table(5_000, 300, 0), TableCaptionPosition::Top);
+        let mut blocks = hosted(floating, "", true, 1);
+        blocks.push(Block::Paragraph(para("끝")));
+        let placed = place_doc(&shape_doc(blocks), &ApproxFontMetrics);
+        assert_eq!(caption_reports(&placed), vec![(0, 0)]);
+        // 칸 안 표의 캡션 — 바깥 표 블록으로.
+        let nested = captioned(
+            fixed_height_table(1, 2_000, false),
+            TableCaptionPosition::Top,
+        );
+        let mut outer = fixed_height_table(1, 6_000, false);
+        outer.cells[0].blocks = vec![Block::Table(nested), Block::Paragraph(para("행"))];
+        let doc = shape_doc(vec![Block::Paragraph(para("앞")), Block::Table(outer)]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(caption_reports(&placed), vec![(0, 1)]);
+    }
+
+    /// #543 — 1×1 틀 표가 안쪽 표로 올려질 때(자가진단표 꼴) 틀의 캡션도 함께 간다. 전에는 두 형식 모두 틀의 캡션이
+    /// 알림 없이 빠졌다. 세 걸음이 같은 쪽 · 자리다.
+    #[test]
+    fn a_frame_tables_caption_goes_with_the_promoted_table() {
+        let mut frame = Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell {
+                blocks: vec![Block::Table(n_row_table(3))],
+                ..Default::default()
+            }],
+            col_widths: vec![1],
+            ..Default::default()
+        };
+        frame = captioned(frame, TableCaptionPosition::Top);
+        let doc = shape_doc(vec![Block::Table(frame), Block::Paragraph(para("끝"))]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(caption_glyphs(&placed), 1, "틀의 캡션이 그려진다");
+        let cap = placed.pages[0]
+            .glyphs
+            .iter()
+            .find(|g| g.ch == '캡')
+            .expect("캡션 글자");
+        let table_top = placed.pages[0]
+            .tables
+            .iter()
+            .filter(|t| t.ancestors.is_empty())
+            .map(|t| t.y)
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            cap.baseline < table_top,
+            "위 캡션은 표 위: {} < {table_top}",
+            cap.baseline
+        );
+        // 세 걸음이 같은 쪽 수(LOCKSTEP) — end_line_in_three_walks 가 단언한다.
+        let [placed_end, naive_end, _] = end_line_in_three_walks(&doc);
+        assert_eq!(placed_end.0, naive_end.0);
+        assert!(
+            (placed_end.1 - naive_end.1).abs() < 1e-6,
+            "{placed_end:?} {naive_end:?}"
+        );
+    }
+
+    /// #543 리뷰 — 틀 표와 올려진 안쪽 표가 둘 다 캡션을 가지면 안쪽 캡션만 그리고(틀 캡션이 덮지 않는다) 틀 캡션은
+    /// `TableCaption` 으로 알린다. 한 단 · 두 단 같다.
+    #[test]
+    fn a_frame_caption_shadowed_by_the_inner_tables_is_reported() {
+        for columns in [false, true] {
+            let mut frame = Table {
+                rows: 1,
+                cols: 1,
+                cells: vec![Cell {
+                    blocks: vec![Block::Table(captioned(
+                        n_row_table(3),
+                        TableCaptionPosition::Top,
+                    ))],
+                    ..Default::default()
+                }],
+                col_widths: vec![1],
+                ..Default::default()
+            };
+            frame.caption = Some(TableCaption {
+                position: TableCaptionPosition::Top,
+                blocks: vec![Block::Paragraph(para("틀"))],
+                spacing: 850,
+                ..Default::default()
+            });
+            let mut lead = para("앞");
+            if columns {
+                lead.column_layout_before = Some(two_columns());
+            }
+            let doc = shape_doc(vec![
+                Block::Paragraph(lead),
+                Block::Table(frame),
+                Block::Paragraph(para("끝")),
+            ]);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let glyphs = |ch| {
+                placed
+                    .pages
+                    .iter()
+                    .flat_map(|pg| &pg.glyphs)
+                    .filter(|g| g.ch == ch)
+                    .count()
+            };
+            assert_eq!(glyphs('캡'), 1, "단 {columns}: 안쪽 캡션을 그린다");
+            assert_eq!(glyphs('틀'), 0, "단 {columns}: 틀 캡션은 그리지 않는다");
+            assert_eq!(
+                caption_reports(&placed),
+                vec![(0, 1)],
+                "단 {columns}: 틀 캡션을 알린다"
+            );
+        }
+    }
+
+    /// #543 리뷰 — 두 단에서도 옆(왼 · 오른) 캡션은 알린다(한 단 시험의 다단 짝).
+    #[test]
+    fn side_captions_are_reported_in_columns_too() {
+        for position in [TableCaptionPosition::Left, TableCaptionPosition::Right] {
+            let mut lead = para("앞");
+            lead.column_layout_before = Some(two_columns());
+            let doc = shape_doc(vec![
+                Block::Paragraph(lead),
+                Block::Table(captioned(fixed_height_table(1, 3_000, false), position)),
+                Block::Paragraph(para("끝")),
+            ]);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            assert_eq!(caption_reports(&placed), vec![(0, 1)], "{position:?}");
+            assert_eq!(caption_glyphs(&placed), 0, "{position:?}");
+        }
+    }
+
+    /// #543 리뷰 — 여러 줄 캡션이 붙은 표를 쪽 끝 근처로 밀어 가며, place_doc ↔ block_pages 가 **표 블록 쪽**(아래 캡션은 표 뒤
+    /// 「끝」 문단 쪽도)에서 같고 place_doc ↔ NaiveLayout 이 쪽 수에서 같은지 본다(성질 시험). 캡션 높이 규칙(마지막 줄 간격 빼기)을 한 걸음만
+    /// 빠뜨리면 경계 근처에서 표 쪽이 갈린다. 위 · 아래 캡션, 한 단 · 두 단.
+    #[test]
+    fn three_walks_agree_on_a_multi_line_captioned_tables_page() {
+        for position in [TableCaptionPosition::Top, TableCaptionPosition::Bottom] {
+            for columns in [false, true] {
+                let mut boundaries = 0;
+                let mut last_page = None;
+                for height in (14_000..=22_000).step_by(100) {
+                    // 두 단은 앞 문단이 둘째 단까지 차야 표가 쪽 경계를 만난다.
+                    let lines = if columns { 14 } else { 6 };
+                    let mut lead = para(&vec!["나"; lines].join("\n"));
+                    if columns {
+                        lead.column_layout_before = Some(two_columns());
+                    }
+                    let mut table = fixed_height_table(1, 3_000, false);
+                    table.caption = Some(TableCaption {
+                        position,
+                        blocks: vec![Block::Paragraph(para(&["캡"; 3].join("\n")))],
+                        spacing: 850,
+                        ..Default::default()
+                    });
+                    let mut doc = shape_doc(vec![
+                        Block::Paragraph(lead),
+                        Block::Table(table),
+                        Block::Paragraph(para("끝")),
+                    ]);
+                    doc.sections[0].page.height = height;
+                    let placed = place_doc(&doc, &ApproxFontMetrics);
+                    let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+                    assert_eq!(placed.pages.len(), naive.pages.len(), "LOCKSTEP {height}");
+                    let placed_page = placed
+                        .pages
+                        .iter()
+                        .position(|pg| {
+                            pg.blocks
+                                .iter()
+                                .any(|b| b.block == 1 && b.kind == BlockKind::Table)
+                        })
+                        .expect("표 블록");
+                    let end_page = placed
+                        .pages
+                        .iter()
+                        .position(|pg| pg.glyphs.iter().any(|g| g.ch == '끝'))
+                        .expect("끝 문단");
+                    let walked = block_pages(&doc, &ApproxFontMetrics);
+                    assert_eq!(
+                        (walked[0][1], walked[0][2]),
+                        (placed_page, end_page),
+                        "{position:?} 단 {columns} 쪽 높이 {height}: block_pages ↔ place_doc (표 · 끝) 쪽"
+                    );
+                    let placed_page = (placed_page, end_page);
+                    if last_page.is_some_and(|p| p != placed_page) {
+                        boundaries += 1;
+                    }
+                    last_page = Some(placed_page);
+                }
+                assert!(
+                    boundaries > 0,
+                    "{position:?} 단 {columns}: 쪽 경계를 한 번은 지난다(헛돌지 않게)"
+                );
+            }
+        }
+    }
+
+    /// #543 — 캡션 블록의 마지막 줄은 줄 간격을 쓰지 않는다(한글 저장 줄 30개): 위 캡션 한 줄(글자 1,000 · 160%)이면
+    /// 표는 1,000 + 간격 850 아래에서 시작하고(1,600 + 850 이 아니다), 아래 캡션 뒤 문단도 같은 양만 밀린다. 세 걸음이
+    /// 같다. 음수 줄 간격(80%)도 줄 높이 그대로 쓴다.
+    #[test]
+    fn a_caption_takes_its_line_heights_not_its_last_line_spacing() {
+        for (pct, position) in [
+            (160, TableCaptionPosition::Top),
+            (160, TableCaptionPosition::Bottom),
+            (80, TableCaptionPosition::Top),
+        ] {
+            let mut doc = shape_doc(vec![
+                Block::Table(captioned(fixed_height_table(1, 3_000, false), position)),
+                Block::Paragraph(para("끝")),
+            ]);
+            doc.para_shapes[0].line_spacing_value = pct;
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let table_y = placed.pages[0].tables[0].y;
+            let want_table_y = if position == TableCaptionPosition::Top {
+                1_000.0 + 850.0
+            } else {
+                0.0
+            };
+            assert_eq!(table_y, want_table_y, "{pct}% {position:?} 표 위");
+            // 「끝」: 표 3,000 + 캡션 줄 1,000 + 간격 850 = 4,850(줄 간격은 안 셈).
+            let [placed_end, naive_end, _] = end_line_in_three_walks(&doc);
+            assert_eq!(placed_end, (0, 4_850.0), "{pct}% {position:?}");
+            assert_eq!(naive_end, (0, 4_850.0), "{pct}% {position:?}");
         }
     }
 
