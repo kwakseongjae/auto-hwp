@@ -1838,8 +1838,21 @@ fn body_paragraph_geom(
     let ratio = hwp_typeset::line_spacing_ratio(p, doc);
     let mut advance_cache: HashMap<(usize, char), f64> = HashMap::new();
     let mut out = Vec::with_capacity(laid.len());
+    // #542 — a floating 「자리 차지」 도형 moves the text lines it overlaps below it: the same plan
+    // place_paragraph follows, so the caret line sits on its placed glyphs.
+    let band = hwp_typeset::float_band_plan(p, &laid, ratio, vert, body_h);
 
     for (li, ls) in laid.iter().enumerate() {
+        if let Some(hwp_typeset::FloatBandPlan::Here {
+            shift_line: Some(at),
+            shift,
+            ..
+        }) = band
+        {
+            if li == at {
+                vert += shift;
+            }
+        }
         if vert + ls.vert_size > body_h && vert > 0.0 {
             page += 1;
             vert = 0.0;
@@ -3627,6 +3640,42 @@ mod tests {
             "빈칸 캐럿 x {}",
             space.x * HWPUNIT_PER_PX
         );
+    }
+
+    /// #542 PR-3 — 문단 기준 「자리 차지」 떠 있는 도형 아래로 내려간 글 줄에도 캐럿이 있고, 캐럿 줄은 놓인
+    /// 글자 줄과 같다(`float_band_plan` 을 place_paragraph 와 같이 따른다).
+    #[test]
+    fn body_caret_follows_text_pushed_below_a_floating_band() {
+        use hwp_model::document::{Block, Inline};
+        let mut doc = shape_text_para_doc(10_000, "가나다", None);
+        let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] else {
+            panic!("문단");
+        };
+        let Inline::Shape(shape) = &mut p.runs[0].content[0] else {
+            panic!("도형");
+        };
+        shape.treat_as_char = false;
+        shape.text_wrap = "TOP_AND_BOTTOM".into();
+        shape.vert_rel_to = "PARA".into();
+        shape.height = 20_000;
+        let placed = place(&doc, &[]);
+        let fonts = own_render_fonts();
+        let first = placed.pages[0]
+            .glyphs
+            .iter()
+            .find(|g| g.ch == '가')
+            .expect("놓인 글자");
+        let top = placed.pages[0].margin_top;
+        assert!(first.baseline > top + 20_000.0, "글 줄이 띠 아래로 내려갔다");
+        for offset in 0..3 {
+            let c = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 0, 0, 0, offset)
+                .unwrap_or_else(|| panic!("오프셋 {offset} 캐럿 없음"));
+            assert!(
+                c.y * HWPUNIT_PER_PX >= top + 20_000.0 - 0.5,
+                "오프셋 {offset}: 캐럿 y {} 는 띠 아래",
+                c.y * HWPUNIT_PER_PX
+            );
+        }
     }
 
     #[test]

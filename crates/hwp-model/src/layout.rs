@@ -36,6 +36,8 @@ pub enum BreakReason {
     RowOverflow,
     /// 한 쪽보다 큰 셀을 조각내면서 넘겼다.
     OverTallCell,
+    /// 떠 있는 「자리 차지」 개체가 남은 자리에 안 들어가 다음 쪽 맨 위로 갔다(#542).
+    FloatingObject,
 }
 
 /// 쪽 하나를 넘긴 기록 (이슈 299).
