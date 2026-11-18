@@ -622,7 +622,9 @@ impl LayoutEngine for NaiveLayout {
                             vert += adv;
                         }
                         match band {
-                            Some(FloatBandPlan::Here { end, .. }) if pages.len() - 1 == band_page => {
+                            Some(FloatBandPlan::Here { end, .. })
+                                if pages.len() - 1 == band_page =>
+                            {
                                 vert = vert.max(band_top + end);
                                 last_drawn = band_page; // 이슈 307 — 도형이 그 쪽을 차지한다
                             }
