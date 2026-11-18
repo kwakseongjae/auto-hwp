@@ -8780,13 +8780,14 @@ mod tests {
         ]
     }
 
-    /// #542 PR-3 — 문단 기준 「자리 차지」(위아래) 떠 있는 도형은 흐름을 민다. 기대값은 한글이 저장한 줄 배치
-    /// (lineseg)에서 왔는데, 공개 표본의 그런 도형은 마지막 문단 하나뿐이라 **같은 배치의 떠 있는 표**의 저장
-    /// 값을 쓴다(표에서 온 규칙을 도형에도 가정): SimpleTable(0 + 283 + 8,657 + 283 = 9,223) · test.hwpx
+    /// #542 PR-3 — 문단 기준 「자리 차지」(위아래) 떠 있는 도형은 흐름을 민다. ⚠️ 기대값은 **도형의 한글 저장
+    /// 값이 아니라, 같은 배치의 떠 있는 표에서 온 값을 도형에 옮긴 가정**이다 — 공개 코퍼스의 그런 도형 표본은
+    /// 마지막 문단 하나(mot.hwpx)뿐이라 규칙을 가를 수 없다. 표는 서로 다른 31개 중 18개를 줄 단위로 맞춰 모두
+    /// 일치(설명 못 한 1개 · 대조 안 한 12개). 쓴 표 값: SimpleTable(0 + 283 + 8,657 + 283 = 9,223) · test.hwpx
     /// (20251107) 구역 1 문단 74(오프셋 45) · 75(오프셋 1,130 — 1,000 높이 빈 줄이 띠 위에 든다) · 82(글 한
     /// 칸 줄은 띠 아래로 내려간다: 38,339 뒤 + 1,600). 글 앞 · 글 뒤 · 어울림 · 종이 기준은 밀지 않는다.
     #[test]
-    fn a_top_and_bottom_floating_shape_pushes_the_flow_by_its_band() {
+    fn table_derived_band_assumed_for_a_top_and_bottom_floating_shape() {
         let tb = "TOP_AND_BOTTOM";
         let cases: [(&str, ShapeRef, &str, f64); 9] = [
             (
@@ -8875,10 +8876,10 @@ mod tests {
     }
 
     /// #542 PR-3 — 띠가 남은 자리에 안 들어가면 호스트 줄은 제자리에 남고, 도형은 다음 쪽 맨 위로 간다(오프셋은
-    /// 버린다). 저장 표본(떠 있는 표 — 도형 표본은 없다): test.hwpx(20251107) 구역 1 문단 77 은 74,178 에 줄이
+    /// 버린다). ⚠️ 저장 표본으로 확인하지 못한 가정 — 떠 있는 **표** 하나의 저장 값을 도형에 옮겼다(도형 표본 없음): test.hwpx(20251107) 구역 1 문단 77 은 74,178 에 줄이
     /// 남고, 다음 문단이 다음 쪽 19,994 = 141 + 19,712 + 141 에서 시작한다. 한 단 · 다단 두 길 모두 LOCKSTEP.
     #[test]
-    fn a_band_that_does_not_fit_moves_to_the_next_page_top() {
+    fn table_derived_assumption_a_band_that_does_not_fit_moves_to_the_next_page_top() {
         use crate::LayoutEngine;
         let tb = "TOP_AND_BOTTOM";
         let mut spilled = floating_shape(tb, "PARA", 45, 19_712, 141);

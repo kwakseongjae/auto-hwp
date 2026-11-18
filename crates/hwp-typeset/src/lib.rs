@@ -2290,9 +2290,13 @@ pub struct FloatBand {
 /// instead (not handled). A paper- or page-relative 「자리 차지」 shape pushes the lines of OTHER paragraphs too
 /// and is not handled yet either.
 ///
-/// The rule is read off Hangul's stored line layout (lineseg). The public corpus has only one such shape
-/// (on a document's last paragraph, so its push is invisible), so it comes from the same placement on
-/// floating tables, which Hangul lays out alike: the content after the paragraph starts at
+/// ⚠️ An ASSUMPTION for shapes, carried over from tables. Hangul's stored line layout (lineseg) has only
+/// ONE paragraph-relative 「자리 차지」 shape in the public corpus, on a document's last paragraph, so its
+/// push cannot be seen. The rule is the one Hangul's stored lineseg shows for floating TABLES with the
+/// same placement: of 31 distinct such tables, 18 were checked line by line and all 18 agree (about 14 pin
+/// the value; the rest only show the next paragraph on a new page), 1 is unexplained (the next paragraph
+/// starts on a new page though the band fits — possibly a stale stored table size) and 12 were not
+/// checked (split across pages or on a last paragraph). The content after the paragraph starts at
 /// `문단 위 + offset + 바깥 위 + 높이 + 바깥 아래` (e.g. 0 + 283 + 8,657 + 283 = 9,223; a 45 offset →
 /// 20,953 + 45 + 20,277 = 41,275). How each line of the paragraph itself moves is [`float_band_plan`].
 pub fn floating_flow_band(p: &Paragraph) -> Option<FloatBand> {
@@ -2342,7 +2346,8 @@ pub enum FloatBandPlan {
     /// The band does not fit what is left of the page: the lines stay, the shape moves to the top of the
     /// next page (its offset dropped) and the flow there resumes `height` down. Stored-lineseg sample (a
     /// 위아래 table again): host line kept at 74,178, next paragraph at 19,994 = 141 + 19,712 + 141 on the
-    /// next page. ⚠️ No shape sample — the table-derived rule is assumed to hold for shapes.
+    /// next page. ⚠️ An assumption not confirmed by a stored sample for shapes — ONE table sample, assumed
+    /// to hold for shapes (like the outer-margin assumption of `shape_box`).
     NextPage { height: f64 },
 }
 
