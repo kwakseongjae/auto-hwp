@@ -3936,6 +3936,10 @@ fn paragraph_atoms<'a>(
                         }));
                     }
                 }
+                // LOCKSTEP with `layout_paragraph`: an inline gets an atom exactly when
+                // `crate::inline_object_slot` gives it a line slot — one rule, not a second copy of it
+                // (a floating 도형 gets none; a picture · equation · chart always gets one).
+                inline if crate::inline_object_slot(inline).is_none() => {}
                 Inline::Image(image) => out.push(ParagraphAtom::Object {
                     width: image.width.max(0) as f64,
                     height: image.height.max(0) as f64,
@@ -3957,10 +3961,7 @@ fn paragraph_atoms<'a>(
                     svg: chart.rendered_svg.clone(),
                     treat_as_char: chart.treat_as_char,
                 }),
-                // LOCKSTEP with `layout_paragraph`: a slot (and so an atom) only for a 글자처럼 취급 도형.
-                Inline::Shape(shape) if shape.treat_as_char => {
-                    out.push(ParagraphAtom::Shape(shape))
-                }
+                Inline::Shape(shape) => out.push(ParagraphAtom::Shape(shape)),
                 _ => {}
             }
         }
@@ -8290,6 +8291,62 @@ mod tests {
                 first.x
             );
         }
+    }
+
+    /// 리뷰 r2 「고치면 좋은 것 1」 — `paragraph_atoms` 는 `layout_paragraph` 와 같은 칸을 만든다: 글자마다
+    /// 하나, 그리고 `inline_object_slot` 이 칸을 주는 개체마다 하나. 떠 있는 도형 · 책갈피는 칸이 없고, 떠 있는
+    /// 그림은 크기 0 칸이다. 줄의 `text_pos` 가 원자 번호이므로 둘이 어긋나면 글자가 다른 줄에 그려진다.
+    #[test]
+    fn paragraph_atoms_take_exactly_the_layout_slots() {
+        let shape = |tac: bool| {
+            Inline::Shape(ShapeRef {
+                kind: ShapeKind::Rect,
+                width: 5_000,
+                height: 2_000,
+                treat_as_char: tac,
+                ..Default::default()
+            })
+        };
+        let image = |tac: bool| {
+            Inline::Image(ImageRef {
+                width: 3_000,
+                height: 1_000,
+                treat_as_char: tac,
+                ..Default::default()
+            })
+        };
+        let p = Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![
+                    Inline::Text("가나".into()),
+                    shape(true),
+                    shape(false),
+                    image(true),
+                    image(false),
+                    Inline::Bookmark("b".into()),
+                    Inline::Text("다".into()),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let doc = shape_doc(vec![Block::Paragraph(p.clone())]);
+        let slots: usize = p
+            .runs
+            .iter()
+            .flat_map(|run| &run.content)
+            .map(|inline| match inline {
+                Inline::Text(t) => t.chars().count(),
+                other => usize::from(crate::inline_object_slot(other).is_some()),
+            })
+            .sum();
+        assert_eq!(slots, 3 + 1 + 2, "글자 3 · 글자처럼 취급 도형 1 · 그림 2");
+        assert_eq!(paragraph_atoms(&p, &doc, &ApproxFontMetrics).len(), slots);
+        // 좁은 폭에서 줄을 나눠도 마지막 줄의 시작은 원자 범위 안이다.
+        let lines = crate::layout_paragraph(&p, &doc, 4_000.0, &ApproxFontMetrics);
+        assert!(lines.len() > 1, "줄이 나뉜다");
+        assert!(lines.iter().all(|l| (l.text_pos as usize) < slots));
     }
 
     /// 글상자 본문은 세로 정렬을 따른다 — 위 < 가운데 < 아래.

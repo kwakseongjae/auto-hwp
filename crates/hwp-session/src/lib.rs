@@ -3530,7 +3530,7 @@ mod tests {
     #[test]
     fn body_caret_counts_model_chars_past_a_tac_shape() {
         // (이름, 도형 폭, 글, 글상자 본문, 줄 수)
-        let cases: [(&str, i32, String, Option<&str>, usize); 6] = [
+        let cases: [(&str, i32, String, Option<&str>, usize); 7] = [
             ("한 줄", 30_000, "가".repeat(9), None, 1),
             ("두 줄", 30_000, "가".repeat(40), None, 2),
             ("도형이 한 줄을 다 차지", 60_000, "가".repeat(20), None, 2),
@@ -3538,6 +3538,14 @@ mod tests {
                 "줄 경계가 빈칸",
                 30_000,
                 format!("{} {}", "가".repeat(29), "가".repeat(10)),
+                None,
+                2,
+            ),
+            // 리뷰 r2 「참고 2」 — 줄 경계의 빈칸이 다음 줄 머리로 가는 모양(가 30자 + 빈칸).
+            (
+                "줄 경계 빈칸이 다음 줄 머리로",
+                30_000,
+                format!("{} {}", "가".repeat(30), "가".repeat(9)),
                 None,
                 2,
             ),
@@ -3600,6 +3608,16 @@ mod tests {
                 "{name}: 문단 끝 캐럿"
             );
         }
+
+        // 줄 경계 빈칸(오프셋 30)은 둘째 줄 머리(x 0)에 있고, 그 뒤 글자(31)와 같은 줄이다(리뷰 r2 「참고 2」).
+        let text = format!("{} {}", "가".repeat(30), "가".repeat(9));
+        let doc = shape_text_para_doc(30_000, &text, None);
+        let space = body_caret_rect(&doc, 0, 0, 0, 30).expect("줄 경계 빈칸 캐럿");
+        let next = body_caret_rect(&doc, 0, 0, 0, 31).expect("빈칸 뒤 글자 캐럿");
+        let first = body_caret_rect(&doc, 0, 0, 0, 0).expect("첫 글자 캐럿");
+        assert!(space.y > first.y, "빈칸은 둘째 줄");
+        assert_eq!(space.y, next.y, "빈칸과 뒤 글자는 같은 줄");
+        assert!(space.x.abs() < 0.01, "빈칸 캐럿 x {} — 줄 머리", space.x);
 
         // 도형 바로 뒤 빈칸은 도형 오른쪽(30,000)에서 시작한다 — 줄 머리(0)가 아니다.
         let doc = shape_text_para_doc(30_000, " 가", None);
