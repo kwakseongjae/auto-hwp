@@ -1165,7 +1165,7 @@ pub(crate) fn cell_paragraph_height(
     let text: f64 = lines.iter().map(|l| line_advance(l, ratio)).sum();
     let last_leading = lines
         .last()
-        .map(|l| l.vert_size * (ratio - 1.0))
+        .map(|l| line_leading(l, ratio))
         .unwrap_or(0.0)
         .max(0.0);
     sb + (text - last_leading) + sa
@@ -1588,7 +1588,7 @@ fn continued_text_row_height(
                 let ratio = line_spacing_ratio(paragraph, doc);
                 if let Some(last) = layout_cell_paragraph(paragraph, doc, text_width, fonts).last()
                 {
-                    height += (last.vert_size * (ratio - 1.0)).max(0.0);
+                    height += line_leading(last, ratio).max(0.0);
                 }
             }
         }
@@ -1687,7 +1687,7 @@ fn cell_term_breakdown(
                 let spaced: f64 = lines.iter().map(|l| line_advance(l, ratio)).sum();
                 let last_leading = lines
                     .last()
-                    .map(|l| l.vert_size * (ratio - 1.0))
+                    .map(|l| line_leading(l, ratio))
                     .unwrap_or(0.0)
                     .max(0.0);
                 b.lines += lines.len();
@@ -2201,6 +2201,12 @@ pub(crate) fn line_advance(line: &LineSeg, ratio: f64) -> f64 {
     } else {
         line.vert_size * ratio
     }
+}
+
+/// The leading [`line_advance`] adds below a line's box — what a paragraph's LAST line in a cell does
+/// not take (the trailing-leading trim). Same rule, so a trimmed object line keeps its whole box.
+pub(crate) fn line_leading(line: &LineSeg, ratio: f64) -> f64 {
+    line_advance(line, ratio) - line.vert_size
 }
 
 pub(crate) fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
@@ -3100,5 +3106,17 @@ mod tests {
         assert_eq!(lines[0].font_size, 0.0);
         let ratio = line_spacing_ratio(&p, &doc);
         assert_eq!(line_advance(&lines[0], ratio), lines[0].vert_size * ratio);
+    }
+
+    /// #556 — 칸 문단의 마지막 줄은 줄 간격 몫(leading)을 빼고 잰다(trailing-leading trim). 그 몫도 같은 규칙이라,
+    /// 개체가 높이를 정한 마지막 줄은 개체 높이를 다 지킨다(예전 규칙의 몫 = 높이 × (비율 − 1)을 빼면 그림보다 작아진다).
+    #[test]
+    fn a_cell_paragraph_ending_in_an_object_line_keeps_the_whole_object() {
+        let (doc, p) = object_line_doc(1500, 29_196, LineSpacingType::Percent, 148);
+        let h = cell_paragraph_height(&p, &doc, 40_000.0, &ApproxFontMetrics);
+        assert!(
+            (h - 29_196.0).abs() < 1.0,
+            "칸 문단 높이 {h} — 그림 29,196 그대로여야 한다"
+        );
     }
 }
