@@ -944,6 +944,14 @@ fn export_pdf(
             parts.join(" · ")
         );
     }
+    // 떠 있는 표(#544)의 보이지 않는 행 — 흐름이 다음 쪽을 만들지 않았거나 종이 아래로 넘쳤다. 쪽마다 한 줄.
+    for notice in result.notices.iter().filter(|n| n.kind == "floating-table") {
+        eprintln!(
+            "경고: {}쪽 — 떠 있는 표의 행 일부가 보이지 않는다(다음 쪽 없음 · 종이 아래로 넘침) ({})",
+            notice.page_index + 1,
+            notice.code
+        );
+    }
     if let (Some(path), Some(bytes)) = (visual_regions, evidence) {
         use std::io::Write as _;
         let mut options = std::fs::OpenOptions::new();

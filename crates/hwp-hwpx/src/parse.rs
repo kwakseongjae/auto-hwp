@@ -463,6 +463,12 @@ struct TblFrame {
     /// new page; retained only as a render-cache lower bound for clean HWPX input.
     cur_cell_last_vert: Option<i32>,
     cur_cell_page_segments: usize,
+    /// #544 — `<hp:tbl textWrap zOrder>`, read into [`Table::float_placement`] at the table's own `<hp:pos>`.
+    text_wrap: String,
+    z_order: i32,
+    /// The table's own `<hp:pos>` (its first, before any cell) was seen — later ones belong to a caption's
+    /// or a cell's objects.
+    pos_seen: bool,
 }
 
 impl TblFrame {
@@ -481,6 +487,9 @@ impl TblFrame {
             cur_cell_margin: None,
             cur_cell_last_vert: None,
             cur_cell_page_segments: 0,
+            text_wrap: String::new(),
+            z_order: 0,
+            pos_seen: false,
         }
     }
 }
@@ -1108,7 +1117,7 @@ pub(crate) fn parse_section(
                             .as_deref()
                             .is_some_and(|value| value.eq_ignore_ascii_case("CELL"));
                         let repeat_first_row = attr_usize(&e, b"repeatHeader") == Some(1);
-                        tbls.push(TblFrame::new(
+                        let mut frame = TblFrame::new(
                             Table {
                                 rows,
                                 cols,
@@ -1120,7 +1129,10 @@ pub(crate) fn parse_section(
                             pos_before,
                             border_ref,
                             no_adjust,
-                        ));
+                        );
+                        frame.text_wrap = attr_str(&e, b"textWrap").unwrap_or_default();
+                        frame.z_order = attr_i32(&e, b"zOrder").unwrap_or(0);
+                        tbls.push(frame);
                     }
                     b"tc" => {
                         blocks.push(Vec::new());
@@ -1361,6 +1373,33 @@ pub(crate) fn parse_section(
                             f.table.outer_margin_bottom = attr_i32(&e, b"bottom").unwrap_or(0);
                         }
                     }
+                }
+                // #544 — 표 자신의 `<hp:pos>`(첫 행 앞의 첫 것). 글 앞 · 글 뒤로 띄운 표면 그 배치를
+                // `float_placement` 로 읽는다 — .hwp 리프트(`lift_table_float`)와 같은 조건 · 같은 필드라
+                // 조판(흐름을 쓰지 않음)과 내보내기(떠 있는 `<hp:pos>` 를 그대로 다시 씀)가 함께 읽는다.
+                // 오프셋은 도형과 같은 `attr_offset`(부호 없는 32비트로 쓴 음수, #572).
+                b"pos" => {
+                    if let Some(f) = tbls.last_mut().filter(|f| f.cell.is_none() && !f.pos_seen) {
+                        f.pos_seen = true;
+                        let floats = attr_usize(&e, b"treatAsChar") == Some(0)
+                            && matches!(f.text_wrap.as_str(), "IN_FRONT_OF_TEXT" | "BEHIND_TEXT");
+                        if floats {
+                            let token = |name: &[u8]| attr_str(&e, name).unwrap_or_default();
+                            f.table.float_placement = Some(TableFloat {
+                                text_wrap: f.text_wrap.clone(),
+                                vert_rel_to: token(b"vertRelTo"),
+                                horz_rel_to: token(b"horzRelTo"),
+                                vert_align: token(b"vertAlign"),
+                                horz_align: token(b"horzAlign"),
+                                vert_offset: attr_offset(&e, b"vertOffset"),
+                                horz_offset: attr_offset(&e, b"horzOffset"),
+                                z_order: f.z_order,
+                            });
+                            // 리프트와 같다 — 통째로 다시 쓸 때 `treatAsChar="0"` 으로 남는다.
+                            f.table.treat_as_char = Some(false);
+                        }
+                    }
+                    mark_not_simple(&mut paras);
                 }
                 // Batch C: the table-DEFAULT cell padding (`<hp:inMargin>` sits before the first row,
                 // so `f.cell` is None then; a picture's inMargin is handled by the pic arm above).
@@ -3985,5 +4024,107 @@ pub(crate) mod tests {
             para_text(&table.cells[0].blocks).contains("칸 상자 글"),
             "칸 문단은 지금 그대로"
         );
+    }
+
+    /// #544 — 글 앞 · 글 뒤로 띄운 표는 표 **자신의** `<hp:pos>`(첫 행 앞) 배치를 `float_placement` 로 읽는다.
+    /// 칸 안 도형의 `<hp:pos>` 는 표의 것이 아니다. 음수 오프셋은 부호 없는 32비트로 쓰여 있다(−150).
+    fn floating_table_xml(wrap: &str, tac: u8) -> String {
+        format!(
+            r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:tbl id="7" zOrder="3" textWrap="{wrap}" rowCnt="1" colCnt="1"><hp:sz width="20000" height="3000"/><hp:pos treatAsChar="{tac}" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="4294967146" horzOffset="14360"/><hp:outMargin left="283" right="283" top="283" bottom="283"/><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:rect id="9" textWrap="IN_FRONT_OF_TEXT"><hp:sz width="10" height="10"/><hp:pos treatAsChar="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="77" horzOffset="88"/></hp:rect><hp:t>셀</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="20000" height="3000"/></hp:tc></hp:tr></hp:tbl><hp:t></hp:t></hp:run></hp:p></hs:sec>"#
+        )
+    }
+
+    fn first_table(blocks: &[Block]) -> &Table {
+        blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("표")
+    }
+
+    #[test]
+    fn a_floating_tables_own_pos_fills_its_float_placement() {
+        for wrap in ["IN_FRONT_OF_TEXT", "BEHIND_TEXT"] {
+            let mut blocks = Vec::new();
+            let xml = floating_table_xml(wrap, 0);
+            parse_section(&xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+            let t = first_table(&blocks);
+            assert_eq!(
+                t.float_placement,
+                Some(TableFloat {
+                    text_wrap: wrap.into(),
+                    vert_rel_to: "PARA".into(),
+                    horz_rel_to: "COLUMN".into(),
+                    vert_align: "TOP".into(),
+                    horz_align: "LEFT".into(),
+                    vert_offset: -150,
+                    horz_offset: 14_360,
+                    z_order: 3,
+                }),
+                "{wrap}"
+            );
+            assert_eq!(t.treat_as_char, Some(false), "{wrap}: 리프트와 같다");
+            // 호스트는 지금처럼 표 앵커로 표시된다 — 줄을 쓸지는 조판이 정한다(hwp_typeset::SectionFloatTables).
+            assert!(blocks
+                .iter()
+                .any(|b| matches!(b, Block::Paragraph(p) if p.is_table_anchor)));
+        }
+    }
+
+    /// #544 — 흐름 안 표(위아래 · 어울림 · 글자처럼 취급)는 지금처럼 배치를 싣지 않는다.
+    #[test]
+    fn a_table_in_the_flow_keeps_no_float_placement() {
+        for (wrap, tac) in [
+            ("TOP_AND_BOTTOM", 0),
+            ("SQUARE", 0),
+            ("IN_FRONT_OF_TEXT", 1),
+        ] {
+            let mut blocks = Vec::new();
+            let xml = floating_table_xml(wrap, tac);
+            parse_section(&xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+            let t = first_table(&blocks);
+            assert_eq!(t.float_placement, None, "{wrap} tac={tac}");
+            assert_eq!(t.treat_as_char, None, "{wrap} tac={tac}");
+        }
+    }
+
+    /// #544 — 파싱한 글 앞 표를 통째로 다시 쓰면(열 너비 · 행 높이 편집) 떠 있는 배치가 그대로 남는다.
+    /// 예전에는 `float_placement` 가 비어 있어 `treatAsChar="1"` 인라인 표로 바뀌어 써졌다.
+    #[test]
+    fn a_rewritten_floating_table_keeps_its_placement() {
+        let section = floating_table_xml("IN_FRONT_OF_TEXT", 0);
+        let bytes = build_test_hwpx(&[
+            ("mimetype", b"application/hwp+zip"),
+            ("Contents/header.xml", b"<hh:head></hh:head>"),
+            ("Contents/section0.xml", section.as_bytes()),
+        ]);
+        let mut doc = parse_semantic(&bytes).expect("parse test hwpx");
+        let sec = &mut doc.sections[0];
+        sec.dirty.mark();
+        let t = sec
+            .blocks
+            .iter_mut()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("표");
+        t.col_widths = vec![18_000];
+        t.geometry_edited = true;
+        t.dirty.mark();
+        let out = crate::serialize::serialize(&doc).expect("serialize");
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(out)).unwrap();
+        let mut xml = String::new();
+        std::io::Read::read_to_string(&mut z.by_name("Contents/section0.xml").unwrap(), &mut xml)
+            .unwrap();
+        let open = xml.find("<hp:tbl ").expect("표를 다시 썼다");
+        let head = &xml[open..xml[open..].find("<hp:outMargin").unwrap() + open];
+        assert!(head.contains(r#"textWrap="IN_FRONT_OF_TEXT""#), "{head}");
+        assert!(head.contains(r#"treatAsChar="0""#), "{head}");
+        assert!(head.contains(r#"vertOffset="-150""#), "{head}");
+        assert!(head.contains(r#"horzOffset="14360""#), "{head}");
+        assert!(head.contains(r#"zOrder="3""#), "{head}");
     }
 }

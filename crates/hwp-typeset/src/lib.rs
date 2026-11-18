@@ -544,6 +544,8 @@ impl LayoutEngine for NaiveLayout {
             let brk = crate::section_page_breaks(sec, doc);
             // 이슈 314 — 이 뒤의 빈 줄은 쪽을 못 만든다. 구역마다 한 번만 센다.
             let last_draw = crate::section_last_drawing_block(sec);
+            // #544 — 글 앞 · 글 뒤 표의 자리. place_doc · block_pages 와 같은 판정(LOCKSTEP).
+            let floats = SectionFloatTables::of(sec);
             let mut vert = 0.0f64; // page-relative vertical cursor
                                    // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 강제 개쪽은 이 쪽에서만 실행된다.
             let mut last_drawn = NOTHING_DRAWN;
@@ -567,7 +569,8 @@ impl LayoutEngine for NaiveLayout {
                         }
                         // A pure table anchor reserves NO height (Hancom hangs the table off it with no
                         // line); the following Table block accounts for the space. Skip its line + spacing.
-                        if p.is_table_anchor {
+                        // #544 — an anchor whose tables all float over the text keeps its line.
+                        if floats.skips_line(blk_idx, p) {
                             continue;
                         }
                         // 문단 위 간격 — Hancom adds it before the paragraph (suppressed at page top).
@@ -579,6 +582,10 @@ impl LayoutEngine for NaiveLayout {
                         // #542 — 떠 있는 「자리 차지」 도형의 띠. 세 걸음 · 캐럿이 같은 계획을 따른다.
                         let band = float_band_plan(p, &lines, ratio, vert, body_h);
                         let (band_page, band_top) = (pages.len() - 1, vert);
+                        // 문단 위가 놓인 쪽 — 이 문단이 품은 떠 있는 표가 그려지는 쪽(place_paragraph 의
+                        // `para_anchor` 와 같은 규칙).
+                        let mut anchor_page = band_page;
+                        let first_line_pushed = band.is_some_and(|plan| plan.pushes_line(0));
                         for (li, ls) in lines.into_iter().enumerate() {
                             if let Some(FloatBandPlan::Here {
                                 shift_line: Some(at),
@@ -610,6 +617,9 @@ impl LayoutEngine for NaiveLayout {
                                     body_h - vert,
                                 );
                                 vert = 0.0;
+                                if li == 0 && !first_line_pushed {
+                                    anchor_page = pages.len() - 1;
+                                }
                             }
                             let adv = line_advance(&ls, ratio);
                             if ls.horz_size > 0.0 {
@@ -643,6 +653,10 @@ impl LayoutEngine for NaiveLayout {
                             }
                             _ => {}
                         }
+                        // #544 — 이 문단이 품은 떠 있는 표는 문단 위 쪽에 그려진다(흐름은 안 쓴다).
+                        if floats.hosted_by(blk_idx).next().is_some() {
+                            mark_drawn(&mut last_drawn, anchor_page);
+                        }
                         // 문단 아래 간격.
                         vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
                     }
@@ -669,6 +683,14 @@ impl LayoutEngine for NaiveLayout {
                                 body_h - vert,
                             );
                             vert = 0.0;
+                        }
+                        // #544 — 글 앞 · 글 뒤 표는 흐름 높이를 쓰지 않는다(바깥 여백 · 쪽 넘김 · 행 나눔
+                        // 없음). 호스트 문단이 그 자리에 그리고, 호스트가 없으면 여기(지금 쪽)에 그린다.
+                        if table_floats_over_text(t) {
+                            if floats.drawn_by(blk_idx).is_none() {
+                                mark_drawn(&mut last_drawn, pages.len() - 1);
+                            }
+                            continue;
                         }
                         // Promote a 1×1 frame-wrapper to its inner table so a tall nested grid splits at
                         // row granularity (자가진단표) instead of bumping whole. Identical in place_doc +
@@ -824,6 +846,8 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
             output.height = height as f64;
         }
         let breaks = section_page_breaks(section, doc);
+        // #544 — 글 앞 · 글 뒤 표(한 단 걸음과 같은 판정).
+        let floats = SectionFloatTables::of(section);
         let mut flow = ColumnFlow::new(body_w);
         for (block_index, block) in section.blocks.iter().enumerate() {
             match block {
@@ -840,7 +864,7 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
                     } else if paragraph.column_break_before && flow.advance_column() {
                         pages.push(new_page(page));
                     }
-                    if paragraph.is_table_anchor {
+                    if floats.skips_line(block_index, paragraph) {
                         continue;
                     }
                     if flow.vert() > 0.0 {
@@ -902,6 +926,10 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
                     if breaks[block_index] && flow.y() > 0.0 {
                         pages.push(new_page(page));
                         flow.reset_page();
+                    }
+                    // #544 — 떠 있는 표는 흐름을 쓰지 않는다(한 단 걸음과 같다).
+                    if table_floats_over_text(table) {
+                        continue;
                     }
                     let promoted = unwrap_frame_table(table);
                     let table = promoted.as_ref().map(|(inner, _)| inner).unwrap_or(table);
@@ -2267,6 +2295,135 @@ pub fn inline_object_slot(inline: &Inline) -> Option<(f64, f64)> {
         // sets the line height like a picture's, every kind alike (only a `rect` is drawn).
         Inline::Shape(shape) if shape.treat_as_char => Some(shape_box(shape)),
         _ => None,
+    }
+}
+
+/// #544 — a table floating over the text: 글 앞으로 (`IN_FRONT_OF_TEXT`) or 글 뒤로 (`BEHIND_TEXT`), read
+/// from [`Table::float_placement`] (the HWPX parser and the .hwp lift fill it alike). Hangul lays the
+/// text out as if such a table were not there: it takes no flow height, and its host paragraph keeps
+/// its ordinary line.
+///
+/// ⚠️ Thin evidence: the public and private corpora (86 HWPX · 40 .hwp) hold THREE such tables in TWO
+/// documents, all 글 앞. The rule rests on one document with Hangul's stored lines — a 32,200-tall 글 앞
+/// table's empty host line at 2,220 = 0 + 1,500 + 720 (the line before it), full body width — and one
+/// document with only another program's PDF — its last text line where 73 paragraphs × 1,620 would put
+/// it (118,260 vs. 118,534 measured, 0.23%), i.e. both tables take no flow and both hosts keep a line.
+/// No 글 뒤 table exists in either corpus (0 samples): it is ASSUMED to lay out the same way.
+pub fn table_floats_over_text(t: &Table) -> bool {
+    t.float_placement
+        .as_ref()
+        .is_some_and(|f| matches!(f.text_wrap.as_str(), "IN_FRONT_OF_TEXT" | "BEHIND_TEXT"))
+}
+
+/// The paragraph block that hosts table block `index` of `sec`. The two block orders: the HWPX parser
+/// emits `[표…, 호스트]` (the host's source span holds the table's — the rule of
+/// [`hoist_to_owned_table`]), the .hwp lift `[호스트, 표…]` (no source spans). `None` when neither
+/// holds (a table an op inserted, say).
+fn table_host(sec: &Section, index: usize) -> Option<usize> {
+    let Some(Block::Table(t)) = sec.blocks.get(index) else {
+        return None;
+    };
+    match t.src_span {
+        Some((start, end)) => {
+            let (offset, host) =
+                sec.blocks[index + 1..]
+                    .iter()
+                    .enumerate()
+                    .find_map(|(k, b)| match b {
+                        Block::Paragraph(p) => Some((k, p)),
+                        Block::Table(_) => None,
+                    })?;
+            let span = host.source.as_ref()?.span;
+            (span.0 <= start && end <= span.1).then_some(index + 1 + offset)
+        }
+        None => {
+            let (at, host) =
+                sec.blocks[..index]
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find_map(|(k, b)| match b {
+                        Block::Paragraph(p) => Some((k, p)),
+                        Block::Table(_) => None,
+                    })?;
+            host.source.is_none().then_some(at)
+        }
+    }
+}
+
+/// Where a section's 글 앞 · 글 뒤 tables ([`table_floats_over_text`]) go (#544) — computed once per
+/// section and shared by every pagination walk (`NaiveLayout`, `place_doc`, `block_pages` and their
+/// column twins), like [`section_page_breaks`], so they stay in LOCKSTEP. A section without such a
+/// table answers exactly as before (no table floats, every pure table anchor reserves no line).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SectionFloatTables {
+    /// Per block: a floating table → the host paragraph that draws it (its anchor). `None` for a table
+    /// in the flow, and for a floating one drawn where it stands (no host, or a host that reserves no
+    /// line because it also holds a table in the flow).
+    drawn_by: Vec<Option<usize>>,
+    /// Per block: a pure table anchor all of whose tables float — it keeps its ordinary line.
+    anchor_line: Vec<bool>,
+}
+
+impl SectionFloatTables {
+    pub fn of(sec: &Section) -> Self {
+        let floats = |b: &Block| matches!(b, Block::Table(t) if table_floats_over_text(t));
+        if !sec.blocks.iter().any(floats) {
+            return Self::default();
+        }
+        let n = sec.blocks.len();
+        let host: Vec<Option<usize>> = (0..n).map(|i| table_host(sec, i)).collect();
+        let mut anchor_line = vec![false; n];
+        for (i, b) in sec.blocks.iter().enumerate() {
+            let Block::Paragraph(p) = b else { continue };
+            if !p.is_table_anchor {
+                continue;
+            }
+            // ⚠️ 표본 없음 — 가정: 떠 있는 표와 흐름 표를 함께 품은 빈 호스트는 지금처럼 줄을 쓰지 않는다(흐름 표가
+            // 그 자리를 차지한다). 코퍼스(HWPX 86 · .hwp 40)에 그런 호스트는 0개다.
+            let mut owned = (0..n).filter(|&t| host[t] == Some(i)).peekable();
+            anchor_line[i] = owned.peek().is_some() && owned.all(|t| floats(&sec.blocks[t]));
+        }
+        let drawn_by = (0..n)
+            .map(|t| {
+                let h = host[t].filter(|_| floats(&sec.blocks[t]))?;
+                let Block::Paragraph(p) = &sec.blocks[h] else {
+                    return None;
+                };
+                (!p.is_table_anchor || anchor_line[h]).then_some(h)
+            })
+            .collect();
+        Self {
+            drawn_by,
+            anchor_line,
+        }
+    }
+
+    /// Whether paragraph block `index` reserves no line: a pure table anchor (the table in the flow takes
+    /// its room) — but not one whose tables all float.
+    pub fn skips_line(&self, index: usize, p: &Paragraph) -> bool {
+        p.is_table_anchor && !self.anchor_line.get(index).copied().unwrap_or(false)
+    }
+
+    /// The host paragraph that draws floating table block `index` at its anchor; `None` otherwise.
+    pub fn drawn_by(&self, index: usize) -> Option<usize> {
+        self.drawn_by.get(index).copied().flatten()
+    }
+
+    /// The floating table blocks paragraph block `index` draws, in block order.
+    pub fn hosted_by(&self, index: usize) -> impl Iterator<Item = usize> + '_ {
+        self.drawn_by
+            .iter()
+            .enumerate()
+            .filter_map(move |(t, h)| (*h == Some(index)).then_some(t))
+    }
+}
+
+/// Record that page `page` holds something drawn (issue 307's `last_drawn`): never moves it back to an
+/// earlier page — a floating table drawn at its host's anchor may sit on a page before the cursor's.
+pub(crate) fn mark_drawn(last_drawn: &mut usize, page: usize) {
+    if *last_drawn == NOTHING_DRAWN || page > *last_drawn {
+        *last_drawn = page;
     }
 }
 

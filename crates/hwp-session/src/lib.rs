@@ -3465,6 +3465,84 @@ mod tests {
         );
     }
 
+    /// #544 — 글 앞으로 띄운 표는 본문 문단 띠 위에 겹친다. 그 자리를 누르면 표와 칸이 잡힌다 — 화면은 표 ·
+    /// 칸을 먼저 묻는다(`selection.resolveHit` 의 `tableAt` · `caretRouter` 의 칸 캐럿). `own_hit_test` 는 지금처럼
+    /// 세로 띠 기준이라 그 아래 본문 문단을 돌려준다(표가 잡히지 않을 때만 화면이 쓴다). 두 블록 순서 모두.
+    #[test]
+    fn a_click_on_a_floating_table_over_body_text_resolves_to_the_table() {
+        use hwp_model::document::{
+            Block, Cell, Inline, ParaSource, Paragraph, Run, Table, TableFloat,
+        };
+        let para = |text: &str| Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text(text.into())],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        for hwpx in [true, false] {
+            let mut doc = body_para_doc("", 80_000);
+            let mut table = Table {
+                rows: 1,
+                cols: 1,
+                cells: vec![Cell {
+                    blocks: vec![Block::Paragraph(para("칸"))],
+                    ..Default::default()
+                }],
+                col_widths: vec![20_000],
+                row_heights: vec![10_000],
+                fixed_row_heights: true,
+                float_placement: Some(TableFloat {
+                    text_wrap: "IN_FRONT_OF_TEXT".into(),
+                    vert_rel_to: "PARA".into(),
+                    horz_rel_to: "COLUMN".into(),
+                    vert_align: "TOP".into(),
+                    horz_align: "LEFT".into(),
+                    vert_offset: 0,
+                    horz_offset: 5_000,
+                    z_order: 1,
+                }),
+                treat_as_char: Some(false),
+                ..Default::default()
+            };
+            let mut host = para("");
+            host.is_table_anchor = true;
+            let mut blocks = Vec::new();
+            if hwpx {
+                host.source = Some(ParaSource {
+                    span: (0, 900),
+                    ..Default::default()
+                });
+                table.src_span = Some((10, 800));
+                blocks.push(Block::Table(table));
+                blocks.push(Block::Paragraph(host));
+            } else {
+                blocks.push(Block::Paragraph(host));
+                blocks.push(Block::Table(table));
+            }
+            blocks.extend((0..8).map(|_| Block::Paragraph(para("가나다"))));
+            doc.sections[0].blocks = blocks;
+            let t_idx = usize::from(!hwpx);
+            // 칸 안(가로 5,000 ~ 25,000 · 세로 0 ~ 10,000) — 본문 줄(1,600 간격)이 그 아래로 흐른다.
+            let (x, y) = (15_000.0 / HWPUNIT_PER_PX, 5_000.0 / HWPUNIT_PER_PX);
+            let table = table_at(&doc, 0, x, y).expect("표");
+            assert_eq!(table.block, t_idx, "hwpx={hwpx}");
+            assert!(
+                (table.x * HWPUNIT_PER_PX - 5_000.0).abs() < 0.5,
+                "hwpx={hwpx}"
+            );
+            let cell = cell_text_hit(&doc, 0, x, y).expect("칸");
+            assert_eq!(
+                (cell.block, cell.row, cell.col),
+                (t_idx, Some(0), Some(0)),
+                "hwpx={hwpx}"
+            );
+            let band = own_hit_test(&doc, 0, x, y).expect("띠");
+            assert_eq!(band.kind, "paragraph", "hwpx={hwpx}: 세로 띠 기준");
+        }
+    }
+
     fn body_para_doc(text: &str, page_height: i32) -> SemanticDoc {
         use hwp_model::document::{Block, Inline, Paragraph, Run, Section};
         let mut doc = SemanticDoc {
