@@ -165,3 +165,35 @@ fn disaster_cover_front_table_sits_at_its_offset_and_the_break_still_runs() {
         drawn.2
     );
 }
+
+/// #544 — 파서가 이제 떠 있는 표에 `float_placement` · `treat_as_char` 를 싣지만, 고치지 않은 저장은 구역 XML 을
+/// 바이트 그대로 둔다(두 공개 문서).
+#[test]
+fn unedited_save_keeps_floating_tables_byte_for_byte() {
+    for rel in [
+        "error/20250523/프로젝트 계획서.hwpx",
+        "error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx",
+    ] {
+        let path = format!(
+            "{}/../../corpus/hwpxlib_corpus/{rel}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let bytes = std::fs::read(&path).expect(&path);
+        let doc = parse_semantic(&bytes).expect("parse");
+        assert!(doc.sections[0]
+            .blocks
+            .iter()
+            .any(|b| matches!(b, Block::Table(t) if t.float_placement.is_some())));
+        let saved = hwp_hwpx::serialize::serialize(&doc).expect("serialize");
+        let part = |zip: &[u8]| {
+            hwp_hwpx::package::Package::open(zip)
+                .unwrap()
+                .read_part("Contents/section0.xml")
+                .unwrap()
+        };
+        assert!(
+            part(&saved) == part(&bytes),
+            "{rel}: section0.xml 이 바뀌었다"
+        );
+    }
+}

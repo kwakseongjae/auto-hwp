@@ -619,7 +619,8 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                             continue;
                         };
                         let at = placed_para.anchor_page;
-                        float_rest.extend(place_floating_table(
+                        // 다음 쪽에서 잇는 표의 쪽 번호 표지는 잇기를 그린 뒤(구역 끝)에 찾는다.
+                        match place_floating_table(
                             &mut pages,
                             at,
                             t,
@@ -628,8 +629,18 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                             fonts,
                             sec_idx,
                             t_idx,
-                        ));
-                        marks.on_table(&pages, at, at, sec_idx, t_idx, &sec.blocks[t_idx], t);
+                        ) {
+                            Some(rest) => float_rest.push(rest),
+                            None => marks.on_table(
+                                &pages,
+                                at,
+                                at,
+                                sec_idx,
+                                t_idx,
+                                &sec.blocks[t_idx],
+                                t,
+                            ),
+                        }
                         crate::mark_drawn(&mut last_drawn, at);
                     }
                     // Provenance band for point-to-scope: the paragraph's row extent on each page it
@@ -676,10 +687,12 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                                 para: (ml, body_w),
                                 para_top: mt + vert,
                             };
-                            float_rest.extend(place_floating_table(
+                            match place_floating_table(
                                 &mut pages, at, t, &frame, doc, fonts, sec_idx, blk_idx,
-                            ));
-                            marks.on_table(&pages, at, at, sec_idx, blk_idx, block, t);
+                            ) {
+                                Some(rest) => float_rest.push(rest),
+                                None => marks.on_table(&pages, at, at, sec_idx, blk_idx, block, t),
+                            }
                             crate::mark_drawn(&mut last_drawn, at);
                         }
                         started = true;
@@ -808,8 +821,10 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
         }
         // #544 — 쪽 아래를 넘은 떠 있는 표는 흐름이 만든 다음 쪽들 맨 위에서 잇는다(쪽을 더하지 않는다).
         for rest in float_rest {
-            if let Some(Block::Table(t)) = sec.blocks.get(rest.block) {
-                continue_floating_table(&mut pages, rest, t, mt, body_h, doc, fonts, sec_idx);
+            if let Some(block @ Block::Table(t)) = sec.blocks.get(rest.block) {
+                let last =
+                    continue_floating_table(&mut pages, rest, t, mt, body_h, doc, fonts, sec_idx);
+                marks.on_table(&pages, rest.page, last, sec_idx, rest.block, block, t);
             }
         }
         marks.finish(pages.len() - 1);
@@ -892,7 +907,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                             continue;
                         };
                         let at = placed_para.anchor_page;
-                        float_rest.extend(place_floating_table(
+                        match place_floating_table(
                             &mut pages,
                             at,
                             t,
@@ -901,16 +916,18 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                             fonts,
                             section_index,
                             t_idx,
-                        ));
-                        marks.on_table(
-                            &pages,
-                            at,
-                            at,
-                            section_index,
-                            t_idx,
-                            &section.blocks[t_idx],
-                            t,
-                        );
+                        ) {
+                            Some(rest) => float_rest.push(rest),
+                            None => marks.on_table(
+                                &pages,
+                                at,
+                                at,
+                                section_index,
+                                t_idx,
+                                &section.blocks[t_idx],
+                                t,
+                            ),
+                        }
                     }
                     let end_page = pages.len() - 1;
                     let end_y = body_y + flow.y();
@@ -949,7 +966,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                                 para: (body_x + column.x, column.width),
                                 para_top: body_y + flow.y(),
                             };
-                            float_rest.extend(place_floating_table(
+                            match place_floating_table(
                                 &mut pages,
                                 at,
                                 table,
@@ -958,16 +975,18 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                                 fonts,
                                 section_index,
                                 block_index,
-                            ));
-                            marks.on_table(
-                                &pages,
-                                at,
-                                at,
-                                section_index,
-                                block_index,
-                                block,
-                                table,
-                            );
+                            ) {
+                                Some(rest) => float_rest.push(rest),
+                                None => marks.on_table(
+                                    &pages,
+                                    at,
+                                    at,
+                                    section_index,
+                                    block_index,
+                                    block,
+                                    table,
+                                ),
+                            }
                         }
                         started = true;
                         continue;
@@ -1105,8 +1124,8 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
             }
         }
         for rest in float_rest {
-            if let Some(Block::Table(t)) = section.blocks.get(rest.block) {
-                continue_floating_table(
+            if let Some(block @ Block::Table(t)) = section.blocks.get(rest.block) {
+                let last = continue_floating_table(
                     &mut pages,
                     rest,
                     t,
@@ -1116,6 +1135,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                     fonts,
                     section_index,
                 );
+                marks.on_table(&pages, rest.page, last, section_index, rest.block, block, t);
             }
         }
         marks.finish(pages.len() - 1);
@@ -4381,8 +4401,8 @@ fn place_floating_table(
 }
 
 /// Draw the rows [`place_floating_table`] left over, from the top of the body (`top` · `body_h`) of each
-/// following page. Only pages the flow made are used — a floating table never adds a page (so the page
-/// count stays the flow's, in LOCKSTEP); rows with no page left are not drawn.
+/// following page, and return the last page drawn on. Only pages the flow made are used — a floating table
+/// never adds a page (so the page count stays the flow's, in LOCKSTEP); rows with no page left are not drawn.
 #[allow(clippy::too_many_arguments)]
 fn continue_floating_table(
     pages: &mut [PlacedPage],
@@ -4393,7 +4413,7 @@ fn continue_floating_table(
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
     section: usize,
-) {
+) -> usize {
     let col_x = column_offsets(t, rest.avail_w);
     let row_h = crate::table_page_flow_row_heights(t, rest.avail_w, body_h, doc, fonts);
     let (mut first, mut page) = (rest.first_row, rest.page + 1);
@@ -4425,6 +4445,7 @@ fn continue_floating_table(
         });
         (first, page) = (end, page + 1);
     }
+    page - 1
 }
 
 /// Where a paragraph-relative 「자리 차지」 도형 goes when [`crate::FloatBandPlan::NextPage`] moved its band:
@@ -10029,6 +10050,32 @@ mod tests {
         assert_eq!(placed.pages.len(), 1);
         assert_eq!(table_on(&placed, 0).len(), 1);
         assert_eq!(placed.pages[0].tables[0].last_row, 2);
+    }
+
+    /// #544 — 다음 쪽에서 잇는 행 안의 쪽 번호 표지는 그 쪽에서 효력을 낸다. 잇기 전에 찾으면 「놓인 쪽을 못
+    /// 찾음」으로 구역의 쪽 번호가 통째로 꺼졌다.
+    #[test]
+    fn a_page_number_mark_in_a_continued_row_takes_effect_on_that_page() {
+        let mut t = fixed_height_table(4, 30_000, false);
+        t.col_widths = vec![20_000];
+        t.float_placement = front_table(1, 10_000, 0).float_placement;
+        let mut marked = para("행");
+        marked.page_number_marks = vec![PageNumberMark::Restart(nz(7))];
+        t.cells[3].blocks = vec![Block::Paragraph(marked)];
+        let mut blocks = hosted(t, "", true, 1);
+        blocks.extend((0..60).map(|_| Block::Paragraph(para("가"))));
+        let mut doc = shape_doc(blocks);
+        doc.sections[0].page_number = Some(digit_number());
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert!(
+            placed.page_number_off.is_empty(),
+            "{:?}",
+            placed.page_number_off
+        );
+        assert_eq!(
+            page_number_texts(&placed),
+            vec!["1".to_string(), "7".to_string()]
+        );
     }
 
     /// #544 — 오프셋으로 옮겨 그린 떠 있는 표에서도 칸 캐럿은 그려진 칸 안에 있다.
