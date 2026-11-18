@@ -36,7 +36,7 @@ pub use place::{
     column_offsets, page_usage, place_doc, row_offsets, table_cell_fits, BlockKind, CellAddr,
     CellCaretRect, CellFit, CellTextHit, PageNumberOffNotice, PageUsage, PlacedBlock, PlacedCell,
     PlacedClippedCell, PlacedDoc, PlacedGlyph, PlacedGlyphOrigin, PlacedImage, PlacedPage,
-    PlacedRect, PlacedTable,
+    PlacedRect, PlacedTable, PlacedUndrawnShape, UndrawnShape,
 };
 
 /// Half the EM for half-width glyphs.
@@ -266,8 +266,9 @@ fn block_draws_something(block: &Block) -> bool {
         Block::Paragraph(p) => p.runs.iter().any(|run| {
             run.content.iter().any(|inline| match inline {
                 Inline::Text(text) => !text.is_empty(),
-                // #542: a 도형 is carried but not drawn yet — it must not keep a page alive.
-                Inline::Shape(_) => false,
+                // #542: a 글자처럼 취급 도형 takes its line's space (and a `rect` draws), so its page is
+                // alive even when the kind is not drawn yet; a floating one takes no space here (PR-3).
+                Inline::Shape(shape) => shape.treat_as_char,
                 _ => true,
             })
         }),
@@ -1853,6 +1854,17 @@ pub fn layout_paragraph(
                         0.0
                     });
                 }
+                // #542: a 글자처럼 취급 도형 is one inline atom of its line — its box (outer margins
+                // included) sets the line height like a picture's, every kind alike (only a `rect` is
+                // drawn). A floating shape takes NO slot: a paragraph holding only that still lays out
+                // as an empty one (PR-3 places floating shapes). `place::paragraph_atoms` mirrors this.
+                Inline::Shape(shape) if shape.treat_as_char => {
+                    let (width, height) = shape_box(shape);
+                    chars.push(('\u{FFFC}', 1));
+                    run_sizes.push(size);
+                    advs.push(width);
+                    object_heights.push(height);
+                }
                 Inline::Chart(chart) => {
                     chars.push(('\u{FFFC}', 1));
                     run_sizes.push(size);
@@ -2188,6 +2200,16 @@ pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64, trailing: 
     // 이슈 302 — 이미 넘친 쪽에 도착한 빈 줄만 흡수한다. 여유가 남은 쪽에서는 끊어야
     // 캐럿이 그 줄에 앉는다.
     vert < body_h
+}
+
+/// The line space a 글자처럼 취급 도형 takes: its box (`<hp:sz>`) plus its outer margins — `(advance,
+/// height)` in HWPUNIT. Hangul stores the host line's `vertsize` as exactly this height (#542).
+pub(crate) fn shape_box(shape: &ShapeRef) -> (f64, f64) {
+    let [left, right, top, bottom] = shape.out_margin.map(|m| m.max(0) as f64);
+    (
+        shape.width.max(0) as f64 + left + right,
+        shape.height.max(0) as f64 + top + bottom,
+    )
 }
 
 /// One line's vertical advance under its paragraph's line-spacing `ratio`. A text line scales its
@@ -3187,5 +3209,128 @@ mod tests {
             DEFAULT_LINESPACE,
             "표지 없는 0 은 값 없음"
         );
+    }
+
+    /// #542 — 본문 문단 하나: 글자 모양 0(크기 `font`) 런에 글자 `text` 와 도형 `shapes`(종류 · 폭 · 높이),
+    /// 퍼센트 줄 간격 `pct`. `tac` = 글자처럼 취급.
+    fn shape_line_doc(
+        font: i32,
+        pct: i32,
+        text: &str,
+        shapes: &[(ShapeKind, i32, i32)],
+        tac: bool,
+    ) -> (SemanticDoc, Paragraph) {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape {
+            height: font,
+            ..Default::default()
+        });
+        doc.para_shapes.push(ParaShape {
+            line_spacing_type: LineSpacingType::Percent,
+            line_spacing_value: pct,
+            ..Default::default()
+        });
+        let mut content = vec![Inline::Text(text.into())];
+        content.extend(shapes.iter().map(|(kind, width, height)| {
+            Inline::Shape(ShapeRef {
+                kind: kind.clone(),
+                width: *width,
+                height: *height,
+                treat_as_char: tac,
+                ..Default::default()
+            })
+        }));
+        let p = Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        (doc, p)
+    }
+
+    /// #542 PR-2 — 글자처럼 취급 도형의 호스트 줄: 높이는 도형 `sz` 높이, 진행은 그 높이 + (비율 − 1) × 글자 크기.
+    /// 비교 값은 한글이 저장한 호스트 lineseg(`vertsize` · `spacing`) — 공개 코퍼스
+    /// `hwpxlib_corpus/error/20250808/…재난안전…hwpx` 구역 0 의 b10 · b38 · b75 · b200 · b256 과
+    /// `error/20230728/test.hwpx` 구역 1 의 b392(블록 번호는 구역의 최상위 `<hp:p>` 순서). 종류는 묶음 개체도
+    /// 같다 — 자리는 모든 종류가 갖고, 그리기만 `rect` 다.
+    #[test]
+    fn a_tac_shape_sets_its_host_line_like_hangul_stores_it() {
+        use ShapeKind::{Container, Rect};
+        // (글자 크기, 퍼센트, 글자, 도형들, 저장 vertsize, 저장 spacing)
+        let stored: [(i32, i32, &str, Vec<(ShapeKind, i32, i32)>, f64, f64); 6] = [
+            (1500, 150, "", vec![(Rect, 47_250, 6_663)], 6_663.0, 752.0),
+            (1500, 190, "", vec![(Rect, 47_250, 9_720)], 9_720.0, 1_352.0),
+            (
+                1500,
+                205,
+                "",
+                vec![(Container, 37_319, 4_218)],
+                4_218.0,
+                1_576.0,
+            ),
+            (
+                1100,
+                128,
+                "",
+                vec![(Container, 47_336, 21_570)],
+                21_570.0,
+                308.0,
+            ),
+            (
+                1400,
+                200,
+                "",
+                vec![(Rect, 50_472, 18_882)],
+                18_882.0,
+                1_400.0,
+            ),
+            (
+                1500,
+                90,
+                "가나다라마바사아",
+                vec![(Container, 17_623, 17_280), (Container, 17_573, 17_100)],
+                17_280.0,
+                -152.0,
+            ),
+        ];
+        for (font, pct, text, shapes, vertsize, spacing) in stored {
+            let (doc, p) = shape_line_doc(font, pct, text, &shapes, true);
+            let lines = layout_paragraph(&p, &doc, 48_328.0, &ApproxFontMetrics);
+            assert_eq!(lines.len(), 1, "{shapes:?}: 한 줄(저장 lineseg 1개)");
+            assert_eq!(lines[0].vert_size, vertsize, "{shapes:?}: 줄 높이");
+            let ratio = line_spacing_ratio(&p, &doc);
+            let advance = line_advance(&lines[0], ratio);
+            assert!(
+                (advance - vertsize - spacing).abs() <= 3.0,
+                "{shapes:?}: 진행 {advance} — 저장 {vertsize} + {spacing}"
+            );
+        }
+    }
+
+    /// #542 — 떠 있는 도형(`treatAsChar="0"`)은 줄에 자리를 갖지 않는다: 그것만 품은 문단은 빈 문단과, 글과
+    /// 함께면 글만 있는 문단과 똑같이 놓인다(자리는 PR-3). 쪽도 살리지 않는다.
+    #[test]
+    fn a_floating_shape_takes_no_slot_and_keeps_no_page_alive() {
+        let shape = [(ShapeKind::Rect, 20_000, 9_000)];
+        for text in ["", "글"] {
+            let (doc, floating) = shape_line_doc(1500, 160, text, &shape, false);
+            let (_, bare) = shape_line_doc(1500, 160, text, &[], false);
+            let a = layout_paragraph(&floating, &doc, 40_000.0, &ApproxFontMetrics);
+            let b = layout_paragraph(&bare, &doc, 40_000.0, &ApproxFontMetrics);
+            assert_eq!(a.len(), b.len());
+            for (x, y) in a.iter().zip(&b) {
+                assert_eq!(
+                    (x.text_pos, x.vert_size, x.horz_size, x.font_size),
+                    (y.text_pos, y.vert_size, y.horz_size, y.font_size)
+                );
+            }
+        }
+        let (_, floating) = shape_line_doc(1500, 160, "", &shape, false);
+        let (_, placed) = shape_line_doc(1500, 160, "", &shape, true);
+        assert!(!block_draws_something(&Block::Paragraph(floating)));
+        assert!(block_draws_something(&Block::Paragraph(placed)));
     }
 }

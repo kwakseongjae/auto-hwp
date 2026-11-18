@@ -1032,6 +1032,8 @@ pub fn export_pdf_with_fonts(
                 code: "cell-text-clipped".into(),
             }),
     );
+    // 그리지 않은 도형 · 글상자도 조용히 넘기지 않는다 — 쪽마다 이유별로 한 건(#542).
+    notices.extend(undrawn_shape_notices(&placed));
     notices.sort_by_key(|notice| notice.page_index);
     Ok(PdfExport {
         pages: trees.len(),
@@ -1042,6 +1044,27 @@ pub fn export_pdf_with_fonts(
         notices,
         visual_evidence,
     })
+}
+
+/// One `text-box` notice per page and reason for the 도형 · 글상자 the page holds but does not draw
+/// (#542) — in page order, reasons in first-seen order.
+fn undrawn_shape_notices(placed: &PlacedDoc) -> Vec<PdfNotice> {
+    let mut out = Vec::new();
+    for (page_index, page) in placed.pages.iter().enumerate() {
+        let mut codes: Vec<&'static str> = Vec::new();
+        for shape in &page.undrawn_shapes {
+            let code = shape.reason.code();
+            if !codes.contains(&code) {
+                codes.push(code);
+            }
+        }
+        out.extend(codes.into_iter().map(|code| PdfNotice {
+            page_index,
+            kind: "text-box".into(),
+            code: code.into(),
+        }));
+    }
+    out
 }
 
 /// Replay one page's paint IR onto a fresh krilla page. Paint order is preserved from the IR (fills →
@@ -2955,5 +2978,52 @@ mod tests {
             missing.len(),
             want.len()
         );
+    }
+
+    /// #542 — 그리지 않은 도형은 쪽마다 이유별로 `text-box` 알림 한 건이다(같은 쪽 묶음 개체 둘 → 한 건). 진단은
+    /// 아니고, 그린 `rect` 는 알림이 없다.
+    #[test]
+    fn undrawn_shapes_are_text_box_notices_once_per_page_and_reason() {
+        let shape = |kind: ShapeKind, tac: bool| {
+            Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![
+                        Inline::Text(String::new()),
+                        Inline::Shape(ShapeRef {
+                            kind,
+                            width: 5_000,
+                            height: 2_000,
+                            treat_as_char: tac,
+                            line_color: Some(Color::default()),
+                            line_width: 33,
+                            ..Default::default()
+                        }),
+                    ],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        };
+        let doc = doc_with(vec![
+            shape(ShapeKind::Container, true),
+            shape(ShapeKind::Container, true),
+            shape(ShapeKind::Rect, false),
+            shape(ShapeKind::Rect, true),
+        ]);
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        let notice = |code: &str| PdfNotice {
+            page_index: 0,
+            kind: "text-box".into(),
+            code: code.into(),
+        };
+        assert_eq!(
+            out.notices,
+            vec![
+                notice("group-not-drawn"),
+                notice("floating-shape-not-drawn")
+            ]
+        );
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     }
 }

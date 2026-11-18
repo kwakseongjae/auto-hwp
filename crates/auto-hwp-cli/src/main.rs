@@ -925,6 +925,25 @@ fn export_pdf(
             tables
         );
     }
+    // 그리지 않은 도형 · 글상자(#542)는 이유마다 몇 쪽인지 한 줄로 알린다 — 작은 글머리 도형은 거의 모든
+    // 쪽에 있어 쪽마다 적으면 경고가 묻힌다. 쪽 목록은 PDF 알림(`text-box`)에 있다.
+    let mut undrawn: Vec<(&str, usize)> = Vec::new();
+    for notice in result.notices.iter().filter(|n| n.kind == "text-box") {
+        match undrawn.iter_mut().find(|(code, _)| *code == notice.code) {
+            Some((_, pages)) => *pages += 1,
+            None => undrawn.push((&notice.code, 1)),
+        }
+    }
+    if !undrawn.is_empty() {
+        let parts: Vec<String> = undrawn
+            .iter()
+            .map(|(code, pages)| format!("{code} {pages}쪽"))
+            .collect();
+        eprintln!(
+            "경고: 그리지 않은 도형 · 글상자가 있다 — {} (text-box)",
+            parts.join(" · ")
+        );
+    }
     if let (Some(path), Some(bytes)) = (visual_regions, evidence) {
         use std::io::Write as _;
         let mut options = std::fs::OpenOptions::new();

@@ -264,6 +264,42 @@ pub struct PlacedPage {
     /// 칸 안 잘림(#534) — cells on this page whose content was partly NOT drawn because it did not fit
     /// a fixed-height cell (#347 clip). Provenance only; never painted. Empty when nothing was clipped.
     pub clipped_cells: Vec<PlacedClippedCell>,
+    /// 도형 · 글상자 that this page holds but does not draw (#542) — report-only, never painted. Empty
+    /// for a document without such shapes.
+    pub undrawn_shapes: Vec<PlacedUndrawnShape>,
+}
+
+/// One 도형 a page holds but does not draw, with why (#542). `(section, block)` is the host paragraph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlacedUndrawnShape {
+    pub section: usize,
+    pub block: usize,
+    pub reason: UndrawnShape,
+}
+
+/// Why a 도형 is not drawn. Only a 글자처럼 취급 `rect` (with a paragraph-only 글상자) is drawn so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UndrawnShape {
+    /// A 묶음 개체 (`<hp:container>`) — its line space is kept, its members are not drawn.
+    Group,
+    /// Another kind (ellipse, polygon, line, …) — its line space is kept, the shape is not drawn.
+    Shape,
+    /// A floating shape (`treatAsChar="0"`) — neither placed nor drawn yet.
+    Floating,
+    /// A `rect` whose 글상자 body holds a table — the box is drawn, the body is not.
+    TableInTextBox,
+}
+
+impl UndrawnShape {
+    /// Stable machine-readable reason (the PDF `text-box` notice's `code`).
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Group => "group-not-drawn",
+            Self::Shape => "shape-not-drawn",
+            Self::Floating => "floating-shape-not-drawn",
+            Self::TableInTextBox => "text-box-table-not-drawn",
+        }
+    }
 }
 
 /// One table cell whose content did not fit and was partly left undrawn. Counted where the drawing
@@ -1579,7 +1615,7 @@ fn place_paragraph(
             .unwrap_or(atoms.len());
         let mut x = x0;
         for atom in atoms.get(start..end.min(atoms.len())).unwrap_or(&[]) {
-            x += place_atom(pg, atom, x, line_top, baseline, fonts, section, block);
+            x += place_atom(pg, atom, x, line_top, baseline, doc, fonts, section, block);
         }
 
         // (No per-line text-box: the SvgSink strokes fill:None rects as borders, so a box per line
@@ -1590,7 +1626,9 @@ fn place_paragraph(
 
         *vert += crate::line_advance(ls, ratio);
     }
-    first_line_page.unwrap_or(pages.len() - 1)
+    let first = first_line_page.unwrap_or(pages.len() - 1);
+    note_floating_shapes(&mut pages[first], p, section, block);
+    first
 }
 
 /// Multi-column twin of [`place_paragraph`]. It uses the shared [`crate::ColumnFlow`] transition
@@ -1672,11 +1710,15 @@ fn place_paragraph_columns(
         let mut x = x0;
         let page_out = pages.last_mut().expect("placed document always has a page");
         for atom in atoms.get(start..end.min(atoms.len())).unwrap_or(&[]) {
-            x += place_atom(page_out, atom, x, line_top, baseline, fonts, section, block);
+            x += place_atom(
+                page_out, atom, x, line_top, baseline, doc, fonts, section, block,
+            );
         }
         flow.add(crate::line_advance(line, ratio));
     }
-    first_line_page.unwrap_or(pages.len() - 1)
+    let first = first_line_page.unwrap_or(pages.len() - 1);
+    note_floating_shapes(&mut pages[first], p, section, block);
+    first
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2638,6 +2680,7 @@ fn place_cell_content(
                     x,
                     vy,
                     baseline,
+                    doc,
                     fonts,
                     ctx.section,
                     ctx.outer_block,
@@ -2775,7 +2818,7 @@ fn walk_cell_lines(
             .iter()
             .filter_map(|atom| match atom {
                 ParagraphAtom::Glyph(glyph) => Some(glyph),
-                ParagraphAtom::Object { .. } => None,
+                ParagraphAtom::Object { .. } | ParagraphAtom::Shape(_) => None,
             })
             .collect();
         let mut text_prefix = Vec::with_capacity(atoms.len() + 1);
@@ -2835,7 +2878,9 @@ fn walk_cell_lines(
             let mut chars = Vec::new();
             for atom in atoms.get(start..end).unwrap_or(&[]) {
                 match atom {
-                    ParagraphAtom::Object { .. } => pending_object_advance += atom.advance(fonts),
+                    ParagraphAtom::Object { .. } | ParagraphAtom::Shape(_) => {
+                        pending_object_advance += atom.advance(fonts)
+                    }
                     ParagraphAtom::Glyph(glyph) => {
                         advances.push(pending_object_advance + atom.advance(fonts));
                         pending_object_advance = 0.0;
@@ -3574,7 +3619,7 @@ struct GlyphInfo {
 }
 
 #[derive(Clone)]
-enum ParagraphAtom {
+enum ParagraphAtom<'a> {
     Glyph(GlyphInfo),
     Object {
         width: f64,
@@ -3583,15 +3628,18 @@ enum ParagraphAtom {
         svg: Option<String>,
         treat_as_char: bool,
     },
+    /// #542 — a 글자처럼 취급 도형 (only those get an atom — see `layout_paragraph`).
+    Shape(&'a ShapeRef),
 }
 
-impl ParagraphAtom {
-    /// Whether [`place_atom`] puts ink for this atom: a visible glyph (not a space, tab, or line break)
-    /// or an object.
+impl ParagraphAtom<'_> {
+    /// Whether [`place_atom`] puts ink for this atom: a visible glyph (not a space, tab, or line break),
+    /// an object, or a drawn 도형 (`rect`).
     fn paints(&self) -> bool {
         match self {
             Self::Glyph(glyph) => glyph_paints(glyph.ch),
             Self::Object { .. } => true,
+            Self::Shape(shape) => shape.kind == ShapeKind::Rect,
         }
     }
 
@@ -3612,6 +3660,7 @@ impl ParagraphAtom {
                     0.0
                 }
             }
+            Self::Shape(shape) => crate::shape_box(shape).0,
         }
     }
 }
@@ -3628,6 +3677,7 @@ fn place_atom(
     x: f64,
     line_top: f64,
     baseline: f64,
+    doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
     section: usize,
     block: usize,
@@ -3678,14 +3728,156 @@ fn place_atom(
             });
             atom.advance(fonts)
         }
+        ParagraphAtom::Shape(shape) => {
+            place_shape(page, shape, x, line_top, doc, fonts, section, block);
+            atom.advance(fonts)
+        }
     }
 }
 
-fn paragraph_atoms(
-    p: &Paragraph,
+/// Draw a 글자처럼 취급 도형 in its line slot at `(x, line_top)` (#542 PR-2). A `rect` paints its fill,
+/// outline and 글상자 body; any other kind (a 묶음 개체, an ellipse, …) keeps its line space but is not
+/// drawn yet, and the page records that (`text-box` notice) instead of dropping it silently.
+#[allow(clippy::too_many_arguments)]
+fn place_shape(
+    pg: &mut PlacedPage,
+    shape: &ShapeRef,
+    x: f64,
+    line_top: f64,
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
-) -> Vec<ParagraphAtom> {
+    section: usize,
+    block: usize,
+) {
+    let undrawn = match shape.kind {
+        ShapeKind::Rect => None,
+        ShapeKind::Container => Some(UndrawnShape::Group),
+        ShapeKind::Other(_) => Some(UndrawnShape::Shape),
+    };
+    if let Some(reason) = undrawn {
+        pg.undrawn_shapes.push(PlacedUndrawnShape {
+            section,
+            block,
+            reason,
+        });
+        return;
+    }
+    let [left, _, top, _] = shape.out_margin.map(|m| m.max(0) as f64);
+    let (bx, by) = (x + left, line_top + top);
+    let (bw, bh) = (shape.width.max(0) as f64, shape.height.max(0) as f64);
+    if let Some(fill) = shape.fill {
+        pg.rects.push(PlacedRect {
+            x: bx,
+            y: by,
+            w: bw,
+            h: bh,
+            fill: Some(fill),
+        });
+    }
+    if let Some(color) = shape.line_color {
+        // `<hp:lineShape width>` is HWPUNIT; a stroke is device px (75 HWPUNIT = 1px at 96 dpi).
+        let edge = CellEdge {
+            color,
+            style: shape.line_style,
+            width_px: shape.line_width.max(0) as f64 / 75.0,
+        };
+        push_cell_edges(pg, &[Some(edge); 4], bx, by, bw, bh);
+    }
+    if let Some(text_box) = &shape.text_box {
+        place_text_box(pg, text_box, bx, by, bw, bh, doc, fonts, section, block);
+    }
+}
+
+/// Lay a 글상자 body into its shape's box `(bx, by, bw, bh)` minus the text margins, aligned by its
+/// `vertAlign` (TOP / CENTER / BOTTOM). The body is drawn the way a table cell's is
+/// ([`place_cell_content`]) but never clipped — a clip would report it as cell text. A body holding a
+/// table is not drawn (a nested table's provenance points at a table block) and the page says so.
+#[allow(clippy::too_many_arguments)]
+fn place_text_box(
+    pg: &mut PlacedPage,
+    text_box: &TextBox,
+    bx: f64,
+    by: f64,
+    bw: f64,
+    bh: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    section: usize,
+    block: usize,
+) {
+    if text_box
+        .body
+        .iter()
+        .any(|b| !matches!(b, Block::Paragraph(_)))
+    {
+        pg.undrawn_shapes.push(PlacedUndrawnShape {
+            section,
+            block,
+            reason: UndrawnShape::TableInTextBox,
+        });
+        return;
+    }
+    let [left, right, top, bottom] = text_box.margin.map(|m| m.max(0) as f64);
+    let (inner_y, inner_h) = (by + top, (bh - top - bottom).max(0.0));
+    let textw = (bw - left - right).max(1.0);
+    // `place_cell_content` centers the body in the box it gets — give it a box exactly the body's
+    // height at the top or bottom for those alignments.
+    let content_h: f64 = text_box
+        .body
+        .iter()
+        .map(|b| block_height_for_place(b, doc, textw, fonts))
+        .sum();
+    let (cy, ch) = match text_box.vert_align.as_str() {
+        "TOP" => (inner_y, content_h),
+        "BOTTOM" => (inner_y + inner_h - content_h, content_h),
+        _ => (inner_y, inner_h),
+    };
+    let ctx = NestCtx {
+        section,
+        outer_block: block,
+        ancestors: Vec::new(),
+        self_block: block,
+    };
+    place_cell_content(
+        pg,
+        &text_box.body,
+        bx,
+        cy,
+        bw,
+        ch,
+        left,
+        right,
+        doc,
+        fonts,
+        &ctx,
+        0,
+        0,
+        false,
+    );
+}
+
+/// The floating 도형 a paragraph anchors (`treatAsChar="0"`): they take no line space and are not
+/// placed yet (PR-3) — record them on the page the paragraph starts on so the PDF says so.
+fn note_floating_shapes(pg: &mut PlacedPage, p: &Paragraph, section: usize, block: usize) {
+    let floating = p
+        .runs
+        .iter()
+        .flat_map(|run| &run.content)
+        .any(|inline| matches!(inline, Inline::Shape(shape) if !shape.treat_as_char));
+    if floating {
+        pg.undrawn_shapes.push(PlacedUndrawnShape {
+            section,
+            block,
+            reason: UndrawnShape::Floating,
+        });
+    }
+}
+
+fn paragraph_atoms<'a>(
+    p: &'a Paragraph,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<ParagraphAtom<'a>> {
     let mut out = Vec::new();
     for run in &p.runs {
         let cs = doc.char_shapes.get(run.char_shape);
@@ -3764,6 +3956,10 @@ fn paragraph_atoms(
                     svg: chart.rendered_svg.clone(),
                     treat_as_char: chart.treat_as_char,
                 }),
+                // LOCKSTEP with `layout_paragraph`: a slot (and so an atom) only for a 글자처럼 취급 도형.
+                Inline::Shape(shape) if shape.treat_as_char => {
+                    out.push(ParagraphAtom::Shape(shape))
+                }
                 _ => {}
             }
         }
@@ -3781,7 +3977,7 @@ fn paragraph_glyphs(
         .into_iter()
         .filter_map(|atom| match atom {
             ParagraphAtom::Glyph(glyph) => Some(glyph),
-            ParagraphAtom::Object { .. } => None,
+            ParagraphAtom::Object { .. } | ParagraphAtom::Shape(_) => None,
         })
         .collect()
 }
@@ -7971,5 +8167,176 @@ mod tests {
             "placed pagination == NaiveLayout pagination"
         );
         assert!(placed.pages.len() >= 2, "100 lines paginate");
+    }
+
+    /// #542 PR-2 — 여백 0 인 쪽(폭 60,000)에 문단들을 놓는다. 문단 모양 0 = 퍼센트 160%, 글자 크기 1000.
+    fn shape_doc(blocks: Vec<Block>) -> SemanticDoc {
+        let mut doc = doc_with(blocks);
+        doc.para_shapes[0].line_spacing_type = LineSpacingType::Percent;
+        doc.para_shapes[0].line_spacing_value = 160;
+        let page = &mut doc.sections[0].page;
+        page.width = 60_000;
+        page.height = 80_000;
+        page.margin_left = 0;
+        page.margin_right = 0;
+        page.margin_top = 0;
+        page.margin_bottom = 0;
+        doc
+    }
+
+    fn shape_para(shape: ShapeRef) -> Paragraph {
+        Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text(String::new()), Inline::Shape(shape)],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// 글자처럼 취급 `rect`(20,000 × 6,000) — 채움 · 점선 테두리 · 글상자 본문 `body`(세로 정렬 `valign`).
+    fn text_box_rect(body: Vec<Block>, valign: &str) -> ShapeRef {
+        ShapeRef {
+            kind: ShapeKind::Rect,
+            width: 20_000,
+            height: 6_000,
+            treat_as_char: true,
+            line_color: Some(Color::default()),
+            line_width: 113,
+            line_style: LineStyle::Dashed,
+            fill: Color::from_hex("#FFFFFF"),
+            text_box: Some(TextBox {
+                margin: [283, 283, 283, 283],
+                vert_align: valign.into(),
+                body,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// #542 PR-2 — 글자처럼 취급 `rect` 는 줄 자리에 채움 · 테두리 넷 · 글상자 본문을 그리고, 다음 문단은
+    /// 그 줄의 진행(높이 + (비율 − 1) × 글자 크기 = 6,000 + 600) 아래에서 시작한다.
+    #[test]
+    fn a_tac_rect_draws_its_fill_outline_and_text_box_body() {
+        let doc = shape_doc(vec![
+            Block::Paragraph(shape_para(text_box_rect(
+                vec![Block::Paragraph(para("글상자"))],
+                "CENTER",
+            ))),
+            Block::Paragraph(para("다음")),
+        ]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let page = &placed.pages[0];
+        let fill: Vec<_> = page.rects.iter().filter(|r| r.fill.is_some()).collect();
+        assert_eq!(fill.len(), 1);
+        assert_eq!(
+            (fill[0].x, fill[0].y, fill[0].w, fill[0].h),
+            (0.0, 0.0, 20_000.0, 6_000.0)
+        );
+        assert_eq!(page.lines.len(), 4, "테두리 네 변");
+        assert!(page
+            .lines
+            .iter()
+            .all(|l| l.style == LineStyle::Dashed && (l.width - 113.0 / 75.0).abs() < 1e-9));
+        let body: Vec<_> = page
+            .glyphs
+            .iter()
+            .filter(|g| "글상자".contains(g.ch))
+            .collect();
+        assert_eq!(body.len(), 3, "글상자 본문 글자");
+        for g in &body {
+            assert!(g.x >= 283.0 && g.x < 20_000.0 - 283.0, "x {}", g.x);
+            assert!(
+                g.baseline > 283.0 && g.baseline < 6_000.0 - 283.0,
+                "baseline {}",
+                g.baseline
+            );
+        }
+        let next = page
+            .glyphs
+            .iter()
+            .find(|g| g.ch == '다')
+            .expect("다음 문단");
+        assert!(
+            (next.baseline - (6_600.0 + 1_000.0 * BASELINE_RATIO)).abs() < 1.0,
+            "다음 문단 기준선 {}",
+            next.baseline
+        );
+        assert!(page.undrawn_shapes.is_empty(), "{:?}", page.undrawn_shapes);
+    }
+
+    /// 글상자 본문은 세로 정렬을 따른다 — 위 < 가운데 < 아래.
+    #[test]
+    fn a_text_box_body_follows_its_vertical_alignment() {
+        let baseline = |valign: &str| {
+            let doc = shape_doc(vec![Block::Paragraph(shape_para(text_box_rect(
+                vec![Block::Paragraph(para("가"))],
+                valign,
+            )))]);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            placed.pages[0]
+                .glyphs
+                .iter()
+                .find(|g| g.ch == '가')
+                .expect("본문 글자")
+                .baseline
+        };
+        let (top, center, bottom) = (baseline("TOP"), baseline("CENTER"), baseline("BOTTOM"));
+        assert!(top < center && center < bottom, "{top} {center} {bottom}");
+    }
+
+    /// 그리지 않는 도형은 쪽 기록으로 남는다: 묶음 개체 · 다른 종류는 줄 자리를 지키고, 떠 있는 도형은 자리도
+    /// 없다. 본문에 표가 있는 글상자는 상자만 그린다.
+    #[test]
+    fn undrawn_shapes_keep_their_line_space_and_are_recorded() {
+        let shape = |kind: ShapeKind, height: i32, tac: bool| ShapeRef {
+            kind,
+            width: 10_000,
+            height,
+            treat_as_char: tac,
+            ..Default::default()
+        };
+        let doc = shape_doc(vec![
+            Block::Paragraph(shape_para(shape(ShapeKind::Container, 4_000, true))),
+            Block::Paragraph(shape_para(shape(
+                ShapeKind::Other("ellipse".into()),
+                3_000,
+                true,
+            ))),
+            Block::Paragraph(shape_para(shape(ShapeKind::Rect, 9_000, false))),
+            Block::Paragraph(shape_para(text_box_rect(
+                vec![Block::Table(Table::default())],
+                "CENTER",
+            ))),
+            Block::Paragraph(para("끝")),
+        ]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let page = &placed.pages[0];
+        let reasons: Vec<_> = page
+            .undrawn_shapes
+            .iter()
+            .map(|u| (u.block, u.reason))
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                (0, UndrawnShape::Group),
+                (1, UndrawnShape::Shape),
+                (2, UndrawnShape::Floating),
+                (3, UndrawnShape::TableInTextBox),
+            ]
+        );
+        // 그려진 것은 표가 든 글상자의 상자(채움 1 · 테두리 4)뿐, 본문은 없다.
+        assert_eq!(page.rects.iter().filter(|r| r.fill.is_some()).count(), 1);
+        assert_eq!(page.lines.len(), 4);
+        // 자리: 4,000 + 600 · 3,000 + 600 · 떠 있는 도형 = 빈 줄(1,000 × 1.6) · 6,000 + 600.
+        let end = page.glyphs.iter().find(|g| g.ch == '끝').expect("끝 문단");
+        let top = 4_600.0 + 3_600.0 + 1_600.0 + 6_600.0;
+        assert!(
+            (end.baseline - (top + 1_000.0 * BASELINE_RATIO)).abs() < 1.0,
+            "끝 문단 기준선 {} — 줄 위 {top}",
+            end.baseline
+        );
     }
 }
