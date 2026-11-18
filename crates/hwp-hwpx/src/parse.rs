@@ -332,6 +332,10 @@ fn resolve_blocks(blocks: &mut [Block], pools: &mut PoolIntern) {
                 for c in &mut t.cells {
                     resolve_blocks(&mut c.blocks, pools);
                 }
+                // #543 — 표 캡션 문단도 칸처럼 모양을 풀어 준다.
+                if let Some(caption) = t.caption.as_mut() {
+                    resolve_blocks(&mut caption.blocks, pools);
+                }
             }
         }
     }
@@ -361,6 +365,9 @@ fn resolve_shape_bodies(blocks: &mut [Block], pools: &mut PoolIntern) {
             Block::Table(t) => {
                 for c in &mut t.cells {
                     resolve_shape_bodies(&mut c.blocks, pools);
+                }
+                if let Some(caption) = t.caption.as_mut() {
+                    resolve_shape_bodies(&mut caption.blocks, pools);
                 }
             }
         }
@@ -469,6 +476,12 @@ struct TblFrame {
     /// The table's own `<hp:pos>` (its first, before any cell) was seen — later ones belong to a caption's
     /// or a cell's objects.
     pos_seen: bool,
+    /// #543 — open-도형 depth (`shapes.len()`) when this table opened: a `<hp:caption>` at this depth, outside
+    /// any cell, picture or equation, is the table's own caption.
+    shapes_depth: usize,
+    /// #543 — the table's own `<hp:caption>` being read: its attributes, its `<hp:subList>` paragraphs filled
+    /// in at `</hp:caption>`.
+    caption: Option<TableCaption>,
 }
 
 impl TblFrame {
@@ -490,6 +503,8 @@ impl TblFrame {
             text_wrap: String::new(),
             z_order: 0,
             pos_seen: false,
+            shapes_depth: 0,
+            caption: None,
         }
     }
 }
@@ -1132,6 +1147,7 @@ pub(crate) fn parse_section(
                         );
                         frame.text_wrap = attr_str(&e, b"textWrap").unwrap_or_default();
                         frame.z_order = attr_i32(&e, b"zOrder").unwrap_or(0);
+                        frame.shapes_depth = shapes.len();
                         tbls.push(frame);
                     }
                     b"tc" => {
@@ -1233,6 +1249,17 @@ pub(crate) fn parse_section(
                         if !in_cell {
                             blocks.push(Vec::new());
                             subs.push(SubFrame::Overlay);
+                            // #543 — 표 자신의 캡션(그림 · 수식 · 도형의 캡션이 아님)은 버리지 않고 표가
+                            // 가진다. 본문 흐름 격리는 그대로 — 문단은 `</hp:caption>` 에서 `Table.caption` 으로.
+                            if ln.as_ref() == b"caption" && pic.is_none() && eq.is_none() {
+                                if let Some(f) = tbls.last_mut().filter(|f| {
+                                    f.caption.is_none()
+                                        && f.table.caption.is_none()
+                                        && f.shapes_depth == shapes.len()
+                                }) {
+                                    f.caption = Some(read_table_caption(&e));
+                                }
+                            }
                         }
                     }
                     // Structural children (secPr/ctrl/equation/container/…) make a paragraph NOT
@@ -1654,6 +1681,14 @@ pub(crate) fn parse_section(
                         // #542: 글상자 본문은 버리지 않고 그 도형이 가진다 — 본문 흐름에는 여전히 넣지 않는다.
                         if e.local_name().as_ref() == b"drawText" {
                             take_text_box_body(&mut shapes, body);
+                        } else if let Some(f) = tbls
+                            .last_mut()
+                            .filter(|f| f.caption.is_some() && f.shapes_depth == shapes.len())
+                        {
+                            // #543 — 표 자신의 캡션 문단.
+                            let mut caption = f.caption.take().expect("checked");
+                            caption.blocks = body;
+                            f.table.caption = Some(caption);
                         }
                     }
                 }
@@ -2069,6 +2104,29 @@ fn attr_i32(e: &BytesStart, name: &[u8]) -> Option<i32> {
         }
     }
     None
+}
+
+/// #543 — `<hp:caption side fullSz width gap lastWidth>` → [`TableCaption`] (paragraphs filled in later). The
+/// same values the .hwp lift reads (a `.hwp` and its HWPX twin store `width 8504 · spacing 850 · max_width
+/// 48047` as `width="8504" gap="850" lastWidth="48047"`): `side` → position, `gap` → spacing (caption ↔ table),
+/// `width` → side-caption width, `lastWidth` → the top/bottom text width bound, `fullSz` → include margin.
+fn read_table_caption(e: &BytesStart) -> TableCaption {
+    TableCaption {
+        position: match attr_str(e, b"side").as_deref().map(str::trim) {
+            Some("LEFT") => TableCaptionPosition::Left,
+            Some("RIGHT") => TableCaptionPosition::Right,
+            Some("TOP") => TableCaptionPosition::Top,
+            _ => TableCaptionPosition::Bottom,
+        },
+        blocks: Vec::new(),
+        spacing: attr_i32(e, b"gap").unwrap_or(0).max(0),
+        width: attr_i32(e, b"width").unwrap_or(0).max(0),
+        max_width: attr_i32(e, b"lastWidth").unwrap_or(0).max(0),
+        include_margin: matches!(
+            attr_str(e, b"fullSz").as_deref().map(str::trim),
+            Some("1" | "true")
+        ),
+    }
 }
 
 /// `<hp:pos vertOffset horzOffset>` (#542): 한글은 음수 오프셋을 부호 없는 32비트로 쓴다
