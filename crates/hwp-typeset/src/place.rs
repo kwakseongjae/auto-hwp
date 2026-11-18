@@ -2655,7 +2655,7 @@ fn place_cell_content(
         // content sits inside the box. The trimmed span is empty space below the last line's ink → no
         // glyph is clipped. Reserve-only (pagination) is untouched, so page counts stay in lockstep.
         if let Some(last) = lines.last() {
-            vy -= crate::line_leading(last, ratio).max(0.0);
+            vy -= crate::trailing_leading(last, ratio);
         }
     }
     if hidden_lines + hidden_tables > 0 {
@@ -2861,7 +2861,7 @@ fn walk_cell_lines(
         }
         // Trailing-leading trim — LOCKSTEP with place_cell_content (see its comment).
         if let Some(last) = lines.last() {
-            vy -= crate::line_leading(last, ratio).max(0.0);
+            vy -= crate::trailing_leading(last, ratio);
         }
         seg_base += nl_pos.len() + 1;
     }

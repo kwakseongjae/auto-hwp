@@ -1165,9 +1165,8 @@ pub(crate) fn cell_paragraph_height(
     let text: f64 = lines.iter().map(|l| line_advance(l, ratio)).sum();
     let last_leading = lines
         .last()
-        .map(|l| line_leading(l, ratio))
-        .unwrap_or(0.0)
-        .max(0.0);
+        .map(|l| trailing_leading(l, ratio))
+        .unwrap_or(0.0);
     sb + (text - last_leading) + sa
 }
 
@@ -1588,7 +1587,7 @@ fn continued_text_row_height(
                 let ratio = line_spacing_ratio(paragraph, doc);
                 if let Some(last) = layout_cell_paragraph(paragraph, doc, text_width, fonts).last()
                 {
-                    height += line_leading(last, ratio).max(0.0);
+                    height += trailing_leading(last, ratio);
                 }
             }
         }
@@ -1687,9 +1686,8 @@ fn cell_term_breakdown(
                 let spaced: f64 = lines.iter().map(|l| line_advance(l, ratio)).sum();
                 let last_leading = lines
                     .last()
-                    .map(|l| line_leading(l, ratio))
-                    .unwrap_or(0.0)
-                    .max(0.0);
+                    .map(|l| trailing_leading(l, ratio))
+                    .unwrap_or(0.0);
                 b.lines += lines.len();
                 b.raw_em += raw;
                 b.spaced += spaced - last_leading;
@@ -2208,6 +2206,20 @@ pub fn line_advance(line: &LineSeg, ratio: f64) -> f64 {
 /// not take (the trailing-leading trim). Same rule, so a trimmed object line keeps its whole box.
 pub(crate) fn line_leading(line: &LineSeg, ratio: f64) -> f64 {
     line_advance(line, ratio) - line.vert_size
+}
+
+/// The leading a paragraph's LAST line gives back in a cell (the trailing-leading trim, issue 020):
+/// [`line_leading`], never negative — a line under 100% spacing keeps its shorter advance. An explicit
+/// 0% paragraph (#557) is the exception: its lines all sit at one spot, and Hangul still stores the line
+/// box (`vertsize`), so the trim hands the box back — in a cell it takes one line box, not nothing (a
+/// one-paragraph cell's content was 0 and its text drew half a line low).
+pub(crate) fn trailing_leading(last: &LineSeg, ratio: f64) -> f64 {
+    let leading = line_leading(last, ratio);
+    if ratio == 0.0 {
+        leading
+    } else {
+        leading.max(0.0)
+    }
 }
 
 /// A paragraph shape's percent line spacing as a ratio, when it has one: a set percent value, or an
@@ -3158,6 +3170,16 @@ mod tests {
             line_advance(&lines[0], 0.0),
             0.0,
             "0% 줄은 자리를 차지하지 않는다"
+        );
+        // 칸 안에서는 줄 상자 하나를 차지한다 — 한글이 저장한 0% 칸 문단도 `vertsize` 그대로(공개 코퍼스
+        // 재난안전의 칸 18개: vertpos 0 · vertsize 1800 · spacing −1800, 칸 하나에 문단 하나). 0 이면 글이
+        // 칸 가운데보다 반 줄 아래에 그려졌다. 다른 문단이 뒤따르면(이어지는 행) 자리는 0 이다.
+        let height = cell_paragraph_height(&p, &doc, 40_000.0, &ApproxFontMetrics);
+        assert_eq!(height, lines[0].vert_size, "0% 칸 문단 = 줄 상자 하나");
+        assert_eq!(
+            height + trailing_leading(&lines[0], 0.0),
+            0.0,
+            "뒤따르는 문단이 있으면 같은 자리"
         );
         p.para_shape = 1;
         assert_eq!(
