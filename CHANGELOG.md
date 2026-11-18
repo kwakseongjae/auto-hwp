@@ -74,19 +74,26 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 - **글 앞 · 글 뒤로 띄운 표가 흐름 높이를 쓰지 않는다 (#544).** 한글은 그런 표(`textWrap="IN_FRONT_OF_TEXT"` ·
   `"BEHIND_TEXT"`, 글자처럼 취급 아님)가 없는 것처럼 글을 흘리고, 표만 품은 호스트 문단도 보통 빈 줄 하나를 쓴다. 엔진은 표를 흐름
-  블록으로 놓아 표 높이만큼 뒤 문단을 밀었다(공개 코퍼스 `프로젝트 계획서.hwpx` 4쪽 → 이제 2쪽, 오라클 2쪽). 이제 HWPX 파서도 표 자신의
-  `<hp:pos>` 를 `Table::float_placement` 로 읽고(.hwp 와 같다 · 음수 오프셋 포함), 조판은 그 표를 호스트 문단 위 기준 자리에 그린다(가로 ·
-  세로 기준 · 정렬 · 오프셋은 떠 있는 도형과 같은 규칙). 앵커 아래 본문에 안 들어가는 행은 흐름이 만든 다음 쪽 맨 위에서 잇는다 — 한글이
-  저장한 표 크기가 첫 쪽에 들어가는 행의 합과 같다(14×9 표: 행 0~9 = 66,284). 아직 하지 않는 것: 글 앞 · 뒤 겹침 순서(표는 글 아래에
-  칠해진다) · 이어지는 조각의 자리(본문 맨 위로 가정) · 호스트 빈 줄의 캐럿 · 위아래 · 어울림 표의 오프셋(#568). 그런 표를 통째로 다시
-  써서 저장해도(열 너비 · 행 높이 편집) 이제 떠 있는 배치가 남는다(전에는 `treatAsChar="1"` 인라인 표로 써졌다). 저장 줄 오라클은
-  그 문서의 우리 쪽 수(4 → 2)만 바뀌어 다시 만들었다. 공개 · 비공개 코퍼스의 다른 문서는 쪽 시작이 그대로다.
+  블록으로 놓아 표 높이만큼 뒤 문단을 밀었다(공개 코퍼스 `프로젝트 계획서.hwpx` 4쪽 → 이제 2쪽, 오라클 2쪽 · 다른 공개 문서 재난안전은
+  73쪽 그대로). 이제 HWPX 파서도 표 자신의 `<hp:pos>` 를 `Table::float_placement` 로 읽고(.hwp 와 같다 · 음수 오프셋 포함), 조판은 그
+  표를 호스트 문단 위 기준 자리에 그린다(가로 · 세로 기준 · 정렬 · 오프셋은 떠 있는 도형과 같은 규칙). 앵커 아래 본문에 안 들어가는 행은
+  흐름이 만든 다음 쪽 맨 위에서 잇는다 — 한글이 저장한 표 크기가 첫 쪽에 들어가는 행의 합과 같다(14×9 표: 행 0~9 = 66,284 · **표본 1개**).
+  ⚠️ 근거가 얇다: 공개 · 비공개 코퍼스(HWPX 86 · .hwp 40)에 이런 표는 **2문서 3개**(모두 글 앞)이고, 규칙은 한글 저장 줄이 있는
+  **1문서**와 다른 프로그램 PDF 측정 **1문서**에서 왔다. **글 뒤 표는 표본 0** — 같은 규칙으로 가정한다. 아직 하지 않는 것: 글 앞 · 뒤
+  겹침 순서(표는 글 아래에 칠해진다) · 이어지는 조각의 자리(본문 맨 위로 가정) · 호스트 빈 줄의 캐럿 · 위아래 · 어울림 표의 오프셋(#568).
+  저장 줄 오라클은 그 문서의 우리 쪽 수(4 → 2)만 바뀌어 다시 만들었다. 공개 · 비공개 코퍼스의 다른 문서는 쪽 시작이 그대로다.
   *(EN — Fixed: tables floating in front of / behind the text no longer take flow height; their host paragraph keeps its ordinary
   line, and the table is drawn at its `<hp:pos>` against that paragraph (same placement rule as floating shapes). The HWPX parser now
   fills `Table::float_placement` from the table's own `<hp:pos>`, as the .hwp lift does. Rows that do not fit below the anchor continue
-  at the top of the following pages the flow made. A public sample goes from 4 to 2 pages (oracle 2). Rewriting such a table on save
-  now keeps its floating placement instead of turning it inline. Not yet: in-front/behind paint order, continuation position (assumed
+  at the top of the following pages the flow made (one sample). A public sample goes from 4 to 2 pages (oracle 2). Evidence is thin:
+  three such tables in two documents; no behind-text sample. Not yet: in-front/behind paint order, continuation position (assumed
   body top), a caret on the host's blank line, offsets of top-and-bottom/square tables.)*
+
+- **글 앞 · 글 뒤로 띄운 표를 고쳐 저장하면 인라인 표로 바뀌어 써지던 것을 고쳤다 (#544).** 파싱한 그런 표를 통째로 다시 쓸 때(열 너비 ·
+  행 높이 편집) `treatAsChar="1"` · `textWrap="TOP_AND_BOTTOM"` 으로 써져, 다시 열면 흐름 안 표가 됐다. 이제 떠 있는 배치(`textWrap` ·
+  기준 · 오프셋 · `zOrder`)가 남는다. 고치지 않은 저장은 바이트 그대로다.
+  *(EN — Fixed: rewriting an edited floating (in front of / behind text) table on save turned it into an inline table; its floating
+  placement is now kept. Unedited saves stay byte-identical.)*
 
 - **줄 간격 0% 를 0 으로 조판한다 (#557).** HWPX 머리말이 명시한 퍼센트 0 을 엔진은 「값 없음」으로 보고 160% 로 조판했다.
   한글은 0% 그대로 다음 줄을 같은 자리에 놓는다(출처 줄 · 빈 줄에 쓰인다). 칸 안 0% 문단은 줄 상자 하나를 차지한다(한글 저장과 같다).

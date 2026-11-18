@@ -4331,7 +4331,8 @@ fn rows_that_fit(row_h: &[f64], first: usize, top: f64, bottom: f64) -> usize {
 /// fragments as for any table.
 ///
 /// Rows that run past the body bottom continue on the next page (between rows; a `keep_together` table is
-/// drawn whole). Evidence: the public 14×9 글 앞 table stores `<hp:sz height="66284">` — exactly its rows
+/// drawn whole). Evidence — ONE sample, the only floating table in either corpus that runs past the page:
+/// the public 14×9 글 앞 table stores `<hp:sz height="66284">` — exactly its rows
 /// 0–9 (3 × 3,319 + 5,831 + 15,097 + 19,175 + 3 × 3,340 + 6,204), the rows that fit under its anchor
 /// (6,480 + 1,228 + 283 + 66,284 = 74,275 of a 74,934 body), while all 14 rows' stored cells add up to
 /// 115,721. The rest is returned to be drawn at the top of the following pages

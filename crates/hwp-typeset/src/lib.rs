@@ -2301,10 +2301,14 @@ pub fn inline_object_slot(inline: &Inline) -> Option<(f64, f64)> {
 /// #544 — a table floating over the text: 글 앞으로 (`IN_FRONT_OF_TEXT`) or 글 뒤로 (`BEHIND_TEXT`), read
 /// from [`Table::float_placement`] (the HWPX parser and the .hwp lift fill it alike). Hangul lays the
 /// text out as if such a table were not there: it takes no flow height, and its host paragraph keeps
-/// its ordinary line. Stored evidence: a 32,200-tall 글 앞 table's empty host line at 2,220 = 0 + 1,500 +
-/// 720 (the line before it), full body width; a PDF of a document with two 글 앞 tables puts its last
-/// text line where 73 paragraphs × 1,620 would (118,260 vs. 118,534 measured, 0.23%). No 글 뒤 table
-/// exists in the public corpus — it is assumed to lay out the same way.
+/// its ordinary line.
+///
+/// ⚠️ Thin evidence: the public and private corpora (86 HWPX · 40 .hwp) hold THREE such tables in TWO
+/// documents, all 글 앞. The rule rests on one document with Hangul's stored lines — a 32,200-tall 글 앞
+/// table's empty host line at 2,220 = 0 + 1,500 + 720 (the line before it), full body width — and one
+/// document with only another program's PDF — its last text line where 73 paragraphs × 1,620 would put
+/// it (118,260 vs. 118,534 measured, 0.23%), i.e. both tables take no flow and both hosts keep a line.
+/// No 글 뒤 table exists in either corpus (0 samples): it is ASSUMED to lay out the same way.
 pub fn table_floats_over_text(t: &Table) -> bool {
     t.float_placement
         .as_ref()
