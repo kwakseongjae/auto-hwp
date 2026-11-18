@@ -2352,7 +2352,7 @@ fn table_host(sec: &Section, index: usize) -> Option<usize> {
 /// column twins), like [`section_page_breaks`], so they stay in LOCKSTEP. A section without such a
 /// table answers exactly as before (no table floats, every pure table anchor reserves no line).
 #[derive(Clone, Debug, Default)]
-pub struct SectionFloatTables {
+pub(crate) struct SectionFloatTables {
     /// Per block: a floating table → the host paragraph that draws it (its anchor). `None` for a table
     /// in the flow, and for a floating one drawn where it stands (no host, or a host that reserves no
     /// line because it also holds a table in the flow).
