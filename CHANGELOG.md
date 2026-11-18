@@ -100,6 +100,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   drawn through the same top/bottom caption flow `.hwp` uses. Pages change where captions take room: a public sample goes 73 → 74
   (oracle 76). A 1×1 frame table's caption is no longer lost when the frame is promoted. Captions not laid out (side captions, captions
   of floating or nested tables) are reported as a `table-caption` PDF notice and an `export-pdf` warning.)*
+- **HWPX 로 쓸 때 표 캡션이 빠지던 것을 고쳤다 (#543).** `.hwp` → HWPX 변환과, 열 너비 · 행 높이를 고쳐 표를 통째로 다시 쓰는
+  저장이 `<hp:caption>` 을 쓰지 않아 결과 파일에서 캡션이 사라졌다. 이제 `Table.caption` 을 OWPML 자리(바깥 여백 다음 · 안 여백 앞)에
+  `side` · `fullSz` · `width` · `gap` · `lastWidth` 와 캡션 문단으로 쓰고, 다시 열면 같은 캡션이다. 고치지 않은 표 · 칸 글만 고친 표는
+  전처럼 원본 바이트 그대로다.
+  *(EN — Fixed: converting `.hwp` to HWPX, or saving a table rewritten after a column/row edit, no longer drops its caption — it is
+  written as `<hp:caption>` and reads back the same.)*
 
 - **글 앞 · 글 뒤로 띄운 표가 흐름 높이를 쓰지 않는다 (#544).** 한글은 그런 표(`textWrap="IN_FRONT_OF_TEXT"` ·
   `"BEHIND_TEXT"`, 글자처럼 취급 아님)가 없는 것처럼 글을 흘리고, 표만 품은 호스트 문단도 보통 빈 줄 하나를 쓴다. 엔진은 표를 흐름

@@ -166,3 +166,74 @@ fn roundtrip_preserves_stored_row_height_floors() {
         "{mismatched}개 표의 저장 행높이 floor가 왕복에서 변동"
     );
 }
+
+/// #543 PR-2 — `.hwp` → HWPX 변환이 표 캡션을 `<hp:caption>` 으로 쓴다(전에는 빠졌다). 다시 열면(생산 HWPX 파서)
+/// 같은 위치 · 간격 · 너비 · 최대 너비 · 글이고, 쪽 수도 같다. 공개 문서 셋: `benchmark.hwp`(위 1) · `benchmark2.hwp`
+/// (위 2) · `corpus/hwp/tac-img-02.hwp`(아래 6).
+#[test]
+fn converted_hwpx_keeps_table_captions() {
+    fn captions(d: &SemanticDoc) -> Vec<(TableCaptionPosition, i32, i32, i32, bool, String)> {
+        let mut out = Vec::new();
+        for sec in &d.sections {
+            for b in &sec.blocks {
+                let Block::Table(t) = b else { continue };
+                let Some(c) = &t.caption else { continue };
+                let text: String = c
+                    .blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        Block::Paragraph(p) => Some(p),
+                        Block::Table(_) => None,
+                    })
+                    .flat_map(|p| &p.runs)
+                    .flat_map(|r| &r.content)
+                    .filter_map(|i| match i {
+                        Inline::Text(t) => Some(t.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                out.push((
+                    c.position,
+                    c.spacing,
+                    c.width,
+                    c.max_width,
+                    c.include_margin,
+                    text,
+                ));
+            }
+        }
+        out
+    }
+    let fonts = fonts();
+    for (rel, want) in [
+        ("benchmarks/benchmark.hwp", 1),
+        ("benchmarks/benchmark2.hwp", 2),
+        ("corpus/hwp/tac-img-02.hwp", 6),
+    ] {
+        let path = format!("{}/../../{rel}", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let orig = parse(&bytes);
+        let before = captions(&orig);
+        assert_eq!(before.len(), want, "{rel}: 원본 캡션 수");
+        let hwpx = hwp_hwpx::serialize::serialize(&orig).expect("serialize to HWPX");
+        let pkg = hwp_hwpx::package::Package::open(&hwpx).expect("package");
+        let xml_captions: usize = pkg
+            .section_part_names()
+            .iter()
+            .map(|p| {
+                let xml = pkg.read_part(p).expect("section part");
+                String::from_utf8_lossy(&xml)
+                    .matches("<hp:caption ")
+                    .count()
+            })
+            .sum();
+        assert_eq!(xml_captions, want, "{rel}: <hp:caption> 수");
+        let reopened = reopen_hwpx(&hwpx);
+        assert_eq!(captions(&reopened), before, "{rel}: 다시 연 캡션");
+        assert_eq!(
+            page_counts(&reopened, &fonts),
+            page_counts(&orig, &fonts),
+            "{rel}: 쪽 수"
+        );
+    }
+}
