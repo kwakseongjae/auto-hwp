@@ -1636,6 +1636,8 @@ fn place_paragraph(
     // #542 — 떠 있는 「자리 차지」 도형의 띠. NaiveLayout · block_pages · 캐럿과 같은 계획.
     let band = crate::float_band_plan(p, &lines, ratio, *vert, body_h).filter(|_| float_band);
     let (band_page, band_top) = (pages.len() - 1, *vert);
+    // 문단 위 — 떠 있는 도형의 문단 기준 자리. 첫 줄이 다음 쪽으로 넘어가면 그 쪽 맨 위다.
+    let mut para_anchor = (band_page, band_top);
 
     for (li, ls) in lines.iter().enumerate() {
         if let Some(crate::FloatBandPlan::Here {
@@ -1655,6 +1657,9 @@ fn place_paragraph(
         {
             new_page(pages, page);
             *vert = 0.0;
+            if li == 0 {
+                para_anchor = (pages.len() - 1, 0.0);
+            }
         }
         first_line_page.get_or_insert(pages.len() - 1);
         if ls.horz_size > 0.0 {
@@ -1702,6 +1707,7 @@ fn place_paragraph(
 
         *vert += crate::line_advance(ls, ratio);
     }
+    let mut spill = None;
     match band {
         Some(crate::FloatBandPlan::Here { end, .. }) if pages.len() - 1 == band_page => {
             *vert = vert.max(band_top + end);
@@ -1709,13 +1715,30 @@ fn place_paragraph(
         }
         Some(crate::FloatBandPlan::NextPage { height }) => {
             new_page(pages, page);
+            spill = Some((pages.len() - 1, mt));
             *vert = height;
             *last_drawn = pages.len() - 1;
         }
         _ => {}
     }
     let first = first_line_page.unwrap_or(pages.len() - 1);
-    note_floating_shapes(&mut pages[first], p, section, block);
+    let frame = FloatFrame {
+        body: (ml, mt, body_w, body_h),
+        column: (ml, body_w),
+        para: (ml + ind.left, ind.wrap_w),
+        para_top: mt + para_anchor.1,
+    };
+    place_floating_shapes(
+        pages,
+        p,
+        para_anchor.0,
+        frame,
+        spill,
+        doc,
+        fonts,
+        section,
+        block,
+    );
     first
 }
 
@@ -1754,15 +1777,11 @@ fn place_paragraph_columns(
     let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
     let mut first_line_page = None;
     // #542 — 떠 있는 「자리 차지」 도형의 띠(layout_columns · block_pages_columns 와 같은 계획).
-    let band = crate::float_band_plan(
-        p,
-        &lines,
-        ratio,
-        flow.vert(),
-        flow.available_height(body_h),
-    )
-    .filter(|_| float_band);
+    let band = crate::float_band_plan(p, &lines, ratio, flow.vert(), flow.available_height(body_h))
+        .filter(|_| float_band);
     let band_lane = (pages.len(), flow.column_index(), flow.vert());
+    // 문단 위(쪽 번호 · 쪽 위 y · 단 상자) — 떠 있는 도형의 문단 · 단 기준 자리.
+    let mut para_anchor = (pages.len() - 1, mt + flow.y(), flow.box_now());
 
     for (line_index, line) in lines.iter().enumerate() {
         if let Some(crate::FloatBandPlan::Here {
@@ -1780,6 +1799,9 @@ fn place_paragraph_columns(
             && flow.advance_column()
         {
             new_page(pages, page);
+        }
+        if line_index == 0 {
+            para_anchor = (pages.len() - 1, mt + flow.y(), flow.box_now());
         }
         first_line_page.get_or_insert(pages.len() - 1);
         let column = flow.box_now();
@@ -1826,6 +1848,7 @@ fn place_paragraph_columns(
         }
         flow.add(crate::line_advance(line, ratio));
     }
+    let mut spill = None;
     match band {
         Some(crate::FloatBandPlan::Here { end, .. })
             if (pages.len(), flow.column_index()) == (band_lane.0, band_lane.1) =>
@@ -1836,12 +1859,31 @@ fn place_paragraph_columns(
             if flow.advance_column() {
                 new_page(pages, page);
             }
+            spill = Some((pages.len() - 1, mt + flow.y()));
             flow.add(height);
         }
         _ => {}
     }
     let first = first_line_page.unwrap_or(pages.len() - 1);
-    note_floating_shapes(&mut pages[first], p, section, block);
+    let (_, _, body_w, _) = crate::body_box(page);
+    let (anchor_page, para_top, column) = para_anchor;
+    let frame = FloatFrame {
+        body: (ml, mt, body_w, body_h),
+        column: (ml + column.x, column.width),
+        para: (ml + column.x + ind.left, ind.wrap_w),
+        para_top,
+    };
+    place_floating_shapes(
+        pages,
+        p,
+        anchor_page,
+        frame,
+        spill,
+        doc,
+        fonts,
+        section,
+        block,
+    );
     first
 }
 
@@ -3890,7 +3932,30 @@ fn place_shape(
     }
     // ⚠️ Unconfirmed, like `crate::shape_box`: no public sample has a non-zero outer margin here.
     let [left, _, top, _] = shape.out_margin.map(|m| m.max(0) as f64);
-    let (bx, by) = (x + left, line_top + top);
+    draw_rect_shape(
+        pg,
+        shape,
+        x + left,
+        line_top + top,
+        doc,
+        fonts,
+        section,
+        block,
+    );
+}
+
+/// Draw a `rect` 도형 with its box's top-left at `(bx, by)`: its fill, outline and 글상자 body.
+#[allow(clippy::too_many_arguments)]
+fn draw_rect_shape(
+    pg: &mut PlacedPage,
+    shape: &ShapeRef,
+    bx: f64,
+    by: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    section: usize,
+    block: usize,
+) {
     let (bw, bh) = (shape.width.max(0) as f64, shape.height.max(0) as f64);
     if let Some(fill) = shape.fill {
         pg.rects.push(PlacedRect {
@@ -3983,20 +4048,116 @@ fn place_text_box(
     );
 }
 
-/// The floating 도형 a paragraph anchors (`treatAsChar="0"`): they take no line space and are not
-/// placed yet (PR-3) — record them on the page the paragraph starts on so the PDF says so.
-fn note_floating_shapes(pg: &mut PlacedPage, p: &Paragraph, section: usize, block: usize) {
-    let floating = p
-        .runs
-        .iter()
-        .flat_map(|run| &run.content)
-        .any(|inline| matches!(inline, Inline::Shape(shape) if !shape.treat_as_char));
-    if floating {
-        pg.undrawn_shapes.push(PlacedUndrawnShape {
-            section,
-            block,
-            reason: UndrawnShape::Floating,
-        });
+/// The boxes a floating 도형's `<hp:pos>` can be relative to (HWPUNIT, page-top-left origin):
+/// `PAGE` = the body box, `COLUMN` = the anchor's column, `PARA` = the paragraph's indented width with
+/// its top at `para_top`. `PAPER` is the whole page.
+#[derive(Clone, Copy, Debug)]
+struct FloatFrame {
+    body: (f64, f64, f64, f64),
+    column: (f64, f64),
+    para: (f64, f64),
+    para_top: f64,
+}
+
+/// One floating 도형's box on its page (HWPUNIT, page-top-left origin), from its `<hp:pos>` — or `None`
+/// for a placement token not handled (then it is not drawn and the page says so).
+///
+/// Offsets go from the reference box's left / top for `LEFT` / `TOP` and from its centre for `CENTER`
+/// (2022.hwpx: a 48,189-wide rect, `PAPER` · `CENTER` · offset 0, sits at the 5,669 left margin of a
+/// 59,528 page). ⚠️ `RIGHT` / `BOTTOM` (offset measured inward from the far edge) and the outer margin
+/// added before the box (as for a 글자처럼 취급 도형) have no public sample: every floating 도형 there is
+/// `LEFT` / `TOP` but one, with outer margins of 0 on the drawn kind.
+fn floating_box(
+    shape: &ShapeRef,
+    page_w: f64,
+    page_h: f64,
+    frame: &FloatFrame,
+) -> Option<(f64, f64)> {
+    let (w, h) = (shape.width.max(0) as f64, shape.height.max(0) as f64);
+    let [out_left, _, out_top, _] = shape.out_margin.map(|m| m.max(0) as f64);
+    let (bx, by, bw, bh) = frame.body;
+    let (rx, rw) = match shape.horz_rel_to.as_str() {
+        "PAPER" => (0.0, page_w),
+        "PAGE" => (bx, bw),
+        "COLUMN" => frame.column,
+        "PARA" => frame.para,
+        _ => return None,
+    };
+    let along = |start: f64, span: f64, size: f64, align: &str, offset: f64| match align {
+        "CENTER" => start + (span - size) / 2.0 + offset,
+        "RIGHT" | "BOTTOM" => start + span - size - offset,
+        _ => start + offset,
+    };
+    let x = along(rx, rw, w, &shape.horz_align, shape.horz_offset as f64);
+    let y = match shape.vert_rel_to.as_str() {
+        "PAPER" => along(0.0, page_h, h, &shape.vert_align, shape.vert_offset as f64),
+        "PAGE" => along(by, bh, h, &shape.vert_align, shape.vert_offset as f64),
+        // A paragraph has no height to align in: the offset goes down from its top.
+        "PARA" => frame.para_top + shape.vert_offset as f64,
+        _ => return None,
+    };
+    Some((x + out_left, y + out_top))
+}
+
+/// Draw the floating 도형 (`treatAsChar="0"`) paragraph `p` anchors, on the page its first line is on
+/// (`anchor_page`), at their `<hp:pos>` (#542 PR-3) — a `rect` like a 글자처럼 취급 one (fill, outline,
+/// 글상자 body), but over or under the text without moving it (a 「자리 차지」 one's room is
+/// [`crate::float_band_plan`]'s). When the plan moved that room to the next page (`spill` = that page and
+/// its body top), a 「자리 차지」 paragraph-relative shape is drawn there, its offset dropped.
+///
+/// What is not drawn is recorded on the anchor page (`floating-shape-not-drawn`): another kind than
+/// `rect` (a group, an ellipse, …) or a placement token not handled. The drawing order cannot follow
+/// 글 앞 / 글 뒤 yet: a fill always paints under the text.
+#[allow(clippy::too_many_arguments)]
+fn place_floating_shapes(
+    pages: &mut [PlacedPage],
+    p: &Paragraph,
+    anchor_page: usize,
+    frame: FloatFrame,
+    spill: Option<(usize, f64)>,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    section: usize,
+    block: usize,
+) {
+    for inline in p.runs.iter().flat_map(|run| &run.content) {
+        let Inline::Shape(shape) = inline else {
+            continue;
+        };
+        if shape.treat_as_char {
+            continue;
+        }
+        let pushes_flow = shape.text_wrap == "TOP_AND_BOTTOM" && shape.vert_rel_to == "PARA";
+        let (page_idx, frame) = match spill {
+            Some((spilled, top)) if pushes_flow => (
+                spilled,
+                FloatFrame {
+                    para_top: top - shape.vert_offset as f64,
+                    ..frame
+                },
+            ),
+            _ => (anchor_page, frame),
+        };
+        let at = (shape.kind == ShapeKind::Rect)
+            .then(|| floating_box(shape, pages[page_idx].width, pages[page_idx].height, &frame))
+            .flatten();
+        match at {
+            Some((x, y)) => draw_rect_shape(
+                &mut pages[page_idx],
+                shape,
+                x,
+                y,
+                doc,
+                fonts,
+                section,
+                block,
+            ),
+            None => pages[anchor_page].undrawn_shapes.push(PlacedUndrawnShape {
+                section,
+                block,
+                reason: UndrawnShape::Floating,
+            }),
+        }
     }
 }
 
@@ -8551,7 +8712,13 @@ mod tests {
     }
 
     /// #542 PR-3 — 떠 있는 도형(위아래 배치 시험용): 폭 10,000, 문단 기준 가로.
-    fn floating_shape(wrap: &str, vert_rel_to: &str, offset: i32, height: i32, out: i32) -> ShapeRef {
+    fn floating_shape(
+        wrap: &str,
+        vert_rel_to: &str,
+        offset: i32,
+        height: i32,
+        out: i32,
+    ) -> ShapeRef {
         ShapeRef {
             kind: ShapeKind::Rect,
             width: 10_000,
@@ -8579,7 +8746,11 @@ mod tests {
         let placed = place_doc(doc, &ApproxFontMetrics);
         let naive = crate::NaiveLayout.layout(doc, &ApproxFontMetrics).unwrap();
         let walked = block_pages(doc, &ApproxFontMetrics);
-        assert_eq!(placed.pages.len(), naive.pages.len(), "LOCKSTEP place_doc · NaiveLayout");
+        assert_eq!(
+            placed.pages.len(),
+            naive.pages.len(),
+            "LOCKSTEP place_doc · NaiveLayout"
+        );
         let last = doc.sections[0].blocks.len() - 1;
         let (pi, glyph) = placed
             .pages
@@ -8588,7 +8759,11 @@ mod tests {
             .find_map(|(i, pg)| pg.glyphs.iter().find(|g| g.ch == '끝').map(|g| (i, g)))
             .expect("끝 문단 글자");
         let naive_page = naive.pages.len() - 1;
-        let naive_top = naive.pages[naive_page].lines.last().expect("끝 줄").vert_pos;
+        let naive_top = naive.pages[naive_page]
+            .lines
+            .last()
+            .expect("끝 줄")
+            .vert_pos;
         [
             (pi, glyph.baseline - 1_000.0 * BASELINE_RATIO),
             (naive_page, naive_top),
@@ -8605,15 +8780,60 @@ mod tests {
     fn a_top_and_bottom_floating_shape_pushes_the_flow_by_its_band() {
         let tb = "TOP_AND_BOTTOM";
         let cases: [(&str, ShapeRef, &str, f64); 9] = [
-            ("빈 문단 · 오프셋 0", floating_shape(tb, "PARA", 0, 8_657, 283), "", 9_223.0),
-            ("빈 문단 · 오프셋 45", floating_shape(tb, "PARA", 45, 19_995, 141), "", 20_322.0),
-            ("빈 줄이 띠 위에 든다", floating_shape(tb, "PARA", 1_130, 29_891, 141), "", 31_303.0),
-            ("빈칸 하나인 줄은 내려간다", floating_shape(tb, "PARA", 0, 38_057, 141), " ", 39_939.0),
-            ("글 줄은 내려간다", floating_shape(tb, "PARA", 0, 38_057, 141), "가", 39_939.0),
-            ("글 앞", floating_shape("IN_FRONT_OF_TEXT", "PARA", 0, 8_657, 283), "", 1_600.0),
-            ("글 뒤", floating_shape("BEHIND_TEXT", "PARA", 0, 8_657, 283), "", 1_600.0),
-            ("어울림", floating_shape("SQUARE", "PARA", 0, 8_657, 283), "", 1_600.0),
-            ("종이 기준(미지원)", floating_shape(tb, "PAPER", 0, 8_657, 283), "", 1_600.0),
+            (
+                "빈 문단 · 오프셋 0",
+                floating_shape(tb, "PARA", 0, 8_657, 283),
+                "",
+                9_223.0,
+            ),
+            (
+                "빈 문단 · 오프셋 45",
+                floating_shape(tb, "PARA", 45, 19_995, 141),
+                "",
+                20_322.0,
+            ),
+            (
+                "빈 줄이 띠 위에 든다",
+                floating_shape(tb, "PARA", 1_130, 29_891, 141),
+                "",
+                31_303.0,
+            ),
+            (
+                "빈칸 하나인 줄은 내려간다",
+                floating_shape(tb, "PARA", 0, 38_057, 141),
+                " ",
+                39_939.0,
+            ),
+            (
+                "글 줄은 내려간다",
+                floating_shape(tb, "PARA", 0, 38_057, 141),
+                "가",
+                39_939.0,
+            ),
+            (
+                "글 앞",
+                floating_shape("IN_FRONT_OF_TEXT", "PARA", 0, 8_657, 283),
+                "",
+                1_600.0,
+            ),
+            (
+                "글 뒤",
+                floating_shape("BEHIND_TEXT", "PARA", 0, 8_657, 283),
+                "",
+                1_600.0,
+            ),
+            (
+                "어울림",
+                floating_shape("SQUARE", "PARA", 0, 8_657, 283),
+                "",
+                1_600.0,
+            ),
+            (
+                "종이 기준(미지원)",
+                floating_shape(tb, "PAPER", 0, 8_657, 283),
+                "",
+                1_600.0,
+            ),
         ];
         for (name, shape, text, want) in cases {
             let doc = shape_doc(vec![
@@ -8622,8 +8842,14 @@ mod tests {
             ]);
             let [(pp, py), (np, ny), (wp, _)] = end_line_in_three_walks(&doc);
             assert_eq!((pp, np, wp), (0, 0, 0), "{name}: 쪽");
-            assert!((py - want).abs() < 1e-6, "{name}: place_doc 「끝」 위 {py} ≠ {want}");
-            assert!((ny - want).abs() < 1e-6, "{name}: NaiveLayout 「끝」 위 {ny} ≠ {want}");
+            assert!(
+                (py - want).abs() < 1e-6,
+                "{name}: place_doc 「끝」 위 {py} ≠ {want}"
+            );
+            assert!(
+                (ny - want).abs() < 1e-6,
+                "{name}: NaiveLayout 「끝」 위 {ny} ≠ {want}"
+            );
         }
         // 글 줄 자체가 띠 아래(38,339)로 내려간다.
         let doc = shape_doc(vec![Block::Paragraph(floating_para(
@@ -8631,7 +8857,11 @@ mod tests {
             "가",
         ))]);
         let placed = place_doc(&doc, &ApproxFontMetrics);
-        let g = placed.pages[0].glyphs.iter().find(|g| g.ch == '가').expect("호스트 글자");
+        let g = placed.pages[0]
+            .glyphs
+            .iter()
+            .find(|g| g.ch == '가')
+            .expect("호스트 글자");
         assert!((g.baseline - (38_339.0 + 1_000.0 * BASELINE_RATIO)).abs() < 1e-6);
     }
 
@@ -8642,6 +8872,8 @@ mod tests {
     fn a_band_that_does_not_fit_moves_to_the_next_page_top() {
         use crate::LayoutEngine;
         let tb = "TOP_AND_BOTTOM";
+        let mut spilled = floating_shape(tb, "PARA", 45, 19_712, 141);
+        spilled.fill = Color::from_hex("#FFFFFF");
         for columns in [false, true] {
             let mut first = floating_para(floating_shape(tb, "PARA", 0, 70_000, 0), "");
             if columns {
@@ -8649,23 +8881,38 @@ mod tests {
             }
             let doc = shape_doc(vec![
                 Block::Paragraph(first),
-                Block::Paragraph(floating_para(floating_shape(tb, "PARA", 45, 19_712, 141), "")),
+                Block::Paragraph(floating_para(spilled.clone(), "")),
                 Block::Paragraph(para("끝")),
             ]);
             let placed = place_doc(&doc, &ApproxFontMetrics);
+            // 넘어간 도형은 다음 쪽 맨 위(바깥 위 141)에 그린다 — 오프셋 45 는 버린다.
+            let fills: Vec<_> = placed.pages[1]
+                .rects
+                .iter()
+                .filter(|r| r.fill.is_some())
+                .collect();
+            assert_eq!(fills.len(), 1, "columns={columns}: 둘째 쪽의 도형");
+            assert_eq!(fills[0].y, 141.0, "columns={columns}: 도형 위");
             let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
             let walked = block_pages(&doc, &ApproxFontMetrics);
             assert_eq!(placed.pages.len(), 2, "columns={columns}: place_doc 쪽 수");
             assert_eq!(naive.pages.len(), 2, "columns={columns}: NaiveLayout 쪽 수");
             assert_eq!(walked[0], vec![0, 0, 1], "columns={columns}: block_pages");
-            let end = placed.pages[1].glyphs.iter().find(|g| g.ch == '끝').expect("둘째 쪽 「끝」");
+            let end = placed.pages[1]
+                .glyphs
+                .iter()
+                .find(|g| g.ch == '끝')
+                .expect("둘째 쪽 「끝」");
             assert!(
                 (end.baseline - (19_994.0 + 1_000.0 * BASELINE_RATIO)).abs() < 1e-6,
                 "columns={columns}: 「끝」 기준선 {}",
                 end.baseline
             );
             // 둘째 호스트의 빈 줄은 첫 쪽 70,000 에 남는다(NaiveLayout 이 놓은 줄).
-            assert_eq!(naive.pages[0].lines.last().map(|l| l.vert_pos), Some(70_000.0));
+            assert_eq!(
+                naive.pages[0].lines.last().map(|l| l.vert_pos),
+                Some(70_000.0)
+            );
             if !columns {
                 assert!(naive
                     .breaks
@@ -8675,4 +8922,123 @@ mod tests {
         }
     }
 
+    /// #542 PR-3 — 떠 있는 `rect` 는 `<hp:pos>` 자리에 채움 · 테두리 · 글상자 본문을 그리고 흐름은 그대로다.
+    /// 종이(PAPER) · 쪽(PAGE = 본문 상자) · 단 · 문단 기준을 가르려고 여백을 둔 쪽(왼쪽 3,000 · 위 4,000)을 쓴다.
+    /// 가운데 정렬: 2022.hwpx 의 `PAPER` · `CENTER` · 오프셋 0 rect(폭 48,189)는 59,528 쪽의 왼쪽 여백 5,669 에
+    /// 놓인다 — 같은 식(`(쪽 폭 − 폭) / 2`)을 잠근다.
+    #[test]
+    fn a_floating_rect_draws_at_its_position_without_moving_the_flow() {
+        let rect = |wrap: &str, vrel: &str, hrel: &str, halign: &str| {
+            let mut s = text_box_rect(vec![Block::Paragraph(para("상자"))], "TOP");
+            s.treat_as_char = false;
+            s.text_wrap = wrap.into();
+            s.vert_rel_to = vrel.into();
+            s.horz_rel_to = hrel.into();
+            s.horz_align = halign.into();
+            s.vert_offset = 7_000;
+            s.horz_offset = 5_000;
+            s
+        };
+        let cases: [(&str, ShapeRef, (f64, f64)); 5] = [
+            (
+                "종이",
+                rect("IN_FRONT_OF_TEXT", "PAPER", "PAPER", "LEFT"),
+                (5_000.0, 7_000.0),
+            ),
+            (
+                "쪽",
+                rect("BEHIND_TEXT", "PAGE", "PAGE", "LEFT"),
+                (8_000.0, 11_000.0),
+            ),
+            (
+                "문단 · 단",
+                rect("IN_FRONT_OF_TEXT", "PARA", "COLUMN", "LEFT"),
+                (8_000.0, 11_000.0),
+            ),
+            (
+                "종이 가운데",
+                rect("IN_FRONT_OF_TEXT", "PAPER", "PAPER", "CENTER"),
+                (20_000.0 + 5_000.0, 7_000.0),
+            ),
+            (
+                "어울림도 자리는 그대로",
+                rect("SQUARE", "PAPER", "PAPER", "LEFT"),
+                (5_000.0, 7_000.0),
+            ),
+        ];
+        for (name, shape, (x, y)) in cases {
+            let mut doc = shape_doc(vec![
+                Block::Paragraph(floating_para(shape, "")),
+                Block::Paragraph(para("끝")),
+            ]);
+            doc.sections[0].page.margin_left = 3_000;
+            doc.sections[0].page.margin_top = 4_000;
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let page = &placed.pages[0];
+            let fill: Vec<_> = page.rects.iter().filter(|r| r.fill.is_some()).collect();
+            assert_eq!(fill.len(), 1, "{name}: 채움 하나");
+            assert_eq!(
+                (fill[0].x, fill[0].y, fill[0].w, fill[0].h),
+                (x, y, 20_000.0, 6_000.0),
+                "{name}: 상자 자리"
+            );
+            assert_eq!(page.lines.len(), 4, "{name}: 테두리 네 변");
+            let body = page
+                .glyphs
+                .iter()
+                .find(|g| g.ch == '상')
+                .expect("글상자 본문");
+            assert!(
+                body.x >= x && body.baseline > y && body.baseline < y + 6_000.0,
+                "{name}: 본문은 상자 안"
+            );
+            assert!(page.undrawn_shapes.is_empty(), "{name}: 알림 없음");
+            // 흐름은 그대로: 「끝」은 빈 줄(1,600) 아래.
+            let end = page.glyphs.iter().find(|g| g.ch == '끝').expect("끝");
+            assert!(
+                (end.baseline - (4_000.0 + 1_600.0 + 1_000.0 * BASELINE_RATIO)).abs() < 1e-6,
+                "{name}"
+            );
+        }
+    }
+
+    /// #542 PR-3 — 그리지 못하는 떠 있는 도형(묶음 · 다른 종류 · 모르는 자리 기준)은 그리지 않고 쪽에 알린다.
+    /// 문단 기준 위아래는 그리지 못해도 자리는 잡는다.
+    #[test]
+    fn floating_shapes_not_drawn_are_recorded_and_still_take_their_band() {
+        let mut group = floating_shape("TOP_AND_BOTTOM", "PARA", 0, 5_000, 0);
+        group.kind = ShapeKind::Container;
+        let mut ellipse = floating_shape("IN_FRONT_OF_TEXT", "PAPER", 0, 5_000, 0);
+        ellipse.kind = ShapeKind::Other("ellipse".into());
+        let mut unknown = floating_shape("IN_FRONT_OF_TEXT", "PAPER", 0, 5_000, 0);
+        unknown.horz_rel_to = String::new();
+        let doc = shape_doc(vec![
+            Block::Paragraph(floating_para(group, "")),
+            Block::Paragraph(floating_para(ellipse, "")),
+            Block::Paragraph(floating_para(unknown, "")),
+            Block::Paragraph(para("끝")),
+        ]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let page = &placed.pages[0];
+        let reasons: Vec<_> = page
+            .undrawn_shapes
+            .iter()
+            .map(|u| (u.block, u.reason))
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                (0, UndrawnShape::Floating),
+                (1, UndrawnShape::Floating),
+                (2, UndrawnShape::Floating),
+            ]
+        );
+        assert!(
+            page.rects.is_empty() && page.lines.is_empty(),
+            "그린 것 없음"
+        );
+        let end = page.glyphs.iter().find(|g| g.ch == '끝').expect("끝");
+        let top = 5_000.0 + 1_600.0 + 1_600.0;
+        assert!((end.baseline - (top + 1_000.0 * BASELINE_RATIO)).abs() < 1e-6);
+    }
 }

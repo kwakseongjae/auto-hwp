@@ -3666,7 +3666,10 @@ mod tests {
             .find(|g| g.ch == '가')
             .expect("놓인 글자");
         let top = placed.pages[0].margin_top;
-        assert!(first.baseline > top + 20_000.0, "글 줄이 띠 아래로 내려갔다");
+        assert!(
+            first.baseline > top + 20_000.0,
+            "글 줄이 띠 아래로 내려갔다"
+        );
         for offset in 0..3 {
             let c = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 0, 0, 0, offset)
                 .unwrap_or_else(|| panic!("오프셋 {offset} 캐럿 없음"));
