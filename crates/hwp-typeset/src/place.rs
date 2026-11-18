@@ -1794,13 +1794,15 @@ fn place_paragraph_columns(
                 flow.add(shift);
             }
         }
+        let lane_before = (pages.len(), flow.column_index());
         if flow.vert() + line.vert_size > flow.available_height(body_h)
             && flow.vert() > 0.0
             && flow.advance_column()
         {
             new_page(pages, page);
         }
-        if line_index == 0 {
+        // 첫 줄이 다음 단 · 쪽으로 넘어가면 문단 위도 거기다(띠로 내린 양은 문단 위가 아니다).
+        if line_index == 0 && (pages.len(), flow.column_index()) != lane_before {
             para_anchor = (pages.len() - 1, mt + flow.y(), flow.box_now());
         }
         first_line_page.get_or_insert(pages.len() - 1);
@@ -9040,5 +9042,42 @@ mod tests {
         let end = page.glyphs.iter().find(|g| g.ch == '끝').expect("끝");
         let top = 5_000.0 + 1_600.0 + 1_600.0;
         assert!((end.baseline - (top + 1_000.0 * BASELINE_RATIO)).abs() < 1e-6);
+    }
+
+    /// #542 PR-3 — 글 줄이 띠 아래로 내려가도 문단 기준 도형은 **문단 위**(오프셋 0)에 그린다 — 한 단 · 다단 두 길.
+    #[test]
+    fn a_paragraph_relative_band_shape_is_drawn_at_the_paragraph_top_not_below_the_pushed_text() {
+        for columns in [false, true] {
+            let mut shape = floating_shape("TOP_AND_BOTTOM", "PARA", 0, 10_000, 0);
+            shape.fill = Color::from_hex("#FFFFFF");
+            let mut host = floating_para(shape, "가");
+            let lead = if columns {
+                let mut lead = para("앞");
+                lead.column_layout_before = Some(ColumnLayout::default());
+                lead
+            } else {
+                para("앞")
+            };
+            host.runs[0].content.push(Inline::Text("나".into()));
+            let doc = shape_doc(vec![Block::Paragraph(lead), Block::Paragraph(host)]);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let page = &placed.pages[0];
+            let fill: Vec<_> = page.rects.iter().filter(|r| r.fill.is_some()).collect();
+            assert_eq!(fill.len(), 1, "columns={columns}");
+            assert_eq!(
+                fill[0].y, 1_600.0,
+                "columns={columns}: 문단 위(앞 문단 1,600 아래)"
+            );
+            let g = page
+                .glyphs
+                .iter()
+                .find(|g| g.ch == '가')
+                .expect("호스트 글자");
+            assert!(
+                (g.baseline - (1_600.0 + 10_000.0 + 1_000.0 * BASELINE_RATIO)).abs() < 1e-6,
+                "columns={columns}: 글 줄은 띠 아래 — 기준선 {}",
+                g.baseline
+            );
+        }
     }
 }
