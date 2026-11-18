@@ -570,6 +570,8 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
         let mut marks = PageNumberMarkPages::default();
         // #544 — 글 앞 · 글 뒤 표의 자리. NaiveLayout · block_pages 와 같은 판정(LOCKSTEP).
         let floats = crate::SectionFloatTables::of(sec);
+        // 쪽 아래를 넘은 떠 있는 표의 나머지 행 — 구역을 다 놓은 뒤 다음 쪽들 맨 위에 그린다.
+        let mut float_rest: Vec<FloatTableRest> = Vec::new();
 
         for (blk_idx, block) in sec.blocks.iter().enumerate() {
             match block {
@@ -617,7 +619,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                             continue;
                         };
                         let at = placed_para.anchor_page;
-                        place_floating_table(
+                        float_rest.extend(place_floating_table(
                             &mut pages,
                             at,
                             t,
@@ -626,7 +628,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                             fonts,
                             sec_idx,
                             t_idx,
-                        );
+                        ));
                         marks.on_table(&pages, at, at, sec_idx, t_idx, &sec.blocks[t_idx], t);
                         crate::mark_drawn(&mut last_drawn, at);
                     }
@@ -674,9 +676,9 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                                 para: (ml, body_w),
                                 para_top: mt + vert,
                             };
-                            place_floating_table(
+                            float_rest.extend(place_floating_table(
                                 &mut pages, at, t, &frame, doc, fonts, sec_idx, blk_idx,
-                            );
+                            ));
                             marks.on_table(&pages, at, at, sec_idx, blk_idx, block, t);
                             crate::mark_drawn(&mut last_drawn, at);
                         }
@@ -804,6 +806,12 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                 }
             }
         }
+        // #544 — 쪽 아래를 넘은 떠 있는 표는 흐름이 만든 다음 쪽들 맨 위에서 잇는다(쪽을 더하지 않는다).
+        for rest in float_rest {
+            if let Some(Block::Table(t)) = sec.blocks.get(rest.block) {
+                continue_floating_table(&mut pages, rest, t, mt, body_h, doc, fonts, sec_idx);
+            }
+        }
         marks.finish(pages.len() - 1);
         place_section_decorations(&mut pages, section_first_page, sec, doc, fonts, &marks);
         page_number_off.extend(page_number_notice(sec, sec_idx, section_first_page, &marks));
@@ -833,6 +841,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
         let mut marks = PageNumberMarkPages::default();
         // #544 — 글 앞 · 글 뒤 표(한 단 걸음과 같은 판정).
         let floats = crate::SectionFloatTables::of(section);
+        let mut float_rest: Vec<FloatTableRest> = Vec::new();
 
         for (block_index, block) in section.blocks.iter().enumerate() {
             match block {
@@ -883,7 +892,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                             continue;
                         };
                         let at = placed_para.anchor_page;
-                        place_floating_table(
+                        float_rest.extend(place_floating_table(
                             &mut pages,
                             at,
                             t,
@@ -892,7 +901,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                             fonts,
                             section_index,
                             t_idx,
-                        );
+                        ));
                         marks.on_table(
                             &pages,
                             at,
@@ -940,7 +949,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                                 para: (body_x + column.x, column.width),
                                 para_top: body_y + flow.y(),
                             };
-                            place_floating_table(
+                            float_rest.extend(place_floating_table(
                                 &mut pages,
                                 at,
                                 table,
@@ -949,7 +958,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                                 fonts,
                                 section_index,
                                 block_index,
-                            );
+                            ));
                             marks.on_table(
                                 &pages,
                                 at,
@@ -1093,6 +1102,20 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
         if let [layout] = separator_layouts.as_slice() {
             for output in pages.iter_mut().skip(section_first_page) {
                 emit_column_separators(output, layout, body_x, body_y, body_w, body_h);
+            }
+        }
+        for rest in float_rest {
+            if let Some(Block::Table(t)) = section.blocks.get(rest.block) {
+                continue_floating_table(
+                    &mut pages,
+                    rest,
+                    t,
+                    body_y,
+                    body_h,
+                    doc,
+                    fonts,
+                    section_index,
+                );
             }
         }
         marks.finish(pages.len() - 1);
@@ -4259,15 +4282,44 @@ struct ParaPlaced {
     frame: FloatFrame,
 }
 
+/// The rows of a floating table (#544) that did not fit its anchor page — continued at the top of the
+/// following pages once the section is laid out ([`continue_floating_table`]).
+#[derive(Clone, Copy, Debug)]
+struct FloatTableRest {
+    block: usize,
+    page: usize,
+    first_row: usize,
+    x: f64,
+    avail_w: f64,
+}
+
+/// The rows `[first, end)` of a table that fit from `top` down to `bottom` — at least one, so a row taller
+/// than the room still draws (clipped) instead of looping.
+fn rows_that_fit(row_h: &[f64], first: usize, top: f64, bottom: f64) -> usize {
+    let mut y = top;
+    let mut end = first;
+    while end < row_h.len() && (end == first || y + row_h[end] <= bottom + 1e-6) {
+        y += row_h[end];
+        end += 1;
+    }
+    end
+}
+
 /// Draw a 글 앞 · 글 뒤 table (#544, [`crate::table_floats_over_text`]) on page `page_idx` at its
-/// `<hp:pos>` against `frame` — [`floating_box`], the rule the floating 도형 use. It takes no flow height
-/// and is drawn whole on that page in one fragment (never split across pages), with its block band for
-/// point-to-scope; cell carets and hit tests follow the placed fragment as for any table.
+/// `<hp:pos>` against `frame` — [`floating_box`], the rule the floating 도형 use. It takes no flow height;
+/// its block band rides along for point-to-scope, and cell carets and hit tests follow the placed
+/// fragments as for any table.
 ///
-/// ⚠️ No sample shows a floating table running past the page bottom (the public ones all fit — the 14×9
-/// one ends at 74,275 in a 74,934 body), so such a table is simply drawn past the body there. The drawing
-/// order does not follow 글 앞 / 글 뒤 yet: the table paints with the page's tables, under the text. A
-/// placement token not handled puts the table at the anchor's column left and paragraph top.
+/// Rows that run past the body bottom continue on the next page (between rows; a `keep_together` table is
+/// drawn whole). Evidence: the public 14×9 글 앞 table stores `<hp:sz height="66284">` — exactly its rows
+/// 0–9 (3 × 3,319 + 5,831 + 15,097 + 19,175 + 3 × 3,340 + 6,204), the rows that fit under its anchor
+/// (6,480 + 1,228 + 283 + 66,284 = 74,275 of a 74,934 body), while all 14 rows' stored cells add up to
+/// 115,721. The rest is returned to be drawn at the top of the following pages
+/// ([`continue_floating_table`]). ⚠️ Where the continuation sits (the body top here) and that it takes no
+/// flow there either are assumptions: the PDF of that document puts its last line where no table takes
+/// any flow, on the page the continuation is on. The drawing order does not follow 글 앞 / 글 뒤 yet: the
+/// table paints with the page's tables, under the text. A placement token not handled puts the table at
+/// the anchor's column left and paragraph top.
 #[allow(clippy::too_many_arguments)]
 fn place_floating_table(
     pages: &mut [PlacedPage],
@@ -4278,12 +4330,10 @@ fn place_floating_table(
     fonts: &dyn FontMetricsProvider,
     section: usize,
     block: usize,
-) {
-    let Some(at) = t.float_placement.as_ref() else {
-        return;
-    };
+) -> Option<FloatTableRest> {
+    let at = t.float_placement.as_ref()?;
     if t.rows == 0 || t.cols == 0 || page_idx >= pages.len() {
-        return;
+        return None;
     }
     let avail_w = frame.column.1;
     let col_x = column_offsets(t, avail_w);
@@ -4292,6 +4342,11 @@ fn place_floating_table(
     let (page_w, page_h) = (pages[page_idx].width, pages[page_idx].height);
     let (x, y) = floating_box(&FloatPos::of_table(t, at, size), page_w, page_h, frame)
         .unwrap_or((frame.column.0, frame.para_top));
+    let end = if t.keep_together {
+        t.rows
+    } else {
+        rows_that_fit(&row_h, 0, y, frame.body.1 + frame.body.3)
+    };
     flush_fragment(
         &mut pages[..=page_idx],
         t,
@@ -4302,7 +4357,7 @@ fn place_floating_table(
         &col_x,
         &row_h,
         0,
-        t.rows,
+        end,
         section,
         block,
         None,
@@ -4311,11 +4366,65 @@ fn place_floating_table(
         x,
         y,
         w: size.0,
-        h: size.1,
+        h: row_h[..end].iter().sum(),
         section,
         block,
         kind: BlockKind::Table,
     });
+    (end < t.rows).then_some(FloatTableRest {
+        block,
+        page: page_idx,
+        first_row: end,
+        x,
+        avail_w,
+    })
+}
+
+/// Draw the rows [`place_floating_table`] left over, from the top of the body (`top` · `body_h`) of each
+/// following page. Only pages the flow made are used — a floating table never adds a page (so the page
+/// count stays the flow's, in LOCKSTEP); rows with no page left are not drawn.
+#[allow(clippy::too_many_arguments)]
+fn continue_floating_table(
+    pages: &mut [PlacedPage],
+    rest: FloatTableRest,
+    t: &Table,
+    top: f64,
+    body_h: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    section: usize,
+) {
+    let col_x = column_offsets(t, rest.avail_w);
+    let row_h = crate::table_page_flow_row_heights(t, rest.avail_w, body_h, doc, fonts);
+    let (mut first, mut page) = (rest.first_row, rest.page + 1);
+    while first < t.rows && page < pages.len() {
+        let end = rows_that_fit(&row_h, first, top, top + body_h);
+        flush_fragment(
+            &mut pages[..=page],
+            t,
+            doc,
+            fonts,
+            rest.x,
+            top,
+            &col_x,
+            &row_h,
+            first,
+            end,
+            section,
+            rest.block,
+            None,
+        );
+        pages[page].blocks.push(PlacedBlock {
+            x: rest.x,
+            y: top,
+            w: col_x[t.cols],
+            h: row_h[first..end].iter().sum(),
+            section,
+            block: rest.block,
+            kind: BlockKind::Table,
+        });
+        (first, page) = (end, page + 1);
+    }
 }
 
 /// Where a paragraph-relative 「자리 차지」 도형 goes when [`crate::FloatBandPlan::NextPage`] moved its band:
@@ -9885,6 +9994,43 @@ mod tests {
         assert_eq!(end_line_in_three_walks(&doc)[0].0, 0);
     }
 
+    /// #544 — 쪽 아래를 넘는 떠 있는 표는 행 사이에서 나뉘어 다음 쪽 본문 맨 위에서 잇는다(공개 14×9 글 앞 표:
+    /// 저장 `sz` 높이 66,284 = 앵커 아래 들어가는 행 0~9 의 합). 흐름 · 쪽 수는 그대로이고, 흐름이 만든 쪽이
+    /// 없으면 남은 행은 그리지 않는다.
+    #[test]
+    fn a_floating_table_past_the_page_bottom_continues_on_the_next_page() {
+        // 행 넷 × 30,000 — 문단 위 0 + 오프셋 10,000 에서 시작하면 80,000 본문에 둘(70,000)만 들어간다.
+        let mut t = fixed_height_table(4, 30_000, false);
+        t.col_widths = vec![20_000];
+        t.float_placement = front_table(1, 10_000, 0).float_placement;
+        let mut blocks = hosted(t.clone(), "", true, 1);
+        // 다음 쪽을 만드는 본문: 「가」 60줄(96,000).
+        blocks.extend((0..60).map(|_| Block::Paragraph(para("가"))));
+        let doc = shape_doc(blocks);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+        assert_eq!(placed.pages.len(), 2);
+        assert_eq!(naive.pages.len(), 2, "LOCKSTEP");
+        let pieces: Vec<_> = placed
+            .pages
+            .iter()
+            .enumerate()
+            .flat_map(|(pi, pg)| {
+                pg.tables
+                    .iter()
+                    .filter(|t| t.block == 0 && t.ancestors.is_empty())
+                    .map(move |t| (pi, t.y, t.first_row, t.last_row))
+            })
+            .collect();
+        assert_eq!(pieces, vec![(0, 10_000.0, 0, 2), (1, 0.0, 2, 4)]);
+        // 흐름이 만든 쪽이 하나뿐이면 남은 행은 그리지 않는다(쪽을 더하지 않는다).
+        let short = shape_doc(hosted(t, "", true, 1));
+        let placed = place_doc(&short, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 1);
+        assert_eq!(table_on(&placed, 0).len(), 1);
+        assert_eq!(placed.pages[0].tables[0].last_row, 2);
+    }
+
     /// #544 — 오프셋으로 옮겨 그린 떠 있는 표에서도 칸 캐럿은 그려진 칸 안에 있다.
     #[test]
     fn a_cell_caret_sits_inside_a_floating_table_drawn_at_its_offset() {
@@ -9995,12 +10141,17 @@ mod tests {
                 .position(|b| matches!(b, Block::Table(_)))
                 .expect("표 블록");
             let drawn = table_on(&placed, t_idx);
-            assert_eq!(drawn.len(), 1, "{ctx}: 한 조각");
+            assert!(!drawn.is_empty(), "{ctx}: 그린 표");
             assert_eq!(
                 drawn[0].0,
                 block_pages(&with, &ApproxFontMetrics)[0][t_idx],
                 "{ctx}: 블록 → 쪽 지도"
             );
+            // 이어지는 조각은 바로 다음 쪽들의 본문 맨 위에 있다(쪽을 더하지 않는다).
+            for (k, piece) in drawn.iter().enumerate().skip(1) {
+                assert_eq!(piece.0, drawn[0].0 + k, "{ctx}: 다음 쪽");
+                assert_eq!(piece.2, 0.0, "{ctx}: 본문 맨 위");
+            }
             cases += 1;
             if drawn[0].0 > 0 {
                 later_page += 1;

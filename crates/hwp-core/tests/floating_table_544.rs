@@ -37,28 +37,20 @@ fn without_tables(doc: &SemanticDoc) -> SemanticDoc {
     out
 }
 
-/// The (page, line top below the body top) of the first glyph `ch` outside a table.
-fn body_glyph(doc: &SemanticDoc, placed: &PlacedDoc, ch: char) -> (usize, f64) {
+/// Every (page, line top below the body top) of glyph `ch`.
+fn glyph_spots(doc: &SemanticDoc, placed: &PlacedDoc, ch: char) -> Vec<(usize, f64)> {
     let (_, mt, _, _) = body_box(&doc.sections[0].page);
     placed
         .pages
         .iter()
         .enumerate()
-        .find_map(|(pi, pg)| {
+        .flat_map(|(pi, pg)| {
             pg.glyphs
                 .iter()
-                .find(|g| {
-                    g.ch == ch
-                        && !pg.tables.iter().any(|t| {
-                            g.x >= t.x
-                                && g.x < t.x + t.w
-                                && g.baseline > t.y
-                                && g.baseline < t.y + t.h
-                        })
-                })
-                .map(|g| (pi, g.baseline - g.size * 0.85 - mt))
+                .filter(move |g| g.ch == ch)
+                .map(move |g| (pi, g.baseline - g.size * 0.85 - mt))
         })
-        .expect("본문 글자")
+        .collect()
 }
 
 /// 프로젝트 계획서: 글 앞 표 2개(1×1 · 14×9, 문단 0 · 4 가 품음) + 빈 문단 + 「완」(문단 73). 다른 프로그램의
@@ -75,18 +67,61 @@ fn project_plan_front_tables_take_no_flow() {
     let naive = NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
     assert_eq!(placed.pages.len(), 2, "place_doc");
     assert_eq!(naive.pages.len(), 2, "NaiveLayout");
+    // 「완」은 표 칸에 없다 — 표를 뺀 문서에서 하나뿐인 자리가 본문 줄의 자리다.
     let plain = without_tables(&doc);
-    let wan = body_glyph(&doc, &placed, '완');
-    assert_eq!(wan.0, 1, "「완」은 2쪽");
-    assert_eq!(
-        wan,
-        body_glyph(&plain, &place_doc(&plain, &ApproxFontMetrics), '완'),
-        "표를 뺀 문서와 같은 자리"
+    let wan = glyph_spots(&plain, &place_doc(&plain, &ApproxFontMetrics), '완');
+    assert_eq!(wan.len(), 1, "{wan:?}");
+    assert_eq!(wan[0].0, 1, "「완」은 2쪽");
+    assert!(
+        glyph_spots(&doc, &placed, '완').contains(&wan[0]),
+        "표가 있어도 같은 자리: {wan:?}"
     );
-    // 두 표는 1쪽에 그려진다(문단 0 · 4 의 자리) — 흐름에 넣던 때는 1~2쪽을 썼다.
-    let tables = top_level_tables(&placed, 0);
-    assert_eq!(tables.len(), 2, "{tables:?}");
-    assert!(top_level_tables(&placed, 1).is_empty());
+    // 두 표는 1쪽 문단 0 · 4 의 자리에 그려진다. 14×9 표는 앵커 아래 들어가는 행까지 1쪽에, 나머지는 2쪽
+    // 본문 맨 위에서 잇는다.
+    let (_, mt, _, body_h) = body_box(&doc.sections[0].page);
+    let pieces = |placed: &PlacedDoc| -> Vec<(usize, usize, usize, f64, f64)> {
+        placed
+            .pages
+            .iter()
+            .enumerate()
+            .flat_map(|(pi, pg)| {
+                pg.tables
+                    .iter()
+                    .filter(|t| t.ancestors.is_empty() && t.rows == 14)
+                    .map(move |t| (pi, t.first_row, t.last_row, t.y, t.h))
+            })
+            .collect()
+    };
+    assert_eq!(top_level_tables(&placed, 0).len(), 2);
+    let big = pieces(&placed);
+    assert_eq!(big.len(), 2, "{big:?}");
+    let (first, rest) = (big[0], big[1]);
+    assert_eq!((first.0, first.1, rest.0, rest.2), (0, 0, 1, 14), "{big:?}");
+    assert_eq!(rest.1, first.2, "{big:?}");
+    assert!(
+        first.3 + first.4 <= mt + body_h,
+        "1쪽 조각은 본문 안: {big:?}"
+    );
+    assert_eq!(rest.3, mt, "2쪽 본문 맨 위");
+
+    // 한글이 저장한 14×9 표의 `sz` 높이 66,284 는 행 0~9 의 합 = 앵커 아래 들어가는 행이다. 지금 엔진은 문단 0
+    // 의 글 앞 그림을 HWPX 파서가 글자처럼 취급해(배치를 읽지 않음 — #568) 그 줄이 2,227 높이가 되고, 호스트
+    // 문단 4 가 1,187 아래에 놓여 행 0~8 만 들어간다. 그림을 떠 있게 고친 사본에서는 저장 값 그대로다.
+    let mut floated = doc.clone();
+    for block in &mut floated.sections[0].blocks {
+        if let Block::Paragraph(p) = block {
+            for inline in p.runs.iter_mut().flat_map(|r| &mut r.content) {
+                if let Inline::Image(image) = inline {
+                    image.treat_as_char = false;
+                }
+            }
+        }
+    }
+    let big = pieces(&place_doc(&floated, &ApproxFontMetrics));
+    assert_eq!(
+        big.iter().map(|p| (p.0, p.1, p.2, p.4)).collect::<Vec<_>>(),
+        vec![(0, 0, 10, 66_284.0), (1, 10, 14, 49_437.0)]
+    );
 }
 
 /// 재난안전: 표지 문단(호스트)이 글 앞 표(오프셋 22,694 · 높이 32,200)를 품고, 다음 문단은
