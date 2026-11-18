@@ -9744,4 +9744,272 @@ mod tests {
         }
         assert!(drawn > 500, "그려진 도형 수 {drawn}");
     }
+
+    /// #544 — 글 앞으로 띄운 표(행 하나 · 높이 `h` 고정 · 폭 20,000 · 칸 글 「표」) — 문단 기준 세로 `v` · 단
+    /// 기준 가로 `x`.
+    fn front_table(h: HwpUnit, v: i32, x: i32) -> Table {
+        let mut t = fixed_height_table(1, h, false);
+        t.col_widths = vec![20_000];
+        t.cells[0].blocks = vec![Block::Paragraph(para("표"))];
+        t.float_placement = Some(TableFloat {
+            text_wrap: "IN_FRONT_OF_TEXT".into(),
+            vert_rel_to: "PARA".into(),
+            horz_rel_to: "COLUMN".into(),
+            vert_align: "TOP".into(),
+            horz_align: "LEFT".into(),
+            vert_offset: v,
+            horz_offset: x,
+            z_order: 1,
+        });
+        t.treat_as_char = Some(false);
+        t
+    }
+
+    /// 표와 그 호스트 문단(글 `text`, 없으면 표 앵커) — `hwpx` 면 HWPX 파서 순서 `[표, 호스트]`(호스트 원본
+    /// 범위가 표를 품는다), 아니면 .hwp 리프트 순서 `[호스트, 표]`.
+    fn hosted(t: Table, text: &str, hwpx: bool, key: usize) -> Vec<Block> {
+        let base = key * 1_000;
+        let mut host = para(text);
+        host.is_table_anchor = text.trim().is_empty();
+        let mut t = t;
+        if hwpx {
+            host.source = Some(ParaSource {
+                span: (base, base + 900),
+                ..Default::default()
+            });
+            t.src_span = Some((base + 10, base + 800));
+            vec![Block::Table(t), Block::Paragraph(host)]
+        } else {
+            vec![Block::Paragraph(host), Block::Table(t)]
+        }
+    }
+
+    fn table_on(placed: &PlacedDoc, block: usize) -> Vec<(usize, f64, f64, f64)> {
+        placed
+            .pages
+            .iter()
+            .enumerate()
+            .flat_map(|(pi, pg)| {
+                pg.tables
+                    .iter()
+                    .filter(move |t| t.block == block && t.ancestors.is_empty())
+                    .map(move |t| (pi, t.x, t.y, t.h))
+            })
+            .collect()
+    }
+
+    /// #544 — 글 앞 표는 흐름 높이를 쓰지 않고, 표만 품은 호스트는 보통 빈 줄 하나를 쓴다(저장 줄: 32,200 높이
+    /// 글 앞 표의 호스트 줄 = 앞 줄 + 1,500 + 720 · 본문 폭). 표는 호스트 문단 위 + 오프셋에 그려진다. 두 블록
+    /// 순서(HWPX · .hwp) 모두, 세 걸음이 같다.
+    #[test]
+    fn a_floating_table_takes_no_flow_and_its_host_keeps_its_line() {
+        for hwpx in [true, false] {
+            let mut blocks = hosted(front_table(30_000, 500, 7_000), "", hwpx, 1);
+            blocks.push(Block::Paragraph(para("끝")));
+            let doc = shape_doc(blocks);
+            let [placed_end, naive_end, walked_end] = end_line_in_three_walks(&doc);
+            // 호스트 빈 줄 하나(1,000 × 160%) 아래 — 표 30,000 은 흐름에 없다.
+            assert_eq!(placed_end, (0, 1_600.0), "hwpx={hwpx} place_doc");
+            assert_eq!(naive_end, (0, 1_600.0), "hwpx={hwpx} NaiveLayout");
+            assert_eq!(walked_end.0, 0, "hwpx={hwpx} block_pages");
+            let t_idx = if hwpx { 0 } else { 1 };
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            assert_eq!(
+                table_on(&placed, t_idx),
+                vec![(0, 7_000.0, 500.0, 30_000.0)],
+                "hwpx={hwpx}: 호스트 위 0 + 오프셋 500, 단 왼쪽 0 + 7,000 — 한 조각"
+            );
+            assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0][t_idx], 0);
+            // 대조: 배치가 없으면(흐름 표) 지금처럼 표 높이만큼 민다.
+            let mut flow = doc.clone();
+            for b in &mut flow.sections[0].blocks {
+                match b {
+                    Block::Table(t) => t.float_placement = None,
+                    Block::Paragraph(p) => p.source = None,
+                }
+            }
+            let [flow_end, ..] = end_line_in_three_walks(&flow);
+            assert!(flow_end.1 >= 30_000.0, "hwpx={hwpx} 흐름 표: {flow_end:?}");
+        }
+    }
+
+    /// #544 — 호스트의 첫 줄이 다음 쪽으로 넘어가면 표도 그 쪽(문단 위)에 그려지고, 블록 → 쪽 지도도 그 쪽을
+    /// 적는다. HWPX 순서에서는 표 블록이 호스트보다 먼저 오므로, 표 블록 자리에서 쪽을 적으면 틀린다.
+    #[test]
+    fn a_floating_table_follows_its_host_to_the_next_page() {
+        for hwpx in [true, false] {
+            // 「가」 49줄 × 1,600 = 78,400 — 본문 79,000 에 호스트 빈 줄(1,000)이 안 들어가 다음 쪽 맨 위로.
+            let mut blocks: Vec<Block> = (0..49).map(|_| Block::Paragraph(para("가"))).collect();
+            let t_idx = blocks.len() + usize::from(!hwpx);
+            blocks.extend(hosted(front_table(10_000, 300, 0), "", hwpx, 1));
+            blocks.push(Block::Paragraph(para("끝")));
+            let mut doc = shape_doc(blocks);
+            doc.sections[0].page.height = 79_000;
+            let [placed_end, naive_end, walked_end] = end_line_in_three_walks(&doc);
+            assert_eq!(placed_end, (1, 1_600.0), "hwpx={hwpx}");
+            assert_eq!(naive_end, (1, 1_600.0), "hwpx={hwpx}");
+            assert_eq!(walked_end.0, 1, "hwpx={hwpx}");
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            assert_eq!(
+                table_on(&placed, t_idx),
+                vec![(1, 0.0, 300.0, 10_000.0)],
+                "hwpx={hwpx}"
+            );
+            assert_eq!(
+                block_line_pages(&doc, &ApproxFontMetrics).expect("한 단")[0][t_idx],
+                vec![1, 1],
+                "hwpx={hwpx}: 표의 쪽 = 호스트 첫 줄의 쪽"
+            );
+        }
+    }
+
+    /// #544 — 떠 있는 표만 그려진 쪽도 「그린 쪽」이다(이슈 307): 뒤 문단의 쪽 나누기가 실행된다. 공개 코퍼스
+    /// 재난안전 문서의 표지(빈 줄 둘 + 떠 있는 개체들, 다음 문단 `pageBreak="1"` · 저장 줄 0)가 이 모양이다.
+    #[test]
+    fn a_page_holding_only_a_floating_table_still_takes_a_forced_break() {
+        for hwpx in [true, false] {
+            let mut blocks = hosted(front_table(5_000, 0, 0), "", hwpx, 1);
+            let mut end = para("끝");
+            end.page_break_before = true;
+            blocks.push(Block::Paragraph(end));
+            let doc = shape_doc(blocks);
+            let [placed_end, naive_end, walked_end] = end_line_in_three_walks(&doc);
+            assert_eq!(placed_end, (1, 0.0), "hwpx={hwpx}");
+            assert_eq!(naive_end, (1, 0.0), "hwpx={hwpx}");
+            assert_eq!(walked_end.0, 1, "hwpx={hwpx}");
+        }
+        // 대조: 표 없이 빈 줄만 있는 쪽에서는 쪽 나누기가 무동작이다(이슈 307 그대로).
+        let mut end = para("끝");
+        end.page_break_before = true;
+        let doc = shape_doc(vec![Block::Paragraph(para("")), Block::Paragraph(end)]);
+        assert_eq!(end_line_in_three_walks(&doc)[0].0, 0);
+    }
+
+    /// #544 — 오프셋으로 옮겨 그린 떠 있는 표에서도 칸 캐럿은 그려진 칸 안에 있다.
+    #[test]
+    fn a_cell_caret_sits_inside_a_floating_table_drawn_at_its_offset() {
+        let mut blocks = hosted(front_table(3_000, 400, 9_000), "", true, 1);
+        blocks.push(Block::Paragraph(para("끝")));
+        let doc = shape_doc(blocks);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let caret =
+            cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 0).expect("칸 캐럿");
+        assert_eq!(caret.page, 0);
+        assert!(
+            (9_000.0..=29_000.0).contains(&caret.x),
+            "캐럿 x {} — 표 9,000 ~ 29,000",
+            caret.x
+        );
+        assert!(
+            (400.0..=3_400.0).contains(&caret.top),
+            "캐럿 위 {} — 표 400 ~ 3,400",
+            caret.top
+        );
+    }
+
+    /// #544 성질 시험(고정 시드) — 떠 있는 표는 본문 글 자리를 바꾸지 않는다: 같은 문서에서 표 블록을 빼고
+    /// 호스트를 보통 문단으로 둔 것과 본문 글자(쪽 · x · 기준선)가 모두 같다. 또 place_doc · NaiveLayout 쪽
+    /// 수가 같고(LOCKSTEP), 표는 한 조각으로 블록 → 쪽 지도가 적은 쪽에 그려진다. 한 단 · 두 단, 두 블록
+    /// 순서, 호스트 글 있음 · 없음.
+    #[test]
+    fn floating_tables_never_move_body_text_and_stay_in_lockstep() {
+        use crate::LayoutEngine;
+        let mut seed: u64 = 0x5eed_0544;
+        let mut next = |n: u64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % n
+        };
+        let (mut later_page, mut cases) = (0, 0);
+        for case in 0..400 {
+            let columns = next(2) == 1;
+            let hwpx = next(2) == 1;
+            let page_h = 20_000 + next(60_000) as i32;
+            let lead = next(60) as usize;
+            let host_text = [
+                "",
+                "",
+                "가",
+                "가가
+가",
+            ][next(4) as usize];
+            let table = front_table(
+                1_000 + next(60_000) as i32,
+                next(20_000) as i32,
+                next(20_000) as i32,
+            );
+            let tail = next(4) as usize;
+            let build = |with_table: bool| {
+                let mut blocks = Vec::new();
+                if lead > 0 {
+                    blocks.push(Block::Paragraph(para(&vec!["나"; lead].join("\n"))));
+                }
+                if with_table {
+                    blocks.extend(hosted(table.clone(), host_text, hwpx, 1));
+                } else {
+                    blocks.push(Block::Paragraph(para(host_text)));
+                }
+                for _ in 0..tail {
+                    blocks.push(Block::Paragraph(para("다다다\n다")));
+                }
+                if columns {
+                    if let Block::Paragraph(first) = &mut blocks[0] {
+                        first.column_layout_before = Some(two_columns());
+                    }
+                }
+                let mut doc = shape_doc(blocks);
+                doc.sections[0].page.height = page_h;
+                doc
+            };
+            let (with, without) = (build(true), build(false));
+            let ctx = format!(
+                "case {case}: columns={columns} hwpx={hwpx} page_h={page_h} lead={lead} \
+                 host={host_text:?} tail={tail}"
+            );
+            let placed = place_doc(&with, &ApproxFontMetrics);
+            let naive = crate::NaiveLayout
+                .layout(&with, &ApproxFontMetrics)
+                .unwrap();
+            assert_eq!(placed.pages.len(), naive.pages.len(), "{ctx}: LOCKSTEP");
+            let text = |doc: &PlacedDoc| -> Vec<(usize, i64, i64, char)> {
+                doc.pages
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(pi, pg)| {
+                        pg.glyphs
+                            .iter()
+                            .filter(|g| g.ch != '표')
+                            .map(move |g| (pi, g.x.round() as i64, g.baseline.round() as i64, g.ch))
+                    })
+                    .collect()
+            };
+            assert_eq!(
+                text(&placed),
+                text(&place_doc(&without, &ApproxFontMetrics)),
+                "{ctx}: 본문 글자 자리"
+            );
+            let t_idx = with.sections[0]
+                .blocks
+                .iter()
+                .position(|b| matches!(b, Block::Table(_)))
+                .expect("표 블록");
+            let drawn = table_on(&placed, t_idx);
+            assert_eq!(drawn.len(), 1, "{ctx}: 한 조각");
+            assert_eq!(
+                drawn[0].0,
+                block_pages(&with, &ApproxFontMetrics)[0][t_idx],
+                "{ctx}: 블록 → 쪽 지도"
+            );
+            cases += 1;
+            if drawn[0].0 > 0 {
+                later_page += 1;
+            }
+        }
+        assert_eq!(cases, 400);
+        assert!(
+            later_page > 100,
+            "표가 둘째 쪽 뒤에 그려진 경우 {later_page}"
+        );
+    }
 }
