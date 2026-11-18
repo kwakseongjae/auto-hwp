@@ -42,6 +42,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 파괴 변경 (Breaking)
 
+- **`ParaShape.zero_line_spacing` 필드가 늘었다 (#557).** HWPX 머리말이 퍼센트 0 을 명시했는지다(값 없는 0 과 가른다).
+  마이그레이션: `ParaShape` 를 필드를 다 적어 만드는 코드는 `false` 를 채운다. 프로젝트 JSON 의 문단 모양에는 켜졌을 때만
+  `zero_line_spacing: true` 가 실린다(생략 = 아님). Rust 크레이트 전용.
+  *(EN — Breaking: new public field `ParaShape.zero_line_spacing`; exhaustive builders fill `false`. The project JSON paragraph shape
+  carries `zero_line_spacing: true` only when set. Rust only.)*
+
 - **`LineSeg.font_size` 필드가 늘었다 (#556).** 개체가 줄 높이를 정한 퍼센트 줄에서만 그 줄의 글자 크기이고, 그 밖에는 0 이다.
   마이그레이션: `LineSeg` 를 직접 만드는 코드는 `font_size: 0.0` 을 채운다. 줄 진행은 이제 `hwp_typeset::line_advance` 로 잰다(공개됨,
   `line_spacing_ratio` 도). Rust 크레이트 전용 — npm 패키지 · CLI 는 그대로다.
@@ -57,6 +63,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   `PlacedPage`, `PdfPageVisualEvidence` and `PdfExport` (`notices`) must be filled by code that builds those structs. CLI and Rust only.)*
 
 ### 고침 (Fixed)
+
+- **줄 간격 0% 를 0 으로 조판한다 (#557).** HWPX 머리말이 명시한 퍼센트 0 을 엔진은 「값 없음」으로 보고 160% 로 조판했다.
+  한글은 0% 그대로 다음 줄을 같은 자리에 놓는다(출처 줄 · 빈 줄에 쓰인다). 칸 안 0% 문단은 줄 상자 하나를 차지한다(한글 저장과 같다).
+  `.hwp` 경로는 그대로다.
+  *(EN — Fixed: an explicit 0% line spacing in an HWPX header now lays out as 0% — the next line starts at the same spot, as in
+  Hangul — instead of the 160% default. A 0% paragraph in a table cell still takes one line box. `.hwp` is unchanged.)*
 
 - **퍼센트 줄 간격 문단에서 그림 · 개체가 줄 높이를 정하면, 줄 간격을 글자 크기 기준으로 더한다 (#556).** 엔진은 줄 높이 전체에
   비율을 곱해, 큰 그림이 있는 줄 뒤가 크게 벌어졌다(148% 줄의 29,196 높이 그림 → 엔진 43,210 · 한글 29,916). 한글이 저장한 줄은
