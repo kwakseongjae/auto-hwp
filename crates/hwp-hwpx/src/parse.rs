@@ -4185,4 +4185,108 @@ pub(crate) mod tests {
         assert!(head.contains(r#"horzOffset="14360""#), "{head}");
         assert!(head.contains(r#"zOrder="3""#), "{head}");
     }
+
+    /// #543 — 표 자신의 `<hp:caption>` 을 `Table.caption` 으로 읽는다(.hwp 리프트와 같은 값 대응). 캡션 문단은
+    /// 본문 흐름에 섞이지 않는다(이슈 80). 칸 안 표의 캡션은 그 칸 안 표가 가진다.
+    fn captioned_table_xml(caption_attrs: &str, inner: &str) -> String {
+        format!(
+            r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:tbl id="7" rowCnt="1" colCnt="1"><hp:sz width="20000" height="3000"/><hp:pos treatAsChar="1"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:caption {caption_attrs}><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP"><hp:p id="0" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:t>캡션 글</hp:t></hp:run></hp:p></hp:subList></hp:caption><hp:inMargin left="510" right="510" top="141" bottom="141"/><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>칸</hp:t>{inner}</hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="20000" height="3000"/></hp:tc></hp:tr></hp:tbl><hp:t></hp:t></hp:run></hp:p><hp:p id="2"><hp:run><hp:t>본문</hp:t></hp:run></hp:p></hs:sec>"#
+        )
+    }
+
+    fn block_text(blocks: &[Block]) -> String {
+        blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(
+                    p.runs
+                        .iter()
+                        .flat_map(|r| &r.content)
+                        .filter_map(|i| match i {
+                            Inline::Text(t) => Some(t.as_str()),
+                            _ => None,
+                        })
+                        .collect::<String>(),
+                ),
+                Block::Table(_) => None,
+            })
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+
+    #[test]
+    fn a_tables_own_caption_is_read_into_table_caption() {
+        let xml = captioned_table_xml(
+            r#"side="TOP" fullSz="0" width="8504" gap="850" lastWidth="48047""#,
+            "",
+        );
+        let mut blocks = Vec::new();
+        parse_section(&xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        let t = first_table(&blocks);
+        let caption = t.caption.as_ref().expect("캡션");
+        assert_eq!(caption.position, TableCaptionPosition::Top);
+        assert_eq!(
+            (
+                caption.spacing,
+                caption.width,
+                caption.max_width,
+                caption.include_margin
+            ),
+            (850, 8504, 48047, false)
+        );
+        assert_eq!(block_text(&caption.blocks), "캡션 글");
+        // 본문 흐름에는 없다(이슈 80) — 최상위 문단은 표 호스트 · 「본문」 둘.
+        let body = block_text(&blocks);
+        assert!(!body.contains("캡션"), "{body}");
+        assert!(body.contains("본문"));
+        // 칸 글에도 섞이지 않는다.
+        assert_eq!(block_text(&t.cells[0].blocks), "칸");
+    }
+
+    /// #543 — `side` 넷 · `fullSz` · 값 없는 속성.
+    #[test]
+    fn caption_sides_and_defaults() {
+        for (side, want) in [
+            ("LEFT", TableCaptionPosition::Left),
+            ("RIGHT", TableCaptionPosition::Right),
+            ("BOTTOM", TableCaptionPosition::Bottom),
+        ] {
+            let xml = captioned_table_xml(&format!(r#"side="{side}" fullSz="1""#), "");
+            let mut blocks = Vec::new();
+            parse_section(&xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+            let caption = first_table(&blocks).caption.clone().expect("캡션");
+            assert_eq!(caption.position, want, "{side}");
+            assert!(caption.include_margin, "{side}");
+            assert_eq!(
+                (caption.spacing, caption.width, caption.max_width),
+                (0, 0, 0)
+            );
+        }
+    }
+
+    /// #543 — 칸 안 표의 캡션은 그 칸 안 표의 것이다(바깥 표의 캡션이 아니다).
+    #[test]
+    fn a_nested_tables_caption_belongs_to_the_nested_table() {
+        let inner = r#"<hp:tbl id="8" rowCnt="1" colCnt="1"><hp:sz width="5000" height="1000"/><hp:pos treatAsChar="1"/><hp:caption side="BOTTOM" gap="300"><hp:subList><hp:p><hp:run><hp:t>안쪽 캡션</hp:t></hp:run></hp:p></hp:subList></hp:caption><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>안</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="5000" height="1000"/></hp:tc></hp:tr></hp:tbl>"#;
+        let xml = captioned_table_xml(r#"side="TOP" gap="850""#, inner);
+        let mut blocks = Vec::new();
+        parse_section(&xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        let outer = first_table(&blocks);
+        assert_eq!(
+            block_text(&outer.caption.as_ref().unwrap().blocks),
+            "캡션 글"
+        );
+        let nested = outer.cells[0]
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("칸 안 표");
+        let caption = nested.caption.as_ref().expect("안쪽 캡션");
+        assert_eq!(caption.position, TableCaptionPosition::Bottom);
+        assert_eq!(block_text(&caption.blocks), "안쪽 캡션");
+        assert!(!block_text(&outer.cells[0].blocks).contains("캡션"));
+    }
 }

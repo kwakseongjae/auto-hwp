@@ -1216,6 +1216,11 @@ pub fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)> {
     if inner.source_anchor_spacing_after == 0 {
         inner.source_anchor_spacing_after = t.source_anchor_spacing_after;
     }
+    // #543 — the frame's caption belongs to what is drawn: without this the promoted table lost it (both
+    // formats) and nothing said so.
+    if inner.caption.is_none() {
+        inner.caption = t.caption.clone();
+    }
     // The outer cell's frame edge (the box around the wrapped table). Prefer a real per-edge border;
     // fall back to a default hairline only when the cell merely flags a legacy box.
     let frame = cell

@@ -1064,6 +1064,9 @@ fn undrawn_shape_notices(placed: &PlacedDoc) -> Vec<PdfNotice> {
                 // #544 — 떠 있는 표의 보이지 않는 행은 도형 · 글상자가 아니라 표 알림이다.
                 kind: if code == UndrawnShape::FloatingTableRows.code() {
                     "floating-table"
+                } else if code == UndrawnShape::TableCaption.code() {
+                    // #543 — 그리지 않은 표 캡션(옆 캡션 · 떠 있는 표 · 칸 안 표).
+                    "table-caption"
                 } else {
                     "text-box"
                 }
@@ -3079,6 +3082,43 @@ mod tests {
                 page_index: 0,
                 kind: "floating-table".into(),
                 code: "floating-table-rows-not-drawn".into(),
+            }]
+        );
+    }
+
+    /// #543 — 옆(왼쪽) 캡션은 그리지 않고 `table-caption` 알림 한 건이다.
+    #[test]
+    fn a_side_caption_is_a_table_caption_notice() {
+        let table = Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell::default()],
+            col_widths: vec![20_000],
+            row_heights: vec![3_000],
+            fixed_row_heights: true,
+            caption: Some(TableCaption {
+                position: TableCaptionPosition::Left,
+                blocks: vec![Block::Paragraph(Paragraph {
+                    runs: vec![Run {
+                        char_shape: 0,
+                        content: vec![Inline::Text("옆".into())],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                })],
+                width: 5_000,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let doc = doc_with(vec![Block::Table(table)]);
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        assert_eq!(
+            out.notices,
+            vec![PdfNotice {
+                page_index: 0,
+                kind: "table-caption".into(),
+                code: "table-caption-not-drawn".into(),
             }]
         );
     }
