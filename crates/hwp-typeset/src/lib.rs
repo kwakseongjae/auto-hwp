@@ -3259,8 +3259,9 @@ mod tests {
     #[test]
     fn a_tac_shape_sets_its_host_line_like_hangul_stores_it() {
         use ShapeKind::{Container, Rect};
-        // (글자 크기, 퍼센트, 글자, 도형들, 저장 vertsize, 저장 spacing)
-        let stored: [(i32, i32, &str, Vec<(ShapeKind, i32, i32)>, f64, f64); 6] = [
+        /// (글자 크기, 퍼센트, 글자, 도형들(종류 · 폭 · 높이), 저장 vertsize, 저장 spacing)
+        type Stored = (i32, i32, &'static str, Vec<(ShapeKind, i32, i32)>, f64, f64);
+        let stored: [Stored; 6] = [
             (1500, 150, "", vec![(Rect, 47_250, 6_663)], 6_663.0, 752.0),
             (1500, 190, "", vec![(Rect, 47_250, 9_720)], 9_720.0, 1_352.0),
             (

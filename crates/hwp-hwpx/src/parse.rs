@@ -254,6 +254,12 @@ fn resolve_shape_pools(doc: &mut SemanticDoc) {
     for sec in sections.iter_mut() {
         resolve_blocks(&mut sec.blocks, &mut pools);
     }
+    // #542 PR-2: 도형 글상자 본문 문단의 모양 참조도 푼다 — 그려지게 되었으니 기본 모양(0)으로 두면 글자
+    // 크기 · 정렬을 잃는다. 본문 · 칸 문단이 다 정해진 **뒤** 따로 돌아, 글상자에서 처음 보는 id 는 맨 뒤에
+    // 붙고 기존 번호는 하나도 바뀌지 않는다.
+    for sec in sections.iter_mut() {
+        resolve_shape_bodies(&mut sec.blocks, &mut pools);
+    }
     for (id, idx) in pools.char_idx {
         hwpx_pool_char_shapes.insert(idx);
         hwpx_pool_char_ids.insert(idx, id);
@@ -325,6 +331,36 @@ fn resolve_blocks(blocks: &mut [Block], pools: &mut PoolIntern) {
             Block::Table(t) => {
                 for c in &mut t.cells {
                     resolve_blocks(&mut c.blocks, pools);
+                }
+            }
+        }
+    }
+}
+
+/// The 글상자 bodies of every 도형 under `blocks` (group members and nested shapes included): resolve
+/// their paragraphs' paraPr/charPr refs like [`resolve_blocks`] does for body paragraphs (#542).
+fn resolve_shape_bodies(blocks: &mut [Block], pools: &mut PoolIntern) {
+    fn shape(s: &mut ShapeRef, pools: &mut PoolIntern) {
+        if let Some(tb) = s.text_box.as_mut() {
+            resolve_blocks(&mut tb.body, pools);
+            resolve_shape_bodies(&mut tb.body, pools);
+        }
+        for member in &mut s.children {
+            shape(member, pools);
+        }
+    }
+    for b in blocks.iter_mut() {
+        match b {
+            Block::Paragraph(p) => {
+                for inl in p.runs.iter_mut().flat_map(|run| &mut run.content) {
+                    if let Inline::Shape(s) = inl {
+                        shape(s, pools);
+                    }
+                }
+            }
+            Block::Table(t) => {
+                for c in &mut t.cells {
+                    resolve_shape_bodies(&mut c.blocks, pools);
                 }
             }
         }
@@ -2862,6 +2898,87 @@ pub(crate) mod tests {
         };
         assert_eq!(p.para_shape, 0, "absent paraPrIDRef → default");
         assert_eq!(p.runs[0].char_shape, 0, "absent charPrIDRef → default");
+    }
+
+    /// #542 PR-2 — 글상자 본문 문단(묶음 개체 멤버의 것도)도 paraPr · charPr 참조가 풀린다 — 그려지게 되었으니
+    /// 기본 모양(0)이면 글자 크기 · 정렬을 잃는다. 본문 문단이 다 정해진 뒤에 돌아서, 글상자에서만 쓰는 id 는
+    /// 뒤에 붙고 본문 문단의 번호는 글상자가 없을 때와 같다.
+    #[test]
+    fn text_box_bodies_resolve_their_shapes_after_the_body() {
+        let rect = |para: u32, chr: u32| {
+            format!(
+                concat!(
+                    r#"<hp:rect id="9"><hp:sz width="9000" height="3000"/><hp:pos treatAsChar="1"/>"#,
+                    r#"<hp:drawText><hp:subList vertAlign="CENTER"><hp:p paraPrIDRef="{}"><hp:run charPrIDRef="{}">"#,
+                    r#"<hp:t>상자</hp:t></hp:run></hp:p></hp:subList></hp:drawText></hp:rect>"#
+                ),
+                para, chr
+            )
+        };
+        let xml = format!(
+            concat!(
+                r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p paraPrIDRef="0"><hp:run charPrIDRef="0">{}<hp:t/></hp:run></hp:p>"#,
+                r#"<hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:container id="1"><hp:sz width="9000" height="3000"/>"#,
+                r#"<hp:pos treatAsChar="1"/>{}</hp:container><hp:t>본문</hp:t></hp:run></hp:p></hs:sec>"#
+            ),
+            rect(7, 8),
+            rect(3, 5)
+        );
+        let mut blocks = Vec::new();
+        parse_section(&xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        let styled = |h| CharShape {
+            height: h,
+            ..Default::default()
+        };
+        let centered = ParaShape {
+            align: HorizontalAlign::Center,
+            ..Default::default()
+        };
+        let mut doc = SemanticDoc {
+            char_shapes: vec![CharShape::default()],
+            para_shapes: vec![ParaShape::default()],
+            ..Default::default()
+        };
+        for (id, h) in [(0, 1000), (5, 1400), (8, 3000)] {
+            doc.header_pools.char.insert(id, styled(h));
+        }
+        doc.header_pools.para.insert(0, ParaShape::default());
+        doc.header_pools.para.insert(3, ParaShape::default());
+        doc.header_pools.para.insert(7, centered.clone());
+        doc.sections.push(Section {
+            blocks,
+            ..Default::default()
+        });
+        resolve_shape_pools(&mut doc);
+
+        let paragraph = |b: &Block| match b {
+            Block::Paragraph(p) => p.clone(),
+            _ => panic!("paragraph"),
+        };
+        let first = paragraph(&doc.sections[0].blocks[0]);
+        let second = paragraph(&doc.sections[0].blocks[1]);
+        // 본문 문단의 번호: 글상자가 없을 때와 같다(0 → 1 · 3/5 → 2).
+        assert_eq!((first.para_shape, first.runs[0].char_shape), (1, 1));
+        assert_eq!((second.para_shape, second.runs[0].char_shape), (2, 2));
+        // 글상자 본문: 첫 rect 의 7/8 은 뒤에 붙고, 묶음 개체 멤버의 3/5 는 본문 것과 같은 번호다.
+        let body = |p: &Paragraph| {
+            let shape = shapes_of(p)[0].clone();
+            let shape = if shape.kind == ShapeKind::Container {
+                shape.children[0].clone()
+            } else {
+                shape
+            };
+            paragraph(&shape.text_box.expect("글상자").body[0])
+        };
+        let a = body(&first);
+        assert_eq!(doc.para_shapes[a.para_shape], centered);
+        assert_eq!(doc.char_shapes[a.runs[0].char_shape].height, 3000);
+        assert!(
+            a.para_shape > 2 && a.runs[0].char_shape > 2,
+            "글상자에서만 쓰는 id 는 뒤에 붙는다"
+        );
+        let b = body(&second);
+        assert_eq!((b.para_shape, b.runs[0].char_shape), (2, 2));
     }
 
     /// Batch A end-to-end (#196): opening a real HWPX now interns MULTIPLE distinct char shapes off
