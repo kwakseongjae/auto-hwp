@@ -1172,6 +1172,19 @@ pub(crate) const CELL_PAD: f64 = 280.0;
 /// continues across the split). `None` when `t` isn't such a wrapper — the predicate is deliberately
 /// narrow so it fires only on real single-cell frame wrappers, and it is applied IDENTICALLY in place_doc,
 /// NaiveLayout and block_pages, so the three page counts stay in lockstep.
+/// #543 — a 1×1 frame table promoted to its inner table ([`unwrap_frame_table`]) where BOTH carry a
+/// caption: the promoted table keeps its own, so the frame's caption is not laid out (drawing it too has
+/// no layout model yet) — the caller reports it instead of dropping it silently.
+pub(crate) fn frame_caption_shadowed(t: &Table) -> bool {
+    t.caption.is_some()
+        && unwrap_frame_table(t).is_some()
+        && t.cells
+            .iter()
+            .filter(|c| c.active && c.row == 0 && c.col == 0)
+            .flat_map(|c| &c.blocks)
+            .any(|b| matches!(b, Block::Table(nt) if nt.caption.is_some()))
+}
+
 pub fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)> {
     if t.rows != 1 || t.cols != 1 {
         return None;

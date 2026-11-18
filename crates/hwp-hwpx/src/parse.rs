@@ -1681,10 +1681,14 @@ pub(crate) fn parse_section(
                         // #542: 글상자 본문은 버리지 않고 그 도형이 가진다 — 본문 흐름에는 여전히 넣지 않는다.
                         if e.local_name().as_ref() == b"drawText" {
                             take_text_box_body(&mut shapes, body);
-                        } else if let Some(f) = tbls
-                            .last_mut()
-                            .filter(|f| f.caption.is_some() && f.shapes_depth == shapes.len())
-                        {
+                        } else if let Some(f) = tbls.last_mut().filter(|f| {
+                            // 여는 길과 같은 가드: 표 캡션 안 그림 · 수식 · 도형의 캡션이 먼저 닫혀도 표의
+                            // 캡션 자리를 가져가지 않는다(가져가면 진짜 캡션 글이 버려진다).
+                            pic.is_none()
+                                && eq.is_none()
+                                && f.caption.is_some()
+                                && f.shapes_depth == shapes.len()
+                        }) {
                             // #543 — 표 자신의 캡션 문단.
                             let mut caption = f.caption.take().expect("checked");
                             caption.blocks = body;
@@ -4192,6 +4196,61 @@ pub(crate) mod tests {
         format!(
             r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:tbl id="7" rowCnt="1" colCnt="1"><hp:sz width="20000" height="3000"/><hp:pos treatAsChar="1"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:caption {caption_attrs}><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP"><hp:p id="0" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:t>캡션 글</hp:t></hp:run></hp:p></hp:subList></hp:caption><hp:inMargin left="510" right="510" top="141" bottom="141"/><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>칸</hp:t>{inner}</hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="20000" height="3000"/></hp:tc></hp:tr></hp:tbl><hp:t></hp:t></hp:run></hp:p><hp:p id="2"><hp:run><hp:t>본문</hp:t></hp:run></hp:p></hs:sec>"#
         )
+    }
+
+    /// #543 — 표 캡션 안에 그림 · 수식 · 도형이 있고 그것이 자기 캡션을 가져도, 표 캡션은 표 자신의 글이다. 안쪽
+    /// 캡션이 먼저 닫히면서 표의 캡션 자리를 가져가면 안쪽 캡션 글이 표 캡션으로 그려지고 진짜 캡션은 알림 없이
+    /// 버려진다(리뷰 실측: 그림 · 수식에서 그랬다). 안쪽 캡션 글은 본문 흐름에도 섞이지 않는다.
+    #[test]
+    fn an_object_caption_inside_a_table_caption_does_not_take_it() {
+        let own = |text: &str| {
+            format!(
+                r#"<hp:caption side="BOTTOM" fullSz="0" width="1000" gap="100" lastWidth="1000"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP"><hp:p id="0" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:t>{text}</hp:t></hp:run></hp:p></hp:subList></hp:caption>"#
+            )
+        };
+        let geometry = r#"<hp:sz width="1000" height="1000"/><hp:pos treatAsChar="1"/>"#;
+        for (name, object) in [
+            (
+                "그림",
+                format!(r#"<hp:pic id="11">{geometry}{}</hp:pic>"#, own("그림 캡션")),
+            ),
+            (
+                "수식",
+                format!(
+                    r#"<hp:equation id="12" version="Equation Version 60">{geometry}{}<hp:script>x</hp:script></hp:equation>"#,
+                    own("수식 캡션")
+                ),
+            ),
+            (
+                "도형",
+                format!(
+                    r#"<hp:rect id="13">{geometry}{}</hp:rect>"#,
+                    own("도형 캡션")
+                ),
+            ),
+        ] {
+            let xml = captioned_table_xml(
+                r#"side="TOP" fullSz="0" width="8504" gap="850" lastWidth="48047""#,
+                "",
+            )
+            .replacen(
+                "<hp:t>캡션 글</hp:t></hp:run>",
+                &format!("<hp:t>캡션 글</hp:t>{object}<hp:t>뒤</hp:t></hp:run>"),
+                1,
+            );
+            let mut blocks = Vec::new();
+            parse_section(&xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+            let caption = first_table(&blocks).caption.as_ref().expect("표 캡션");
+            assert_eq!(
+                block_text(&caption.blocks),
+                "캡션 글뒤",
+                "{name}: 표 캡션은 표 자신의 글"
+            );
+            assert!(
+                !body_text(&blocks).contains("캡션"),
+                "{name}: 본문 흐름 격리"
+            );
+        }
     }
 
     fn block_text(blocks: &[Block]) -> String {

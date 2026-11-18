@@ -713,6 +713,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     // splits at row granularity instead of bumping whole; the outer box rides along as
                     // `frame` and is redrawn per page fragment. Identical predicate in NaiveLayout +
                     // block_pages → lockstep.
+                    let frame_caption_shadowed = crate::frame_caption_shadowed(t);
                     let unwrapped = crate::unwrap_frame_table(t);
                     let (t, frame) = match &unwrapped {
                         Some((inner, f)) => (inner, *f),
@@ -761,6 +762,15 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     let start_page = pages.len() - 1;
                     // #543 — 옆(왼 · 오른) 캡션은 아직 배치하지 않는다 — 알린다.
                     report_unplaced_caption(&mut pages[start_page], t, sec_idx, blk_idx, false);
+                    if frame_caption_shadowed {
+                        // #543 — 틀과 올려진 안쪽 표가 둘 다 캡션을 가지면 안쪽 것만 그린다 — 틀의 것은 알린다.
+                        report_undrawn(
+                            &mut pages[start_page],
+                            sec_idx,
+                            blk_idx,
+                            UndrawnShape::TableCaption,
+                        );
+                    }
                     // place_table SPLITS the table across pages itself (한글식 row-level break): a
                     // first-row reserve, then a new page whenever the next row crosses the body bottom,
                     // emitting one bordered fragment per page. Returns the final page-relative cursor.
@@ -1004,6 +1014,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                         started = true;
                         continue;
                     }
+                    let frame_caption_shadowed = crate::frame_caption_shadowed(table);
                     let promoted = crate::unwrap_frame_table(table);
                     let (table, frame) = match &promoted {
                         Some((inner, frame)) => (inner, *frame),
@@ -1055,6 +1066,14 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                         block_index,
                         false,
                     );
+                    if frame_caption_shadowed {
+                        report_undrawn(
+                            &mut pages[start_page],
+                            section_index,
+                            block_index,
+                            UndrawnShape::TableCaption,
+                        );
+                    }
                     place_table_columns(
                         table,
                         doc,
@@ -10452,6 +10471,141 @@ mod tests {
             (placed_end.1 - naive_end.1).abs() < 1e-6,
             "{placed_end:?} {naive_end:?}"
         );
+    }
+
+    /// #543 리뷰 — 틀 표와 올려진 안쪽 표가 둘 다 캡션을 가지면 안쪽 캡션만 그리고(틀 캡션이 덮지 않는다) 틀 캡션은
+    /// `TableCaption` 으로 알린다. 한 단 · 두 단 같다.
+    #[test]
+    fn a_frame_caption_shadowed_by_the_inner_tables_is_reported() {
+        for columns in [false, true] {
+            let mut frame = Table {
+                rows: 1,
+                cols: 1,
+                cells: vec![Cell {
+                    blocks: vec![Block::Table(captioned(
+                        n_row_table(3),
+                        TableCaptionPosition::Top,
+                    ))],
+                    ..Default::default()
+                }],
+                col_widths: vec![1],
+                ..Default::default()
+            };
+            frame.caption = Some(TableCaption {
+                position: TableCaptionPosition::Top,
+                blocks: vec![Block::Paragraph(para("틀"))],
+                spacing: 850,
+                ..Default::default()
+            });
+            let mut lead = para("앞");
+            if columns {
+                lead.column_layout_before = Some(two_columns());
+            }
+            let doc = shape_doc(vec![
+                Block::Paragraph(lead),
+                Block::Table(frame),
+                Block::Paragraph(para("끝")),
+            ]);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let glyphs = |ch| {
+                placed
+                    .pages
+                    .iter()
+                    .flat_map(|pg| &pg.glyphs)
+                    .filter(|g| g.ch == ch)
+                    .count()
+            };
+            assert_eq!(glyphs('캡'), 1, "단 {columns}: 안쪽 캡션을 그린다");
+            assert_eq!(glyphs('틀'), 0, "단 {columns}: 틀 캡션은 그리지 않는다");
+            assert_eq!(
+                caption_reports(&placed),
+                vec![(0, 1)],
+                "단 {columns}: 틀 캡션을 알린다"
+            );
+        }
+    }
+
+    /// #543 리뷰 — 두 단에서도 옆(왼 · 오른) 캡션은 알린다(한 단 시험의 다단 짝).
+    #[test]
+    fn side_captions_are_reported_in_columns_too() {
+        for position in [TableCaptionPosition::Left, TableCaptionPosition::Right] {
+            let mut lead = para("앞");
+            lead.column_layout_before = Some(two_columns());
+            let doc = shape_doc(vec![
+                Block::Paragraph(lead),
+                Block::Table(captioned(fixed_height_table(1, 3_000, false), position)),
+                Block::Paragraph(para("끝")),
+            ]);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            assert_eq!(caption_reports(&placed), vec![(0, 1)], "{position:?}");
+            assert_eq!(caption_glyphs(&placed), 0, "{position:?}");
+        }
+    }
+
+    /// #543 리뷰 — 여러 줄 캡션이 붙은 표를 쪽 끝 근처로 밀어 가며, place_doc ↔ block_pages 가 **표 블록 쪽**(아래 캡션은 표 뒤
+    /// 「끝」 문단 쪽도)에서 같고 place_doc ↔ NaiveLayout 이 쪽 수에서 같은지 본다(성질 시험). 캡션 높이 규칙(마지막 줄 간격 빼기)을 한 걸음만
+    /// 빠뜨리면 경계 근처에서 표 쪽이 갈린다. 위 · 아래 캡션, 한 단 · 두 단.
+    #[test]
+    fn three_walks_agree_on_a_multi_line_captioned_tables_page() {
+        for position in [TableCaptionPosition::Top, TableCaptionPosition::Bottom] {
+            for columns in [false, true] {
+                let mut boundaries = 0;
+                let mut last_page = None;
+                for height in (14_000..=22_000).step_by(100) {
+                    // 두 단은 앞 문단이 둘째 단까지 차야 표가 쪽 경계를 만난다.
+                    let lines = if columns { 14 } else { 6 };
+                    let mut lead = para(&vec!["나"; lines].join("\n"));
+                    if columns {
+                        lead.column_layout_before = Some(two_columns());
+                    }
+                    let mut table = fixed_height_table(1, 3_000, false);
+                    table.caption = Some(TableCaption {
+                        position,
+                        blocks: vec![Block::Paragraph(para(&["캡"; 3].join("\n")))],
+                        spacing: 850,
+                        ..Default::default()
+                    });
+                    let mut doc = shape_doc(vec![
+                        Block::Paragraph(lead),
+                        Block::Table(table),
+                        Block::Paragraph(para("끝")),
+                    ]);
+                    doc.sections[0].page.height = height;
+                    let placed = place_doc(&doc, &ApproxFontMetrics);
+                    let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+                    assert_eq!(placed.pages.len(), naive.pages.len(), "LOCKSTEP {height}");
+                    let placed_page = placed
+                        .pages
+                        .iter()
+                        .position(|pg| {
+                            pg.blocks
+                                .iter()
+                                .any(|b| b.block == 1 && b.kind == BlockKind::Table)
+                        })
+                        .expect("표 블록");
+                    let end_page = placed
+                        .pages
+                        .iter()
+                        .position(|pg| pg.glyphs.iter().any(|g| g.ch == '끝'))
+                        .expect("끝 문단");
+                    let walked = block_pages(&doc, &ApproxFontMetrics);
+                    assert_eq!(
+                        (walked[0][1], walked[0][2]),
+                        (placed_page, end_page),
+                        "{position:?} 단 {columns} 쪽 높이 {height}: block_pages ↔ place_doc (표 · 끝) 쪽"
+                    );
+                    let placed_page = (placed_page, end_page);
+                    if last_page.is_some_and(|p| p != placed_page) {
+                        boundaries += 1;
+                    }
+                    last_page = Some(placed_page);
+                }
+                assert!(
+                    boundaries > 0,
+                    "{position:?} 단 {columns}: 쪽 경계를 한 번은 지난다(헛돌지 않게)"
+                );
+            }
+        }
     }
 
     /// #543 — 캡션 블록의 마지막 줄은 줄 간격을 쓰지 않는다(한글 저장 줄 30개): 위 캡션 한 줄(글자 1,000 · 160%)이면
