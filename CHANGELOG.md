@@ -42,6 +42,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 파괴 변경 (Breaking)
 
+- **`LineSeg.font_size` 필드가 늘었다 (#556).** 개체가 줄 높이를 정한 퍼센트 줄에서만 그 줄의 글자 크기이고, 그 밖에는 0 이다.
+  마이그레이션: `LineSeg` 를 직접 만드는 코드는 `font_size: 0.0` 을 채운다. 줄 진행은 이제 `hwp_typeset::line_advance` 로 잰다(공개됨,
+  `line_spacing_ratio` 도). Rust 크레이트 전용 — npm 패키지 · CLI 는 그대로다.
+  *(EN — Breaking: new public field `LineSeg.font_size`; code building `LineSeg` fills `0.0`. `hwp_typeset::line_advance` and
+  `line_spacing_ratio` are now public. Rust only.)*
+
 - **`auto-hwp export-pdf --visual-regions` 증거가 schema 4 → 5 (#534).** 쪽 객체에 `clipped_cell_text` 목록이 늘었다(아래 「추가」).
   마이그레이션: 필드를 엄격하게 검사하는 도구는 `schema_version: 5` 와 이 필드를 받아들인다. 저장소의 `scripts/pdf-visual-check.py` 는
   이제 5 만 받으므로 schema 4 증거는 같은 CLI 로 다시 만든다. Rust 쪽은 `PlacedPage.clipped_cells` · `PdfPageVisualEvidence.clipped_cell_text`
@@ -51,6 +57,13 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   `PlacedPage`, `PdfPageVisualEvidence` and `PdfExport` (`notices`) must be filled by code that builds those structs. CLI and Rust only.)*
 
 ### 고침 (Fixed)
+
+- **퍼센트 줄 간격 문단에서 그림 · 개체가 줄 높이를 정하면, 줄 간격을 글자 크기 기준으로 더한다 (#556).** 엔진은 줄 높이 전체에
+  비율을 곱해, 큰 그림이 있는 줄 뒤가 크게 벌어졌다(148% 줄의 29,196 높이 그림 → 엔진 43,210 · 한글 29,916). 한글이 저장한 줄은
+  간격 = (비율 − 1) × 그 줄의 글자 크기다(공개 코퍼스 28줄 모두). 칸 안 마지막 줄의 행간 빼기도 같은 규칙이다. 그런 줄이 있는 문서는
+  쪽 나눔이 달라진다. 다른 줄 간격 종류(고정 · 최소 · 줄 사이)는 그대로다.
+  *(EN — Fixed: a percent-spaced line whose height an inline picture or object sets now advances its height + (ratio − 1) × font
+  size, as Hangul stores it, instead of height × ratio. Documents with such lines paginate differently.)*
 
 - **HWPX 빈 문단의 줄 높이를 그 문단 글자 크기로 잡는다.** 한글이 저장한 빈 문단은 대부분 자기 닫힘 런 `<hp:run charPrIDRef="N"/>`
   하나뿐인데, 파서가 이것을 런으로 만들지 않아 빈 줄이 늘 기본 10pt 높이였다. 이제 그 런의 글자 모양으로 잰다(열고 닫는 꼴 · `.hwp`
