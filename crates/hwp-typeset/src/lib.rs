@@ -2195,7 +2195,7 @@ pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64, trailing: 
 /// height (its height is the font size); a line whose height an inline object sets adds only
 /// (ratio − 1) × its font size, as Hangul stores it (#556 — a 148% line under a 29,196-tall picture
 /// advances 29,916, not 43,210). See [`LineSeg::font_size`].
-pub(crate) fn line_advance(line: &LineSeg, ratio: f64) -> f64 {
+pub fn line_advance(line: &LineSeg, ratio: f64) -> f64 {
     if line.font_size > 0.0 {
         line.vert_size + (ratio - 1.0) * line.font_size
     } else {
@@ -2209,7 +2209,9 @@ pub(crate) fn line_leading(line: &LineSeg, ratio: f64) -> f64 {
     line_advance(line, ratio) - line.vert_size
 }
 
-pub(crate) fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
+/// A paragraph's line-spacing ratio for [`line_advance`] — percent spacing as a ratio, else the default
+/// 160%. Public so a caller that walks laid-out lines (caret geometry) advances them the way placement does.
+pub fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
     match doc.para_shapes.get(p.para_shape) {
         Some(s) if s.line_spacing_type == LineSpacingType::Percent && s.line_spacing_value > 0 => {
             s.line_spacing_value as f64 / 100.0

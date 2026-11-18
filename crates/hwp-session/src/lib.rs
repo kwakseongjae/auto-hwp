@@ -1677,16 +1677,6 @@ fn body_model_chars(p: &hwp_model::prelude::Paragraph) -> Vec<(char, usize)> {
     out
 }
 
-fn body_line_spacing_ratio(p: &hwp_model::prelude::Paragraph, doc: &SemanticDoc) -> f64 {
-    use hwp_model::prelude::LineSpacingType;
-    match doc.para_shapes.get(p.para_shape) {
-        Some(s) if s.line_spacing_type == LineSpacingType::Percent && s.line_spacing_value > 0 => {
-            s.line_spacing_value as f64 / 100.0
-        }
-        _ => 1.6,
-    }
-}
-
 /// Exact one-char advance from the existing public typesetter. This deliberately avoids a second
 /// width implementation in hwp-session: `layout_paragraph` already applies substitution, per-script
 /// 장평/자간 and the caller's font provider. Callers memoize by `(char_shape, char)`.
@@ -1798,7 +1788,7 @@ fn body_paragraph_geom(
 
     let mut page = first_page;
     let mut vert = first_band.y - mt;
-    let ratio = body_line_spacing_ratio(p, doc);
+    let ratio = hwp_typeset::line_spacing_ratio(p, doc);
     let mut advance_cache: HashMap<(usize, char), f64> = HashMap::new();
     let mut out = Vec::with_capacity(laid.len());
 
@@ -1889,7 +1879,8 @@ fn body_paragraph_geom(
             height: ls.vert_size,
             chars: line_chars,
         });
-        vert += ls.vert_size * ratio;
+        // The same advance placement uses (#556 — an object line adds spacing from its font size).
+        vert += hwp_typeset::line_advance(ls, ratio);
     }
 
     Some(BodyParagraphGeom {
