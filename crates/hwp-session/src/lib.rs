@@ -1677,14 +1677,37 @@ fn body_model_chars(p: &hwp_model::prelude::Paragraph) -> Vec<(char, usize)> {
     out
 }
 
-fn body_line_spacing_ratio(p: &hwp_model::prelude::Paragraph, doc: &SemanticDoc) -> f64 {
-    use hwp_model::prelude::LineSpacingType;
-    match doc.para_shapes.get(p.para_shape) {
-        Some(s) if s.line_spacing_type == LineSpacingType::Percent && s.line_spacing_value > 0 => {
-            s.line_spacing_value as f64 / 100.0
+/// One flow slot of a body paragraph as `layout_paragraph` counts them (#542): a model char (its offset)
+/// or an object, which takes a slot and its advance but no model offset.
+enum BodySlot {
+    Char(usize),
+    Object(f64),
+}
+
+/// The paragraph's layout slots in flow order — text one per char, objects by
+/// [`hwp_typeset::inline_object_slot`], the same rule `layout_paragraph` breaks lines on.
+fn body_layout_slots(p: &hwp_model::prelude::Paragraph) -> Vec<BodySlot> {
+    use hwp_model::prelude::Inline;
+    let mut out = Vec::new();
+    let mut model = 0usize;
+    for run in &p.runs {
+        for inline in &run.content {
+            match inline {
+                Inline::Text(text) => {
+                    for _ in text.chars() {
+                        out.push(BodySlot::Char(model));
+                        model += 1;
+                    }
+                }
+                other => {
+                    if let Some((advance, _)) = hwp_typeset::inline_object_slot(other) {
+                        out.push(BodySlot::Object(advance));
+                    }
+                }
+            }
         }
-        _ => 1.6,
     }
+    out
 }
 
 /// Exact one-char advance from the existing public typesetter. This deliberately avoids a second
@@ -1734,6 +1757,20 @@ fn body_paragraph_geom(
 
     let p = body_model_paragraph(doc, section, block)?;
     let chars = body_model_chars(p);
+    // #542: a line's `text_pos` counts LAYOUT slots, and an object (a 글자처럼 취급 도형) takes a slot
+    // that is no model char. Map slots back: `model_at[k]` = model chars before slot `k`.
+    let slots = body_layout_slots(p);
+    let model_at: Vec<usize> = std::iter::once(0)
+        .chain(slots.iter().scan(0usize, |model, slot| {
+            if matches!(slot, BodySlot::Char(_)) {
+                *model += 1;
+            }
+            Some(*model)
+        }))
+        .collect();
+    if model_at.last().copied() != Some(chars.len()) {
+        return None;
+    }
 
     let mut bands = Vec::new();
     for (page, pg) in placed.pages.iter().enumerate() {
@@ -1798,7 +1835,7 @@ fn body_paragraph_geom(
 
     let mut page = first_page;
     let mut vert = first_band.y - mt;
-    let ratio = body_line_spacing_ratio(p, doc);
+    let ratio = hwp_typeset::line_spacing_ratio(p, doc);
     let mut advance_cache: HashMap<(usize, char), f64> = HashMap::new();
     let mut out = Vec::with_capacity(laid.len());
 
@@ -1813,15 +1850,16 @@ fn body_paragraph_geom(
                 && band.block == block
                 && band.kind == hwp_typeset::BlockKind::Paragraph
         })?;
-        let start = ls.text_pos as usize;
-        let end = laid
+        let slot_start = ls.text_pos as usize;
+        let slot_end = laid
             .get(li + 1)
             .map(|next| next.text_pos as usize)
-            .unwrap_or(chars.len())
-            .min(chars.len());
-        if start > end {
+            .unwrap_or(slots.len())
+            .min(slots.len());
+        if slot_start > slot_end {
             return None;
         }
+        let (start, end) = (model_at[slot_start], model_at[slot_end]);
 
         let line_indent = left + if li == 0 { first_extra } else { 0.0 };
         let slack =
@@ -1863,7 +1901,16 @@ fn body_paragraph_geom(
         let mut cursor = x0;
         let mut gi = 0usize;
         let mut line_chars = Vec::with_capacity(end - start);
-        for (offset, &(ch, shape)) in chars.iter().enumerate().take(end).skip(start) {
+        for slot in &slots[slot_start..slot_end] {
+            let offset = match *slot {
+                // An object owns no model offset; it only moves the pen (a space after it starts there).
+                BodySlot::Object(advance) => {
+                    cursor += advance;
+                    continue;
+                }
+                BodySlot::Char(offset) => offset,
+            };
+            let (ch, shape) = chars[offset];
             let advance = *advance_cache
                 .entry((shape, ch))
                 .or_insert_with(|| body_char_advance(doc, fonts, p.para_shape, shape, ch));
@@ -1889,7 +1936,8 @@ fn body_paragraph_geom(
             height: ls.vert_size,
             chars: line_chars,
         });
-        vert += ls.vert_size * ratio;
+        // The same advance placement uses (#556 — an object line adds spacing from its font size).
+        vert += hwp_typeset::line_advance(ls, ratio);
     }
 
     Some(BodyParagraphGeom {
@@ -3421,6 +3469,146 @@ mod tests {
         }));
         doc.sections.push(section);
         doc
+    }
+
+    /// #542 — 글자처럼 취급 도형(폭 `box_w`) 런 하나 + 글 런 하나인 본문 문단. HWPX 처럼 구조 문단이고
+    /// 글 런만 편집 구역(`text_zone`)이라 편집할 수 있다. 쪽 폭 60,000 · 여백 0.
+    fn shape_text_para_doc(box_w: i32, text: &str, text_box: Option<&str>) -> SemanticDoc {
+        use hwp_model::document::{
+            Block, Inline, ParaSource, Paragraph, Run, ShapeKind, ShapeRef, TextBox, TextZone,
+        };
+        let mut doc = body_para_doc("", 80_000);
+        let shape = ShapeRef {
+            kind: ShapeKind::Rect,
+            width: box_w,
+            height: 3_000,
+            treat_as_char: true,
+            text_box: text_box.map(|body| TextBox {
+                margin: [283, 283, 283, 283],
+                vert_align: "CENTER".into(),
+                body: vec![Block::Paragraph(Paragraph {
+                    runs: vec![Run {
+                        char_shape: 0,
+                        content: vec![Inline::Text(body.into())],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                })],
+            }),
+            ..Default::default()
+        };
+        doc.sections[0].blocks[0] = Block::Paragraph(Paragraph {
+            runs: vec![
+                Run {
+                    char_shape: 0,
+                    content: vec![Inline::Shape(shape)],
+                    ..Default::default()
+                },
+                Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text(text.into())],
+                    ..Default::default()
+                },
+            ],
+            source: Some(ParaSource {
+                simple: false,
+                text_zone: Some(TextZone {
+                    runs: (1, 2),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        doc
+    }
+
+    /// #542 — 도형 뒤에 글이 이어지는 문단: 줄의 `text_pos` 는 레이아웃 칸(도형 칸 포함)이고 캐럿은 모델 글자
+    /// 번호다. 리뷰 실측 네 경우(한 줄 · 두 줄 · 도형이 한 줄을 다 차지 · 줄 경계가 빈칸)와 도형 바로 뒤 빈칸에서
+    /// 모든 오프셋이 캐럿을 갖고, 보이는 글자의 캐럿 x 는 그 글자의 `PlacedGlyph` x 와 같으며, 클릭이 같은
+    /// 오프셋으로 돌아온다.
+    #[test]
+    fn body_caret_counts_model_chars_past_a_tac_shape() {
+        // (이름, 도형 폭, 글, 글상자 본문, 줄 수)
+        let cases: [(&str, i32, String, Option<&str>, usize); 6] = [
+            ("한 줄", 30_000, "가".repeat(9), None, 1),
+            ("두 줄", 30_000, "가".repeat(40), None, 2),
+            ("도형이 한 줄을 다 차지", 60_000, "가".repeat(20), None, 2),
+            (
+                "줄 경계가 빈칸",
+                30_000,
+                format!("{} {}", "가".repeat(29), "가".repeat(10)),
+                None,
+                2,
+            ),
+            (
+                "도형 바로 뒤 빈칸",
+                30_000,
+                format!(" {}", "가".repeat(5)),
+                None,
+                1,
+            ),
+            ("글상자 본문", 30_000, "가".repeat(40), Some("상자 안"), 2),
+        ];
+        let fonts = own_render_fonts();
+        for (name, box_w, text, body, lines) in cases {
+            let doc = shape_text_para_doc(box_w, &text, body);
+            let placed = place(&doc, &[]);
+            let geom = body_paragraph_geom(&doc, &placed, fonts.as_ref(), 0, 0)
+                .unwrap_or_else(|| panic!("{name}: 캐럿 기하가 없다"));
+            let n = text.chars().count();
+            assert_eq!(geom.para_len, n, "{name}");
+            assert_eq!(geom.lines.len(), lines, "{name}: 줄 수");
+            // 이 문단의 보이는 글자(본문 '가')를 놓인 순서(줄 → x)로.
+            let mut glyphs: Vec<_> = placed.pages[0]
+                .glyphs
+                .iter()
+                .filter(|g| g.ch == '가')
+                .collect();
+            glyphs.sort_by(|a, b| a.baseline.total_cmp(&b.baseline).then(a.x.total_cmp(&b.x)));
+            let mut visible = glyphs.iter();
+            for (offset, ch) in text.chars().enumerate() {
+                let c = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 0, 0, 0, offset)
+                    .unwrap_or_else(|| panic!("{name}: 오프셋 {offset} 캐럿 없음"));
+                if ch == ' ' {
+                    continue;
+                }
+                let g = visible.next().expect("놓인 글자");
+                assert!(
+                    (c.x * HWPUNIT_PER_PX - g.x).abs() < 0.5,
+                    "{name}: 오프셋 {offset} 캐럿 x {} ≠ 글자 x {}",
+                    c.x * HWPUNIT_PER_PX,
+                    g.x
+                );
+                let hit = body_text_hit_placed(
+                    &doc,
+                    &placed,
+                    fonts.as_ref(),
+                    0,
+                    c.x + 0.1,
+                    c.y + c.h / 2.0,
+                )
+                .unwrap_or_else(|| panic!("{name}: 오프셋 {offset} 클릭 없음"));
+                assert_eq!(hit.offset, offset, "{name}: 클릭 → 오프셋");
+            }
+            assert!(
+                visible.next().is_none(),
+                "{name}: 놓인 글자 수 = 모델 글자 수"
+            );
+            assert!(
+                body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 0, 0, 0, n).is_some(),
+                "{name}: 문단 끝 캐럿"
+            );
+        }
+
+        // 도형 바로 뒤 빈칸은 도형 오른쪽(30,000)에서 시작한다 — 줄 머리(0)가 아니다.
+        let doc = shape_text_para_doc(30_000, " 가", None);
+        let space = body_caret_rect(&doc, 0, 0, 0, 0).expect("빈칸 캐럿");
+        assert!(
+            (space.x * HWPUNIT_PER_PX - 30_000.0).abs() < 0.5,
+            "빈칸 캐럿 x {}",
+            space.x * HWPUNIT_PER_PX
+        );
     }
 
     #[test]

@@ -32,10 +32,11 @@ pub use diagnostic::{
 /// Positioned layout (glyphs/images/boxes per page) — the paint-IR bridge consumed by `hwp-render`.
 pub mod place;
 pub use place::{
-    block_pages, cell_caret_rect, cell_caret_rect_path, cell_text_hit, column_offsets, page_usage,
-    place_doc, row_offsets, table_cell_fits, BlockKind, CellAddr, CellCaretRect, CellFit,
-    CellTextHit, PageNumberOffNotice, PageUsage, PlacedBlock, PlacedCell, PlacedClippedCell,
-    PlacedDoc, PlacedGlyph, PlacedGlyphOrigin, PlacedImage, PlacedPage, PlacedRect, PlacedTable,
+    block_line_pages, block_pages, cell_caret_rect, cell_caret_rect_path, cell_text_hit,
+    column_offsets, page_usage, place_doc, row_offsets, table_cell_fits, BlockKind, CellAddr,
+    CellCaretRect, CellFit, CellTextHit, PageNumberOffNotice, PageUsage, PlacedBlock, PlacedCell,
+    PlacedClippedCell, PlacedDoc, PlacedGlyph, PlacedGlyphOrigin, PlacedImage, PlacedPage,
+    PlacedRect, PlacedTable, PlacedUndrawnShape, UndrawnShape,
 };
 
 /// Half the EM for half-width glyphs.
@@ -265,8 +266,9 @@ fn block_draws_something(block: &Block) -> bool {
         Block::Paragraph(p) => p.runs.iter().any(|run| {
             run.content.iter().any(|inline| match inline {
                 Inline::Text(text) => !text.is_empty(),
-                // #542: a 도형 is carried but not drawn yet — it must not keep a page alive.
-                Inline::Shape(_) => false,
+                // #542: a 글자처럼 취급 도형 takes its line's space (and a `rect` draws), so its page is
+                // alive even when the kind is not drawn yet; a floating one takes no space here (PR-3).
+                Inline::Shape(shape) => shape.treat_as_char,
                 _ => true,
             })
         }),
@@ -595,7 +597,7 @@ impl LayoutEngine for NaiveLayout {
                                 );
                                 vert = 0.0;
                             }
-                            let adv = ls.vert_size * ratio;
+                            let adv = line_advance(&ls, ratio);
                             if ls.horz_size > 0.0 {
                                 last_drawn = pages.len() - 1; // 이슈 307
                             }
@@ -817,7 +819,7 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
                             pages.push(new_page(page));
                         }
                         line.horz_pos += flow.box_now().x;
-                        let advance = line.vert_size * ratio;
+                        let advance = line_advance(&line, ratio);
                         pages.last_mut().expect("page exists").lines.push(LineSeg {
                             vert_pos: flow.y(),
                             ..line
@@ -978,7 +980,7 @@ fn flow_caption_naive(
                         pages.push(new_page(page));
                         vert = 0.0;
                     }
-                    let advance = line.vert_size * ratio;
+                    let advance = line_advance(&line, ratio);
                     pages.last_mut().expect("page exists").lines.push(LineSeg {
                         vert_pos: vert,
                         ..line
@@ -1032,7 +1034,7 @@ fn flow_caption_columns_naive(
                         pages.push(new_page(page));
                     }
                     line.horz_pos += flow.box_now().x;
-                    let advance = line.vert_size * ratio;
+                    let advance = line_advance(&line, ratio);
                     pages.last_mut().expect("page exists").lines.push(LineSeg {
                         vert_pos: flow.y(),
                         ..line
@@ -1161,12 +1163,11 @@ pub(crate) fn cell_paragraph_height(
     let sa = ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
     let ratio = line_spacing_ratio(p, doc);
     let lines = layout_cell_paragraph(p, doc, width, fonts);
-    let text: f64 = lines.iter().map(|l| l.vert_size * ratio).sum();
+    let text: f64 = lines.iter().map(|l| line_advance(l, ratio)).sum();
     let last_leading = lines
         .last()
-        .map(|l| l.vert_size * (ratio - 1.0))
-        .unwrap_or(0.0)
-        .max(0.0);
+        .map(|l| trailing_leading(l, ratio))
+        .unwrap_or(0.0);
     sb + (text - last_leading) + sa
 }
 
@@ -1224,7 +1225,10 @@ pub(crate) fn table_caption_metrics(
                 let lines = layout_paragraph(paragraph, doc, width, fonts);
                 let ratio = line_spacing_ratio(paragraph, doc);
                 shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64
-                    + lines.iter().map(|line| line.vert_size * ratio).sum::<f64>()
+                    + lines
+                        .iter()
+                        .map(|line| line_advance(line, ratio))
+                        .sum::<f64>()
                     + shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64
             }
             Block::Table(table) => table_height(table, width, doc, fonts),
@@ -1584,7 +1588,7 @@ fn continued_text_row_height(
                 let ratio = line_spacing_ratio(paragraph, doc);
                 if let Some(last) = layout_cell_paragraph(paragraph, doc, text_width, fonts).last()
                 {
-                    height += (last.vert_size * (ratio - 1.0)).max(0.0);
+                    height += trailing_leading(last, ratio);
                 }
             }
         }
@@ -1680,12 +1684,11 @@ fn cell_term_breakdown(
                 }
                 let lines = layout_cell_paragraph(p, doc, tw, fonts);
                 let raw: f64 = lines.iter().map(|l| l.vert_size).sum();
-                let spaced: f64 = lines.iter().map(|l| l.vert_size * ratio).sum();
+                let spaced: f64 = lines.iter().map(|l| line_advance(l, ratio)).sum();
                 let last_leading = lines
                     .last()
-                    .map(|l| l.vert_size * (ratio - 1.0))
-                    .unwrap_or(0.0)
-                    .max(0.0);
+                    .map(|l| trailing_leading(l, ratio))
+                    .unwrap_or(0.0);
                 b.lines += lines.len();
                 b.raw_em += raw;
                 b.spaced += spaced - last_leading;
@@ -1801,6 +1804,9 @@ pub fn layout_paragraph(
     let mut chars: Vec<(char, i32)> = Vec::new();
     let mut advs: Vec<f64> = Vec::new();
     let mut object_heights: Vec<f64> = Vec::new();
+    // #556: the font size of the run that owns each slot — an object slot's metric size is 1, but
+    // percent spacing on an object line is (ratio − 1) × the FONT size of the line's runs.
+    let mut run_sizes: Vec<i32> = Vec::new();
     for run in &p.runs {
         let cs = doc.char_shapes.get(run.char_shape);
         let size = cs.map(|c| c.height).filter(|&h| h > 0).unwrap_or(1000);
@@ -1815,55 +1821,30 @@ pub fn layout_paragraph(
                         let font = keys[script_slot(sch) as usize]
                             .get_or_insert_with(|| resolved_font_key(cs, sch, fonts));
                         chars.push((sch, size));
+                        run_sizes.push(size);
                         advs.push(scaled_advance(sch, size, cs, font, fonts));
                         object_heights.push(0.0);
                     }
                 }
-                Inline::Image(image) => {
-                    chars.push(('\u{FFFC}', 1));
-                    advs.push(if image.treat_as_char {
-                        image.width.max(0) as f64
-                    } else {
-                        0.0
-                    });
-                    object_heights.push(if image.treat_as_char {
-                        image.height.max(0) as f64
-                    } else {
-                        0.0
-                    });
+                // One slot per object, by the same rule the editor caret uses to map slots back to
+                // model chars ([`inline_object_slot`]). U+FFFC is only the metric proxy; its size is 1.
+                other => {
+                    if let Some((width, height)) = inline_object_slot(other) {
+                        chars.push(('\u{FFFC}', 1));
+                        run_sizes.push(size);
+                        advs.push(width);
+                        object_heights.push(height);
+                    }
                 }
-                Inline::Equation(equation) => {
-                    chars.push(('\u{FFFC}', 1));
-                    advs.push(if equation.treat_as_char {
-                        equation.width.max(0) as f64
-                    } else {
-                        0.0
-                    });
-                    object_heights.push(if equation.treat_as_char {
-                        equation.height.max(0) as f64
-                    } else {
-                        0.0
-                    });
-                }
-                Inline::Chart(chart) => {
-                    chars.push(('\u{FFFC}', 1));
-                    advs.push(if chart.treat_as_char {
-                        chart.width.max(0) as f64
-                    } else {
-                        0.0
-                    });
-                    object_heights.push(if chart.treat_as_char {
-                        chart.height.max(0) as f64
-                    } else {
-                        0.0
-                    });
-                }
-                _ => {}
             }
         }
     }
     let n = chars.len();
     let adv = |i: usize| advs[i];
+    let percent_spacing = doc
+        .para_shapes
+        .get(p.para_shape)
+        .is_some_and(|s| percent_ratio(s).is_some());
 
     if n == 0 {
         // An empty paragraph still occupies one line — height = the object's if it anchors one.
@@ -1963,11 +1944,19 @@ pub fn layout_paragraph(
             .iter()
             .copied()
             .fold(0.0f64, f64::max);
-        lines.push(mk_line(
-            start as u32,
-            fonts.line_height(max_size).max(object_height),
-            lw,
-        ));
+        let text_height = fonts.line_height(max_size);
+        let mut line = mk_line(start as u32, text_height.max(object_height), lw);
+        // #556: an object sets this line's height — percent spacing adds (ratio − 1) × the font size
+        // of the line's runs (Hangul's stored `spacing`), not (ratio − 1) × the object height.
+        if percent_spacing && object_height > text_height {
+            line.font_size = run_sizes[start..line_end]
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or(1000)
+                .max(1) as f64;
+        }
+        lines.push(line);
         // Consume the '\n' itself on a forced break so the next line starts after it (it draws
         // nothing — the place step skips '\n'). Otherwise advance to the computed break point.
         start = if forced && line_end < n {
@@ -2103,6 +2092,7 @@ fn mk_line(text_pos: u32, height: f64, width: f64) -> LineSeg {
         baseline: h * BASELINE_RATIO,
         horz_pos: 0.0,
         horz_size: width,
+        font_size: 0.0,
     }
 }
 
@@ -2168,13 +2158,102 @@ pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64, trailing: 
     vert < body_h
 }
 
-pub(crate) fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
-    match doc.para_shapes.get(p.para_shape) {
-        Some(s) if s.line_spacing_type == LineSpacingType::Percent && s.line_spacing_value > 0 => {
-            s.line_spacing_value as f64 / 100.0
+/// The line space a 글자처럼 취급 도형 takes: its box (`<hp:sz>`) plus its outer margins — `(advance,
+/// height)` in HWPUNIT. Hangul stores the host line's `vertsize` as exactly this height (#542).
+///
+/// ⚠️ The outer-margin terms are NOT confirmed by a sample: every shape in the public corpus that
+/// fixed the `vertsize` rule has outer margins of 0, so "+ margins" (and where `place_shape` offsets
+/// the drawn box) is an assumption to check once a sample with non-zero `<hp:outMargin>` turns up.
+pub(crate) fn shape_box(shape: &ShapeRef) -> (f64, f64) {
+    let [left, right, top, bottom] = shape.out_margin.map(|m| m.max(0) as f64);
+    (
+        shape.width.max(0) as f64 + left + right,
+        shape.height.max(0) as f64 + top + bottom,
+    )
+}
+
+/// The flow slot an object inline takes in [`layout_paragraph`] — `Some((advance, height))` in HWPUNIT —
+/// or `None` when it takes none. Text is not an object: it takes one slot per char. A picture, equation
+/// or chart always takes a slot (zero-sized when it floats); a 도형 takes one only when it is 글자처럼
+/// 취급 (#542 — a floating one is placed by PR-3, not on the line). `place::paragraph_atoms` builds the
+/// same slots, and the editor caret uses this to tell a layout slot from a model char.
+pub fn inline_object_slot(inline: &Inline) -> Option<(f64, f64)> {
+    let tac_box = |treat_as_char: bool, width: i32, height: i32| {
+        if treat_as_char {
+            (width.max(0) as f64, height.max(0) as f64)
+        } else {
+            (0.0, 0.0)
         }
-        _ => DEFAULT_LINESPACE,
+    };
+    match inline {
+        Inline::Image(image) => Some(tac_box(image.treat_as_char, image.width, image.height)),
+        Inline::Equation(equation) => Some(tac_box(
+            equation.treat_as_char,
+            equation.width,
+            equation.height,
+        )),
+        Inline::Chart(chart) => Some(tac_box(chart.treat_as_char, chart.width, chart.height)),
+        // #542: a 글자처럼 취급 도형 is one inline atom of its line — its box (outer margins included)
+        // sets the line height like a picture's, every kind alike (only a `rect` is drawn).
+        Inline::Shape(shape) if shape.treat_as_char => Some(shape_box(shape)),
+        _ => None,
     }
+}
+
+/// One line's vertical advance under its paragraph's line-spacing `ratio`. A text line scales its
+/// height (its height is the font size); a line whose height an inline object sets adds only
+/// (ratio − 1) × its font size, as Hangul stores it (#556 — a 148% line under a 29,196-tall picture
+/// advances 29,916, not 43,210). See [`LineSeg::font_size`].
+pub fn line_advance(line: &LineSeg, ratio: f64) -> f64 {
+    if line.font_size > 0.0 {
+        line.vert_size + (ratio - 1.0) * line.font_size
+    } else {
+        line.vert_size * ratio
+    }
+}
+
+/// The leading [`line_advance`] adds below a line's box — what a paragraph's LAST line in a cell does
+/// not take (the trailing-leading trim). Same rule, so a trimmed object line keeps its whole box.
+pub(crate) fn line_leading(line: &LineSeg, ratio: f64) -> f64 {
+    line_advance(line, ratio) - line.vert_size
+}
+
+/// The leading a paragraph's LAST line gives back in a cell (the trailing-leading trim, issue 020):
+/// [`line_leading`], never negative — a line under 100% spacing keeps its shorter advance. An explicit
+/// 0% paragraph (#557) is the exception: its lines all sit at one spot, and Hangul still stores the line
+/// box (`vertsize`), so the trim hands the box back — in a cell it takes one line box, not nothing (a
+/// one-paragraph cell's content was 0 and its text drew half a line low).
+pub(crate) fn trailing_leading(last: &LineSeg, ratio: f64) -> f64 {
+    let leading = line_leading(last, ratio);
+    if ratio == 0.0 {
+        leading
+    } else {
+        leading.max(0.0)
+    }
+}
+
+/// A paragraph shape's percent line spacing as a ratio, when it has one: a set percent value, or an
+/// explicit 0% (#557 — not "unset"). `None` = not percent spacing, or no value.
+fn percent_ratio(s: &ParaShape) -> Option<f64> {
+    if s.line_spacing_type != LineSpacingType::Percent {
+        return None;
+    }
+    if s.line_spacing_value > 0 {
+        Some(s.line_spacing_value as f64 / 100.0)
+    } else if s.zero_line_spacing {
+        Some(0.0)
+    } else {
+        None
+    }
+}
+
+/// A paragraph's line-spacing ratio for [`line_advance`] — its percent spacing (an explicit 0% included, #557), else the default 160%.
+/// Public so a caller that walks laid-out lines (caret geometry) advances them the way placement does.
+pub fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
+    doc.para_shapes
+        .get(p.para_shape)
+        .and_then(percent_ratio)
+        .unwrap_or(DEFAULT_LINESPACE)
 }
 
 /// Placeholder metrics provider (flat ~0.5em). Prefer [`ApproxFontMetrics`] (per-script).
@@ -2984,5 +3063,263 @@ mod tests {
             .len();
         let placed = place_doc(&doc, &ApproxFontMetrics).pages.len();
         assert_eq!(oracle, placed, "no-chart doc stays in lockstep");
+    }
+
+    /// #556 — 한 문단: 글자 모양 0(크기 `font`) 런 하나에 글자처럼 취급 그림(높이 `object`) 하나, 줄 간격 종류
+    /// · 값은 `kind` · `value`.
+    fn object_line_doc(
+        font: i32,
+        object: i32,
+        kind: LineSpacingType,
+        value: i32,
+    ) -> (SemanticDoc, Paragraph) {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape {
+            height: font,
+            ..Default::default()
+        });
+        doc.para_shapes.push(ParaShape {
+            line_spacing_type: kind,
+            line_spacing_value: value,
+            ..Default::default()
+        });
+        let p = Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![
+                    Inline::Text(String::new()),
+                    Inline::Image(ImageRef {
+                        bin_ref: "image1".into(),
+                        width: 10_000,
+                        height: object,
+                        treat_as_char: true,
+                    }),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        (doc, p)
+    }
+
+    /// #556 — 퍼센트 줄 간격이 개체 줄의 높이 전체에 곱해지지 않는다. 대조값은 한글이 저장한 줄 배치
+    /// (`lineseg vertsize` + `spacing`)다 — 공개 코퍼스 `hwpxlib_corpus/error/20250808/…재난안전…hwpx` 의
+    /// 그림 줄 다섯: 간격 = (비율 − 1) × 그 런의 글자 크기(한글 반올림 ±2).
+    #[test]
+    fn a_percent_spaced_object_line_adds_spacing_from_the_font_size_not_the_object() {
+        // (글자 크기, 그림 높이, 퍼센트, 한글 저장 간격)
+        const STORED: [(i32, i32, i32, f64); 5] = [
+            (1500, 29_196, 148, 720.0),
+            (1200, 58_066, 220, 1_440.0),
+            (1600, 13_606, 160, 960.0),
+            (1100, 17_007, 150, 552.0),
+            (1600, 13_606, 100, 0.0),
+        ];
+        for (font, object, pct, spacing) in STORED {
+            let (doc, p) = object_line_doc(font, object, LineSpacingType::Percent, pct);
+            let lines = layout_paragraph(&p, &doc, 40_000.0, &ApproxFontMetrics);
+            assert_eq!(lines.len(), 1);
+            assert_eq!(lines[0].vert_size, object as f64, "개체가 줄 높이를 정한다");
+            let got = line_advance(&lines[0], line_spacing_ratio(&p, &doc));
+            let want = object as f64 + spacing;
+            assert!(
+                (got - want).abs() <= 2.0,
+                "{pct}% · 글자 {font} · 그림 {object}: {got} vs 한글 {want}"
+            );
+        }
+    }
+
+    /// #556 — 글 줄은 예전 그대로(줄 높이 × 비율), 퍼센트가 아닌 줄 간격의 개체 줄도 예전 그대로다.
+    /// (공개 · 로컬 코퍼스 147문서에 퍼센트가 아닌 개체 줄 표본이 없어, 근거 없이 바꾸지 않는다.)
+    #[test]
+    fn text_lines_and_non_percent_object_lines_keep_the_old_advance() {
+        let (mut doc, _) = object_line_doc(1500, 29_196, LineSpacingType::Percent, 148);
+        let text = para("가나다");
+        let lines = layout_paragraph(&text, &doc, 40_000.0, &ApproxFontMetrics);
+        assert_eq!(lines[0].font_size, 0.0, "글 줄은 글자 크기가 곧 줄 높이");
+        assert_eq!(line_advance(&lines[0], 1.48), lines[0].vert_size * 1.48);
+        doc.para_shapes[0].line_spacing_type = LineSpacingType::Fixed;
+        let (_, p) = object_line_doc(1500, 29_196, LineSpacingType::Fixed, 2_000);
+        let lines = layout_paragraph(&p, &doc, 40_000.0, &ApproxFontMetrics);
+        assert_eq!(lines[0].font_size, 0.0);
+        let ratio = line_spacing_ratio(&p, &doc);
+        assert_eq!(line_advance(&lines[0], ratio), lines[0].vert_size * ratio);
+    }
+
+    /// #556 — 칸 문단의 마지막 줄은 줄 간격 몫(leading)을 빼고 잰다(trailing-leading trim). 그 몫도 같은 규칙이라,
+    /// 개체가 높이를 정한 마지막 줄은 개체 높이를 다 지킨다(예전 규칙의 몫 = 높이 × (비율 − 1)을 빼면 그림보다 작아진다).
+    #[test]
+    fn a_cell_paragraph_ending_in_an_object_line_keeps_the_whole_object() {
+        let (doc, p) = object_line_doc(1500, 29_196, LineSpacingType::Percent, 148);
+        let h = cell_paragraph_height(&p, &doc, 40_000.0, &ApproxFontMetrics);
+        assert!(
+            (h - 29_196.0).abs() < 1.0,
+            "칸 문단 높이 {h} — 그림 29,196 그대로여야 한다"
+        );
+    }
+
+    /// #557 — 표지가 있는 0% 문단은 줄 진행이 0 이다(한글 저장: 간격 = −줄 높이 → 다음 문단이 같은 자리 —
+    /// 공개 코퍼스 `hwpxlib_corpus/error/20250808/…재난안전…hwpx` 의 출처 줄 · 빈 줄). 표지 없는 0 은 예전처럼
+    /// 기본 160% 다.
+    #[test]
+    fn an_explicit_zero_percent_line_advances_nothing_and_an_unset_zero_keeps_the_default() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape {
+            height: 1_200,
+            ..Default::default()
+        });
+        doc.para_shapes.push(ParaShape {
+            zero_line_spacing: true,
+            ..Default::default()
+        });
+        doc.para_shapes.push(ParaShape::default());
+        let mut p = para("자료제공 : 기관");
+        let lines = layout_paragraph(&p, &doc, 40_000.0, &ApproxFontMetrics);
+        assert_eq!(line_spacing_ratio(&p, &doc), 0.0);
+        assert_eq!(
+            line_advance(&lines[0], 0.0),
+            0.0,
+            "0% 줄은 자리를 차지하지 않는다"
+        );
+        // 칸 안에서는 줄 상자 하나를 차지한다 — 한글이 저장한 0% 칸 문단도 `vertsize` 그대로(공개 코퍼스
+        // 재난안전의 칸 18개: vertpos 0 · vertsize 1800 · spacing −1800, 칸 하나에 문단 하나). 0 이면 글이
+        // 칸 가운데보다 반 줄 아래에 그려졌다. 다른 문단이 뒤따르면(이어지는 행) 자리는 0 이다.
+        let height = cell_paragraph_height(&p, &doc, 40_000.0, &ApproxFontMetrics);
+        assert_eq!(height, lines[0].vert_size, "0% 칸 문단 = 줄 상자 하나");
+        assert_eq!(
+            height + trailing_leading(&lines[0], 0.0),
+            0.0,
+            "뒤따르는 문단이 있으면 같은 자리"
+        );
+        p.para_shape = 1;
+        assert_eq!(
+            line_spacing_ratio(&p, &doc),
+            DEFAULT_LINESPACE,
+            "표지 없는 0 은 값 없음"
+        );
+    }
+
+    /// #542 — 본문 문단 하나: 글자 모양 0(크기 `font`) 런에 글자 `text` 와 도형 `shapes`(종류 · 폭 · 높이),
+    /// 퍼센트 줄 간격 `pct`. `tac` = 글자처럼 취급.
+    fn shape_line_doc(
+        font: i32,
+        pct: i32,
+        text: &str,
+        shapes: &[(ShapeKind, i32, i32)],
+        tac: bool,
+    ) -> (SemanticDoc, Paragraph) {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape {
+            height: font,
+            ..Default::default()
+        });
+        doc.para_shapes.push(ParaShape {
+            line_spacing_type: LineSpacingType::Percent,
+            line_spacing_value: pct,
+            ..Default::default()
+        });
+        let mut content = vec![Inline::Text(text.into())];
+        content.extend(shapes.iter().map(|(kind, width, height)| {
+            Inline::Shape(ShapeRef {
+                kind: kind.clone(),
+                width: *width,
+                height: *height,
+                treat_as_char: tac,
+                ..Default::default()
+            })
+        }));
+        let p = Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        (doc, p)
+    }
+
+    /// #542 PR-2 — 글자처럼 취급 도형의 호스트 줄: 높이는 도형 `sz` 높이, 진행은 그 높이 + (비율 − 1) × 글자 크기.
+    /// 비교 값은 한글이 저장한 호스트 lineseg(`vertsize` · `spacing`) — 공개 코퍼스에서, 아래 값 표의 순서대로
+    /// `hwpxlib_corpus/error/20250808/…재난안전…hwpx` 구역 0 의 b10 · b38 · b75 · b200, `error/20230728/test.hwpx`
+    /// 구역 1 의 b392, 다시 재난안전 구역 0 의 b256(블록 번호는 구역의 최상위 `<hp:p>` 순서). 종류는 묶음 개체도
+    /// 같다 — 자리는 모든 종류가 갖고, 그리기만 `rect` 다.
+    #[test]
+    fn a_tac_shape_sets_its_host_line_like_hangul_stores_it() {
+        use ShapeKind::{Container, Rect};
+        /// (글자 크기, 퍼센트, 글자, 도형들(종류 · 폭 · 높이), 저장 vertsize, 저장 spacing)
+        type Stored = (i32, i32, &'static str, Vec<(ShapeKind, i32, i32)>, f64, f64);
+        let stored: [Stored; 6] = [
+            (1500, 150, "", vec![(Rect, 47_250, 6_663)], 6_663.0, 752.0),
+            (1500, 190, "", vec![(Rect, 47_250, 9_720)], 9_720.0, 1_352.0),
+            (
+                1500,
+                205,
+                "",
+                vec![(Container, 37_319, 4_218)],
+                4_218.0,
+                1_576.0,
+            ),
+            (
+                1100,
+                128,
+                "",
+                vec![(Container, 47_336, 21_570)],
+                21_570.0,
+                308.0,
+            ),
+            (
+                1400,
+                200,
+                "",
+                vec![(Rect, 50_472, 18_882)],
+                18_882.0,
+                1_400.0,
+            ),
+            (
+                1500,
+                90,
+                "가나다라마바사아",
+                vec![(Container, 17_623, 17_280), (Container, 17_573, 17_100)],
+                17_280.0,
+                -152.0,
+            ),
+        ];
+        for (font, pct, text, shapes, vertsize, spacing) in stored {
+            let (doc, p) = shape_line_doc(font, pct, text, &shapes, true);
+            let lines = layout_paragraph(&p, &doc, 48_328.0, &ApproxFontMetrics);
+            assert_eq!(lines.len(), 1, "{shapes:?}: 한 줄(저장 lineseg 1개)");
+            assert_eq!(lines[0].vert_size, vertsize, "{shapes:?}: 줄 높이");
+            let ratio = line_spacing_ratio(&p, &doc);
+            let advance = line_advance(&lines[0], ratio);
+            assert!(
+                (advance - vertsize - spacing).abs() <= 3.0,
+                "{shapes:?}: 진행 {advance} — 저장 {vertsize} + {spacing}"
+            );
+        }
+    }
+
+    /// #542 — 떠 있는 도형(`treatAsChar="0"`)은 줄에 자리를 갖지 않는다: 그것만 품은 문단은 빈 문단과, 글과
+    /// 함께면 글만 있는 문단과 똑같이 놓인다(자리는 PR-3). 쪽도 살리지 않는다.
+    #[test]
+    fn a_floating_shape_takes_no_slot_and_keeps_no_page_alive() {
+        let shape = [(ShapeKind::Rect, 20_000, 9_000)];
+        for text in ["", "글"] {
+            let (doc, floating) = shape_line_doc(1500, 160, text, &shape, false);
+            let (_, bare) = shape_line_doc(1500, 160, text, &[], false);
+            let a = layout_paragraph(&floating, &doc, 40_000.0, &ApproxFontMetrics);
+            let b = layout_paragraph(&bare, &doc, 40_000.0, &ApproxFontMetrics);
+            assert_eq!(a.len(), b.len());
+            for (x, y) in a.iter().zip(&b) {
+                assert_eq!(
+                    (x.text_pos, x.vert_size, x.horz_size, x.font_size),
+                    (y.text_pos, y.vert_size, y.horz_size, y.font_size)
+                );
+            }
+        }
+        let (_, floating) = shape_line_doc(1500, 160, "", &shape, false);
+        let (_, placed) = shape_line_doc(1500, 160, "", &shape, true);
+        assert!(!block_draws_something(&Block::Paragraph(floating)));
+        assert!(block_draws_something(&Block::Paragraph(placed)));
     }
 }

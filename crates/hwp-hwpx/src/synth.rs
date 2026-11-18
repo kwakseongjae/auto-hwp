@@ -371,6 +371,8 @@ pub fn parse_para_pr(elem: &str) -> ParaShape {
                 _ => LineSpacingType::Percent,
             };
             ps.line_spacing_value = v;
+            // #557: 0% 는 「값 없음」이 아니다 — 한글은 다음 줄을 같은 자리에 둔다.
+            ps.zero_line_spacing = v == 0 && ps.line_spacing_type == LineSpacingType::Percent;
         }
     }
     // 문단 앞에서 쪽 나누기 — the .hwp lift reads this (attr1 bit19); the layout consumes it
@@ -1780,6 +1782,29 @@ mod tests {
         assert_eq!(
             pools.border[&1].shade,
             Some(Color::from_hex("#D6D6D6").unwrap())
+        );
+    }
+
+    /// #557 — 머리말의 `PERCENT value="0"` 은 「값 없음」이 아니라 0% 다(표지를 켠다). 다른 값 · 다른 종류의
+    /// 0 은 켜지 않는다.
+    #[test]
+    fn an_explicit_zero_percent_line_spacing_is_marked() {
+        let pr = |ty: &str, v: i32| {
+            parse_para_pr(&format!(
+                r#"<hh:paraPr id="0"><hh:lineSpacing type="{ty}" value="{v}" unit="HWPUNIT"/></hh:paraPr>"#
+            ))
+        };
+        let zero = pr("PERCENT", 0);
+        assert!(zero.zero_line_spacing);
+        assert_eq!(
+            (zero.line_spacing_type, zero.line_spacing_value),
+            (LineSpacingType::Percent, 0)
+        );
+        assert!(!pr("PERCENT", 160).zero_line_spacing);
+        assert!(!pr("FIXED", 0).zero_line_spacing);
+        assert!(
+            !parse_para_pr(r#"<hh:paraPr id="0"/>"#).zero_line_spacing,
+            "줄 간격이 없으면 표지도 없다"
         );
     }
 }

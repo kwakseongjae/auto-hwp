@@ -42,6 +42,22 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 파괴 변경 (Breaking)
 
+- **`PlacedPage.undrawn_shapes` 필드가 늘었다 (#558).** 쪽이 품었지만 그리지 않은 도형과 그 이유(`UndrawnShape`)다.
+  마이그레이션: `PlacedPage` 를 직접 만드는 코드는 빈 목록을 채운다. Rust 크레이트 전용.
+  *(EN — Breaking: new public field `PlacedPage.undrawn_shapes`; code building `PlacedPage` fills an empty list. Rust only.)*
+
+- **`ParaShape.zero_line_spacing` 필드가 늘었다 (#557).** HWPX 머리말이 퍼센트 0 을 명시했는지다(값 없는 0 과 가른다).
+  마이그레이션: `ParaShape` 를 필드를 다 적어 만드는 코드는 `false` 를 채운다. 프로젝트 JSON 의 문단 모양에는 켜졌을 때만
+  `zero_line_spacing: true` 가 실린다(생략 = 아님). Rust 크레이트 전용.
+  *(EN — Breaking: new public field `ParaShape.zero_line_spacing`; exhaustive builders fill `false`. The project JSON paragraph shape
+  carries `zero_line_spacing: true` only when set. Rust only.)*
+
+- **`LineSeg.font_size` 필드가 늘었다 (#556).** 개체가 줄 높이를 정한 퍼센트 줄에서만 그 줄의 글자 크기이고, 그 밖에는 0 이다.
+  마이그레이션: `LineSeg` 를 직접 만드는 코드는 `font_size: 0.0` 을 채운다. 줄 진행은 이제 `hwp_typeset::line_advance` 로 잰다(공개됨,
+  `line_spacing_ratio` 도). Rust 크레이트 전용 — npm 패키지 · CLI 는 그대로다.
+  *(EN — Breaking: new public field `LineSeg.font_size`; code building `LineSeg` fills `0.0`. `hwp_typeset::line_advance` and
+  `line_spacing_ratio` are now public. Rust only.)*
+
 - **`auto-hwp export-pdf --visual-regions` 증거가 schema 4 → 5 (#534).** 쪽 객체에 `clipped_cell_text` 목록이 늘었다(아래 「추가」).
   마이그레이션: 필드를 엄격하게 검사하는 도구는 `schema_version: 5` 와 이 필드를 받아들인다. 저장소의 `scripts/pdf-visual-check.py` 는
   이제 5 만 받으므로 schema 4 증거는 같은 CLI 로 다시 만든다. Rust 쪽은 `PlacedPage.clipped_cells` · `PdfPageVisualEvidence.clipped_cell_text`
@@ -51,6 +67,19 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   `PlacedPage`, `PdfPageVisualEvidence` and `PdfExport` (`notices`) must be filled by code that builds those structs. CLI and Rust only.)*
 
 ### 고침 (Fixed)
+
+- **줄 간격 0% 를 0 으로 조판한다 (#557).** HWPX 머리말이 명시한 퍼센트 0 을 엔진은 「값 없음」으로 보고 160% 로 조판했다.
+  한글은 0% 그대로 다음 줄을 같은 자리에 놓는다(출처 줄 · 빈 줄에 쓰인다). 칸 안 0% 문단은 줄 상자 하나를 차지한다(한글 저장과 같다).
+  `.hwp` 경로는 그대로다.
+  *(EN — Fixed: an explicit 0% line spacing in an HWPX header now lays out as 0% — the next line starts at the same spot, as in
+  Hangul — instead of the 160% default. A 0% paragraph in a table cell still takes one line box. `.hwp` is unchanged.)*
+
+- **퍼센트 줄 간격 문단에서 그림 · 개체가 줄 높이를 정하면, 줄 간격을 글자 크기 기준으로 더한다 (#556).** 엔진은 줄 높이 전체에
+  비율을 곱해, 큰 그림이 있는 줄 뒤가 크게 벌어졌다(148% 줄의 29,196 높이 그림 → 엔진 43,210 · 한글 29,916). 한글이 저장한 줄은
+  간격 = (비율 − 1) × 그 줄의 글자 크기다(공개 코퍼스 28줄 모두). 칸 안 마지막 줄의 행간 빼기도 같은 규칙이다. 그런 줄이 있는 문서는
+  쪽 나눔이 달라진다. 다른 줄 간격 종류(고정 · 최소 · 줄 사이)는 그대로다.
+  *(EN — Fixed: a percent-spaced line whose height an inline picture or object sets now advances its height + (ratio − 1) × font
+  size, as Hangul stores it, instead of height × ratio. Documents with such lines paginate differently.)*
 
 - **HWPX 빈 문단의 줄 높이를 그 문단 글자 크기로 잡는다.** 한글이 저장한 빈 문단은 대부분 자기 닫힘 런 `<hp:run charPrIDRef="N"/>`
   하나뿐인데, 파서가 이것을 런으로 만들지 않아 빈 줄이 늘 기본 10pt 높이였다. 이제 그 런의 글자 모양으로 잰다(열고 닫는 꼴 · `.hwp`
@@ -92,6 +121,28 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   verification gates are unchanged; CLI warning). Dash-wrapped numbers are spaced like Hancom: `- 1 -`.)*
 
 ### 추가 (Added)
+
+- **본문의 글자처럼 취급 글상자(`rect`)를 자체 조판 · 쪽 SVG · PDF 에 그린다 (#558, #542 의 2단계).** 채움 · 테두리 · 글상자 본문
+  (세로 정렬)을 그린다. 글자처럼 취급 도형은 모든 종류가 줄 자리를 갖는다 — 한글이 저장한 호스트 줄 높이가 도형 높이다(공개 코퍼스
+  21줄 모두). 그런 도형이 있는 문서는 쪽 나눔이 달라진다. 아직 그리지 않는 도형(묶음 개체 · 타원 등 · 떠 있는 도형 · 본문에 표가 든
+  글상자)은 PDF 알림 `text-box`(`PdfExport.notices`, 쪽마다 이유별 한 건)와 CLI 경고 한 줄로 알린다. 알림 범위는 **본문 문단의
+  도형**이다 — 표 칸 안의 도형과 글상자 본문 안의 떠 있는 도형은 아직 알림 없이 빠지고, 웹(wasm) PDF 내보내기는 알림을 넘기지 않는다.
+  편집기 캐럿은 도형 뒤 글자도 모델 글자 번호로 짚는다(여러 줄 문단 포함). 라이브러리: `hwp_typeset::inline_object_slot`(어떤 인라인이 줄 칸을
+  갖는지 — `layout_paragraph` 와 캐럿이 함께 쓰는 규칙)을 공개한다.
+  *(EN — Added: inline (treat-as-char) text-box rectangles are drawn — fill, outline and body with its vertical alignment. Every
+  inline shape now takes its line space, as Hangul stores it, so such documents paginate differently. Shapes of body paragraphs
+  that are not drawn yet are reported as `text-box` notices and one CLI warning; shapes inside table cells or floating inside a
+  text box are still dropped without a notice, and the wasm PDF export does not pass notices on. `hwp_typeset::inline_object_slot` is
+  now public — the one rule for which inline takes a line slot.)*
+
+- **`auto-hwp layout-check --page-starts` — 쪽이 어디서 시작하는지를 파일에 저장된 줄 배치와 맞댄다 (#559).** 쪽 수는 우연히 맞을 수 있다(여기서
+  한 쪽 더, 저기서 한 쪽 덜). 본문 줄이 이어지는 자리마다 「저장 배치가 여기서 쪽을 넘기는가 · 우리도 넘기는가」를 보고, 같은 줄에서 넘긴 수 ·
+  최대 어긋남(쪽) · 처음 어긋난 저장 쪽을 낸다(`--json` 이면 파일마다 JSON, 한 파일이면 어긋난 자리 목록). 저장 쪽 나눔은 쪽 나누기 ·
+  구역 나누기, 본문 위쪽으로 되돌아간 줄 위치, 남은 높이에 안 들어가는 표로 센다 — 쪽을 넘는 표는 양쪽 다 한 번으로 센다. 다단 문서는
+  재지 않는다. 라이브러리: `hwp_rhwp::page_start_alignment(_for_doc)` · `hwp_typeset::block_line_pages`(`--features rhwp`).
+  *(EN — Added: `layout-check --page-starts` compares where pages start in our flow with the layout stored in the file
+  (page-break events per body line: matched breaks, largest drift in pages, first drifting stored page). Multi-column documents are
+  skipped. Library: `hwp_rhwp::page_start_alignment(_for_doc)`, `hwp_typeset::block_line_pages`.)*
 
 - **`hwp_rhwp::scope_svg_ids(svg, prefix)` · `hwp_rhwp::render_document_svgs(bytes, scope)`.** 앞의 것은 조각이 정의한 id 와 태그 안 참조
   (`url(#X)` · `href="#X"` · `xlink:href="#X"`)에만 접두를 붙인다(정의 안 된 참조 · data URI · `data-id` · 글자 데이터는 그대로). 뒤의 것은

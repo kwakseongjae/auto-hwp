@@ -189,8 +189,12 @@ pub struct ParaShape {
     pub vertical_align: VerticalAlign,
 
     pub line_spacing_type: LineSpacingType,
-    /// Interpreted per `line_spacing_type` (e.g. 160 for 160%).
+    /// Interpreted per `line_spacing_type` (e.g. 160 for 160%). 0 means "not set" (the 160% default)
+    /// unless [`ParaShape::zero_line_spacing`] says the source wrote 0% on purpose.
     pub line_spacing_value: i32,
+    /// The source set percent line spacing to exactly 0%: each line advances 0, so the next line lands
+    /// on the same position — what Hangul stores (#557). Without this flag a 0 value is "not set".
+    pub zero_line_spacing: bool,
 
     pub left_margin: HwpUnit,
     pub right_margin: HwpUnit,
