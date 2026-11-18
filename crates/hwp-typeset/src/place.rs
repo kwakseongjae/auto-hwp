@@ -1517,6 +1517,7 @@ fn advance_caption_block_pages(
             }
         }
     }
+    *vert -= crate::caption_trailing_leading(caption, doc, fonts, width);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1566,6 +1567,7 @@ fn advance_caption_columns_pages(
             }
         }
     }
+    flow.add(-crate::caption_trailing_leading(caption, doc, fonts, width));
 }
 
 fn block_pages_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Vec<usize>> {
@@ -2195,7 +2197,7 @@ fn place_caption(
             }
         }
     }
-    vert
+    vert - crate::caption_trailing_leading(caption, doc, fonts, width)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2241,6 +2243,14 @@ fn place_caption_columns(
             ),
         }
     }
+    // #543 — 캡션 블록의 마지막 줄은 줄 간격을 쓰지 않는다(`caption_trailing_leading`).
+    let width = if caption.max_width > 0 {
+        flow.min_width().min(caption.max_width as f64)
+    } else {
+        flow.min_width()
+    }
+    .max(1.0);
+    flow.add(-crate::caption_trailing_leading(caption, doc, fonts, width));
 }
 
 /// Place a table, SPLITTING it across pages at row boundaries when it doesn't fit (한글식 표 나눔).
@@ -10442,6 +10452,36 @@ mod tests {
             (placed_end.1 - naive_end.1).abs() < 1e-6,
             "{placed_end:?} {naive_end:?}"
         );
+    }
+
+    /// #543 — 캡션 블록의 마지막 줄은 줄 간격을 쓰지 않는다(한글 저장 줄 30개): 위 캡션 한 줄(글자 1,000 · 160%)이면
+    /// 표는 1,000 + 간격 850 아래에서 시작하고(1,600 + 850 이 아니다), 아래 캡션 뒤 문단도 같은 양만 밀린다. 세 걸음이
+    /// 같다. 음수 줄 간격(80%)도 줄 높이 그대로 쓴다.
+    #[test]
+    fn a_caption_takes_its_line_heights_not_its_last_line_spacing() {
+        for (pct, position) in [
+            (160, TableCaptionPosition::Top),
+            (160, TableCaptionPosition::Bottom),
+            (80, TableCaptionPosition::Top),
+        ] {
+            let mut doc = shape_doc(vec![
+                Block::Table(captioned(fixed_height_table(1, 3_000, false), position)),
+                Block::Paragraph(para("끝")),
+            ]);
+            doc.para_shapes[0].line_spacing_value = pct;
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let table_y = placed.pages[0].tables[0].y;
+            let want_table_y = if position == TableCaptionPosition::Top {
+                1_000.0 + 850.0
+            } else {
+                0.0
+            };
+            assert_eq!(table_y, want_table_y, "{pct}% {position:?} 표 위");
+            // 「끝」: 표 3,000 + 캡션 줄 1,000 + 간격 850 = 4,850(줄 간격은 안 셈).
+            let [placed_end, naive_end, _] = end_line_in_three_walks(&doc);
+            assert_eq!(placed_end, (0, 4_850.0), "{pct}% {position:?}");
+            assert_eq!(naive_end, (0, 4_850.0), "{pct}% {position:?}");
+        }
     }
 
     /// #544 — 오프셋으로 옮겨 그린 떠 있는 표에서도 칸 캐럿은 그려진 칸 안에 있다.

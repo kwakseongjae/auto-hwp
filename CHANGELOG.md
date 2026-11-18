@@ -89,6 +89,9 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   간격을 예약하므로 그런 문서는 쪽 나눔이 바뀐다: 공개 코퍼스 재난안전 문서(위 캡션 10개, 캡션 글 325자가 이제 모두 그려짐) 73 → 74쪽
   (오라클 76 · 다른 프로그램 PDF 75), 비공개 코퍼스 1문서 21 → 22쪽(오라클 23). 다른 문서 · `.hwp` · 게이트 문서는 그대로다.
   - 1×1 틀 표가 안쪽 표로 올려 그려질 때 틀의 캡션이 두 형식 모두 알림 없이 빠지던 것도 고쳤다 — 캡션이 올려진 표와 함께 간다.
+  - 캡션 블록의 높이는 줄 높이의 합이다 — 마지막 줄의 줄 간격은 쓰지 않는다(`.hwp` · HWPX 모두). 공개 · 비공개 코퍼스에서 저장 줄이
+    있는 캡션 30개(.hwp 17 · HWPX 13 · 위 24 · 아래 6) 모두 한글이 이렇게 저장한다. 전에는 캡션마다 줄 간격만큼(1,300 줄이면 780) 표를
+    아래로 밀었다. 쪽 안 자리만 바뀌고, 코퍼스 문서의 쪽 나눔 · 게이트 문서 쪽 수(8 · 18 · 24)는 그대로다.
   - 배치하지 않는 캡션(옆 캡션 · 떠 있는 표 · 칸 안 표)은 PDF 알림(`kind: "table-caption"` · `code: "table-caption-not-drawn"`)과
     `auto-hwp export-pdf` 경고로 알린다(코퍼스에는 0개).
   *(EN — Fixed: HWPX table captions are now read into `Table.caption` (they were isolated from the body flow and then dropped) and

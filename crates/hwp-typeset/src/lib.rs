@@ -1097,7 +1097,7 @@ fn flow_caption_naive(
             }
         }
     }
-    vert
+    vert - caption_trailing_leading(caption, doc, fonts, width)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1154,6 +1154,7 @@ fn flow_caption_columns_naive(
             }
         }
     }
+    flow.add(-caption_trailing_leading(caption, doc, fonts, width));
 }
 
 /// Vertical cell padding (HWPUNIT) — HWP's default top+bottom cell insets (~141 HWPUNIT ≈ 0.49 mm each
@@ -1336,8 +1337,31 @@ pub(crate) fn table_caption_metrics(
             }
             Block::Table(table) => table_height(table, width, doc, fonts),
         })
-        .sum();
+        .sum::<f64>()
+        - caption_trailing_leading(caption, doc, fonts, width);
     Some((width, height))
+}
+
+/// #543 — what a caption flow over-advances by: the signed leading (`line_leading`) of the caption's last
+/// line, 0 when it ends in a table or has no line. Hangul's stored lines size a caption block like a cell's
+/// content — its last line takes its own height, not its line spacing. Evidence, all 30 captions with stored
+/// lines in the public and private corpora (.hwp 17 · HWPX 13 · top 24 · bottom 6 · one-line captions): the
+/// host line of a 글자처럼 취급 table is exactly
+/// `표 높이 + 바깥 위 · 아래 + Σ 캡션 줄 높이 + gap` — e.g. 7,492 + 282 + 1,300 + 850 = 9,924 with a 1,300 line
+/// whose spacing is 780, and 29,349 + 0 + 1,100 + 850 = 31,299 with a −220 spacing. ⚠️ Every sample is one
+/// caption line: that the lines between take their full advance is the cell rule, assumed.
+pub(crate) fn caption_trailing_leading(
+    caption: &TableCaption,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    width: f64,
+) -> f64 {
+    match caption.blocks.last() {
+        Some(Block::Paragraph(p)) => layout_paragraph(p, doc, width, fonts)
+            .last()
+            .map_or(0.0, |line| line_leading(line, line_spacing_ratio(p, doc))),
+        _ => 0.0,
+    }
 }
 
 pub(crate) fn keep_captioned_table_on_fresh_lane(
