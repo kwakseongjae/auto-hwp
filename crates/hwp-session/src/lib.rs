@@ -1792,6 +1792,15 @@ fn body_paragraph_geom(
         // to the next page. `emptyParaBoxes` rejects that band (`h <= 0`) and resolves the real
         // positive-height fragment, so lift the same rule into the engine contract.
         let (empty_page, empty_band) = bands.iter().copied().find(|(_, band)| band.h > 0.0)?;
+        // #542 — a floating 「자리 차지」 도형 stretches the paragraph's band to its own height; the caret is
+        // still the one empty line (the band absorbs the line, it does not grow it).
+        let height = if hwp_typeset::floating_flow_band(p).is_some() {
+            hwp_typeset::layout_paragraph(p, doc, empty_band.w.max(1.0), fonts)
+                .first()
+                .map_or(empty_band.h, |line| line.vert_size.min(empty_band.h))
+        } else {
+            empty_band.h
+        };
         return Some(BodyParagraphGeom {
             section,
             block,
@@ -1803,7 +1812,7 @@ fn body_paragraph_geom(
                 x0: empty_band.x,
                 end_x: empty_band.x,
                 top: empty_band.y,
-                height: empty_band.h,
+                height,
                 chars: chars
                     .iter()
                     .enumerate()
@@ -1838,8 +1847,21 @@ fn body_paragraph_geom(
     let ratio = hwp_typeset::line_spacing_ratio(p, doc);
     let mut advance_cache: HashMap<(usize, char), f64> = HashMap::new();
     let mut out = Vec::with_capacity(laid.len());
+    // #542 — a floating 「자리 차지」 도형 moves the text lines it overlaps below it: the same plan
+    // place_paragraph follows, so the caret line sits on its placed glyphs.
+    let band = hwp_typeset::float_band_plan(p, &laid, ratio, vert, body_h);
 
     for (li, ls) in laid.iter().enumerate() {
+        if let Some(hwp_typeset::FloatBandPlan::Here {
+            shift_line: Some(at),
+            shift,
+            ..
+        }) = band
+        {
+            if li == at {
+                vert += shift;
+            }
+        }
         if vert + ls.vert_size > body_h && vert > 0.0 {
             page += 1;
             vert = 0.0;
@@ -3530,7 +3552,7 @@ mod tests {
     #[test]
     fn body_caret_counts_model_chars_past_a_tac_shape() {
         // (이름, 도형 폭, 글, 글상자 본문, 줄 수)
-        let cases: [(&str, i32, String, Option<&str>, usize); 6] = [
+        let cases: [(&str, i32, String, Option<&str>, usize); 7] = [
             ("한 줄", 30_000, "가".repeat(9), None, 1),
             ("두 줄", 30_000, "가".repeat(40), None, 2),
             ("도형이 한 줄을 다 차지", 60_000, "가".repeat(20), None, 2),
@@ -3538,6 +3560,14 @@ mod tests {
                 "줄 경계가 빈칸",
                 30_000,
                 format!("{} {}", "가".repeat(29), "가".repeat(10)),
+                None,
+                2,
+            ),
+            // 리뷰 r2 「참고 2」 — 줄 경계의 빈칸이 다음 줄 머리로 가는 모양(가 30자 + 빈칸).
+            (
+                "줄 경계 빈칸이 다음 줄 머리로",
+                30_000,
+                format!("{} {}", "가".repeat(30), "가".repeat(9)),
                 None,
                 2,
             ),
@@ -3601,6 +3631,16 @@ mod tests {
             );
         }
 
+        // 줄 경계 빈칸(오프셋 30)은 둘째 줄 머리(x 0)에 있고, 그 뒤 글자(31)와 같은 줄이다(리뷰 r2 「참고 2」).
+        let text = format!("{} {}", "가".repeat(30), "가".repeat(9));
+        let doc = shape_text_para_doc(30_000, &text, None);
+        let space = body_caret_rect(&doc, 0, 0, 0, 30).expect("줄 경계 빈칸 캐럿");
+        let next = body_caret_rect(&doc, 0, 0, 0, 31).expect("빈칸 뒤 글자 캐럿");
+        let first = body_caret_rect(&doc, 0, 0, 0, 0).expect("첫 글자 캐럿");
+        assert!(space.y > first.y, "빈칸은 둘째 줄");
+        assert_eq!(space.y, next.y, "빈칸과 뒤 글자는 같은 줄");
+        assert!(space.x.abs() < 0.01, "빈칸 캐럿 x {} — 줄 머리", space.x);
+
         // 도형 바로 뒤 빈칸은 도형 오른쪽(30,000)에서 시작한다 — 줄 머리(0)가 아니다.
         let doc = shape_text_para_doc(30_000, " 가", None);
         let space = body_caret_rect(&doc, 0, 0, 0, 0).expect("빈칸 캐럿");
@@ -3608,6 +3648,116 @@ mod tests {
             (space.x * HWPUNIT_PER_PX - 30_000.0).abs() < 0.5,
             "빈칸 캐럿 x {}",
             space.x * HWPUNIT_PER_PX
+        );
+    }
+
+    /// #542 PR-3 — 문단 기준 「자리 차지」 떠 있는 도형 아래로 내려간 글 줄에도 캐럿이 있고, 캐럿 줄은 놓인
+    /// 글자 줄과 같다(`float_band_plan` 을 place_paragraph 와 같이 따른다).
+    #[test]
+    fn body_caret_follows_text_pushed_below_a_floating_band() {
+        use hwp_model::document::{Block, Inline};
+        let mut doc = shape_text_para_doc(10_000, "가나다", None);
+        let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] else {
+            panic!("문단");
+        };
+        let Inline::Shape(shape) = &mut p.runs[0].content[0] else {
+            panic!("도형");
+        };
+        shape.treat_as_char = false;
+        shape.text_wrap = "TOP_AND_BOTTOM".into();
+        shape.vert_rel_to = "PARA".into();
+        shape.height = 20_000;
+        let placed = place(&doc, &[]);
+        let fonts = own_render_fonts();
+        let first = placed.pages[0]
+            .glyphs
+            .iter()
+            .find(|g| g.ch == '가')
+            .expect("놓인 글자");
+        let top = placed.pages[0].margin_top;
+        assert!(
+            first.baseline > top + 20_000.0,
+            "글 줄이 띠 아래로 내려갔다"
+        );
+        for offset in 0..3 {
+            let c = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 0, 0, 0, offset)
+                .unwrap_or_else(|| panic!("오프셋 {offset} 캐럿 없음"));
+            assert!(
+                c.y * HWPUNIT_PER_PX >= top + 20_000.0 - 0.5,
+                "오프셋 {offset}: 캐럿 y {} 는 띠 아래",
+                c.y * HWPUNIT_PER_PX
+            );
+        }
+    }
+
+    /// #542 PR-3(리뷰 M13) — 쪽 끝 근처의 띠 문단: 띠가 남은 자리에 안 들어가 도형이 다음 쪽으로 가면(NextPage)
+    /// 글 줄은 제자리다. 캐럿은 문단이 실제로 시작하는 자리(쪽 맨 위가 아님)로 계획을 세워야 글 줄을 짚는다.
+    #[test]
+    fn body_caret_near_the_page_end_follows_the_next_page_band_plan() {
+        use hwp_model::document::{Block, Inline, Paragraph, Run};
+        let mut doc = shape_text_para_doc(10_000, "가나다", None);
+        let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] else {
+            panic!("문단");
+        };
+        let Inline::Shape(shape) = &mut p.runs[0].content[0] else {
+            panic!("도형");
+        };
+        shape.treat_as_char = false;
+        shape.text_wrap = "TOP_AND_BOTTOM".into();
+        shape.vert_rel_to = "PARA".into();
+        shape.height = 20_000;
+        let lead = vec!["앞"; 42].join("\n");
+        doc.sections[0].blocks.insert(
+            0,
+            Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text(lead)],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+        );
+        let placed = place(&doc, &[]);
+        let fonts = own_render_fonts();
+        let host_glyph_page = placed
+            .pages
+            .iter()
+            .position(|pg| pg.glyphs.iter().any(|g| g.ch == '가'))
+            .expect("놓인 글자");
+        assert_eq!(
+            host_glyph_page, 0,
+            "전제: 글 줄은 띠에 밀리지 않고 첫 쪽에 남는다(NextPage)"
+        );
+        assert_eq!(placed.pages.len(), 2, "전제: 도형은 다음 쪽으로 간다");
+        for offset in 0..3 {
+            let c = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 0, 0, 1, offset)
+                .unwrap_or_else(|| panic!("오프셋 {offset} 캐럿 없음"));
+            assert_eq!(c.page, 0, "오프셋 {offset}: 캐럿 쪽");
+        }
+    }
+
+    /// #542 PR-3 — 빈 문단이 문단 기준 위아래 도형을 품으면 문단 띠는 도형 높이까지 늘지만, 캐럿은 빈 줄 하나의
+    /// 높이다(문단 띠 높이가 아니다).
+    #[test]
+    fn body_caret_on_an_empty_floating_band_host_is_one_line_tall() {
+        use hwp_model::document::{Block, Inline};
+        let mut doc = shape_text_para_doc(10_000, "", None);
+        let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] else {
+            panic!("문단");
+        };
+        let Inline::Shape(shape) = &mut p.runs[0].content[0] else {
+            panic!("도형");
+        };
+        shape.treat_as_char = false;
+        shape.text_wrap = "TOP_AND_BOTTOM".into();
+        shape.vert_rel_to = "PARA".into();
+        shape.height = 20_000;
+        let c = body_caret_rect(&doc, 0, 0, 0, 0).expect("빈 문단 캐럿");
+        assert!(
+            c.h * HWPUNIT_PER_PX < 3_000.0,
+            "캐럿 높이 {} 는 빈 줄 하나",
+            c.h * HWPUNIT_PER_PX
         );
     }
 

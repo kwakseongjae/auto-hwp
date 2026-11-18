@@ -1400,6 +1400,7 @@ fn page_fill_print(bytes: &[u8]) -> Result<(), String> {
                     hwp_core::BreakReason::LineOverflow => "줄 안 들어감",
                     hwp_core::BreakReason::RowOverflow => "행 안 들어감",
                     hwp_core::BreakReason::OverTallCell => "과대 셀",
+                    hwp_core::BreakReason::FloatingObject => "떠 있는 개체",
                 };
                 // 들어갈 수 있었는데 넘겼다면 그게 잃은 쪽이다.
                 let mark = if needed > 0.0 && needed <= avail {

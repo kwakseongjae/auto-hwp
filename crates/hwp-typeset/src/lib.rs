@@ -575,7 +575,21 @@ impl LayoutEngine for NaiveLayout {
                             vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
                         }
                         let ratio = line_spacing_ratio(p, doc);
-                        for ls in layout_paragraph(p, doc, body_w, fonts) {
+                        let lines = layout_paragraph(p, doc, body_w, fonts);
+                        // #542 — 떠 있는 「자리 차지」 도형의 띠. 세 걸음 · 캐럿이 같은 계획을 따른다.
+                        let band = float_band_plan(p, &lines, ratio, vert, body_h);
+                        let (band_page, band_top) = (pages.len() - 1, vert);
+                        for (li, ls) in lines.into_iter().enumerate() {
+                            if let Some(FloatBandPlan::Here {
+                                shift_line: Some(at),
+                                shift,
+                                ..
+                            }) = band
+                            {
+                                if li == at {
+                                    vert += shift;
+                                }
+                            }
                             // 이슈 302 — 아무것도 그리지 않는 줄은 쪽을 넘기지 못한다.
                             if vert + ls.vert_size > body_h
                                 && vert > 0.0
@@ -606,6 +620,28 @@ impl LayoutEngine for NaiveLayout {
                                 ..ls
                             });
                             vert += adv;
+                        }
+                        match band {
+                            Some(FloatBandPlan::Here { end, .. })
+                                if pages.len() - 1 == band_page =>
+                            {
+                                vert = vert.max(band_top + end);
+                                last_drawn = band_page; // 이슈 307 — 도형이 그 쪽을 차지한다
+                            }
+                            Some(FloatBandPlan::NextPage { height }) => {
+                                break_page(
+                                    &mut pages,
+                                    &mut breaks,
+                                    page,
+                                    BreakReason::FloatingObject,
+                                    blk_idx,
+                                    height,
+                                    body_h - vert,
+                                );
+                                vert = height;
+                                last_drawn = pages.len() - 1;
+                            }
+                            _ => {}
                         }
                         // 문단 아래 간격.
                         vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
@@ -811,7 +847,27 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
                         flow.add(shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64);
                     }
                     let ratio = line_spacing_ratio(paragraph, doc);
-                    for mut line in layout_paragraph(paragraph, doc, flow.min_width(), fonts) {
+                    let lines = layout_paragraph(paragraph, doc, flow.min_width(), fonts);
+                    // #542 — 떠 있는 「자리 차지」 도형의 띠(한 단 걸음과 같은 계획).
+                    let band = float_band_plan(
+                        paragraph,
+                        &lines,
+                        ratio,
+                        flow.vert(),
+                        flow.available_height(body_h),
+                    );
+                    let band_lane = (pages.len(), flow.column_index(), flow.vert());
+                    for (index, mut line) in lines.into_iter().enumerate() {
+                        if let Some(FloatBandPlan::Here {
+                            shift_line: Some(at),
+                            shift,
+                            ..
+                        }) = band
+                        {
+                            if index == at {
+                                flow.add(shift);
+                            }
+                        }
                         if flow.vert() + line.vert_size > flow.available_height(body_h)
                             && flow.vert() > 0.0
                             && flow.advance_column()
@@ -825,6 +881,20 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
                             ..line
                         });
                         flow.add(advance);
+                    }
+                    match band {
+                        Some(FloatBandPlan::Here { end, .. })
+                            if (pages.len(), flow.column_index()) == (band_lane.0, band_lane.1) =>
+                        {
+                            flow.add((band_lane.2 + end - flow.vert()).max(0.0));
+                        }
+                        Some(FloatBandPlan::NextPage { height }) => {
+                            if flow.advance_column() {
+                                pages.push(new_page(page));
+                            }
+                            flow.add(height);
+                        }
+                        _ => {}
                     }
                     flow.add(shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64);
                 }
@@ -2198,6 +2268,140 @@ pub fn inline_object_slot(inline: &Inline) -> Option<(f64, f64)> {
         Inline::Shape(shape) if shape.treat_as_char => Some(shape_box(shape)),
         _ => None,
     }
+}
+
+/// The flow band of a paragraph's floating 「자리 차지」 도형 (#542 PR-3), in HWPUNIT from the paragraph's
+/// top. See [`floating_flow_band`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FloatBand {
+    /// The smallest vertical offset (`<hp:pos vertOffset>`) — where the band starts.
+    pub top: f64,
+    /// The largest `offset + 바깥 위 + 높이 + 바깥 아래` — where the content after the band starts.
+    pub bottom: f64,
+    /// The largest `바깥 위 + 높이 + 바깥 아래` — the band without its offset (see [`FloatBandPlan::NextPage`]).
+    pub height: f64,
+}
+
+/// The band a paragraph's floating 도형 take in the text flow (#542 PR-3), or `None` when none pushes it.
+///
+/// Only a shape that floats (`treatAsChar="0"`), is 「자리 차지」 (`textWrap="TOP_AND_BOTTOM"`) and is placed
+/// relative to its paragraph (`vertRelTo="PARA"`) counts, whatever its kind (drawn or not, like a 글자처럼
+/// 취급 도형's line slot). 글 앞 · 글 뒤 never move the flow, and 어울림 (`SQUARE`) narrows the lines beside it
+/// instead (not handled). A paper- or page-relative 「자리 차지」 shape pushes the lines of OTHER paragraphs too
+/// and is not handled yet either.
+///
+/// ⚠️ An ASSUMPTION for shapes, carried over from tables. Hangul's stored line layout (lineseg) has only
+/// ONE paragraph-relative 「자리 차지」 shape in the public corpus, on a document's last paragraph, so its
+/// push cannot be seen. The rule is the one Hangul's stored lineseg shows for floating TABLES with the
+/// same placement: of 31 distinct such tables, 18 were checked line by line and all 18 agree (about 14 pin
+/// the value; the rest only show the next paragraph on a new page), 1 runs over several pages (37 rows whose
+/// per-row cell heights add up to 298,147 while its stored `sz` height is 31,502 — a table-only property, a
+/// shape has no rows) and 12 were not checked (split across pages or on a last paragraph). The content after the paragraph starts at
+/// `문단 위 + offset + 바깥 위 + 높이 + 바깥 아래` (e.g. 0 + 283 + 8,657 + 283 = 9,223; a 45 offset →
+/// 20,953 + 45 + 20,277 = 41,275). How each line of the paragraph itself moves is [`float_band_plan`].
+pub fn floating_flow_band(p: &Paragraph) -> Option<FloatBand> {
+    let mut band: Option<FloatBand> = None;
+    for inline in p.runs.iter().flat_map(|run| &run.content) {
+        let Inline::Shape(shape) = inline else {
+            continue;
+        };
+        if shape.treat_as_char || shape.text_wrap != "TOP_AND_BOTTOM" || shape.vert_rel_to != "PARA"
+        {
+            continue;
+        }
+        let [_, _, out_top, out_bottom] = shape.out_margin.map(|m| m.max(0) as f64);
+        let height = out_top + shape.height.max(0) as f64 + out_bottom;
+        let top = shape.vert_offset as f64;
+        let next = FloatBand {
+            top,
+            bottom: top + height,
+            height,
+        };
+        band = Some(match band {
+            None => next,
+            Some(b) => FloatBand {
+                top: b.top.min(next.top),
+                bottom: b.bottom.max(next.bottom),
+                height: b.height.max(next.height),
+            },
+        });
+    }
+    band
+}
+
+/// How a paragraph with a [`FloatBand`] advances the flow — one plan that every pagination walk
+/// (`NaiveLayout`, `place_doc`, `block_pages` and their column twins) and the editor caret follow, so the
+/// page counts stay in LOCKSTEP.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FloatBandPlan {
+    /// The band fits on this page. Line `shift_line` (and every line after it) moves down by `shift` — the
+    /// first line holding text that the band overlaps goes below the band; an empty paragraph's line stays
+    /// where it is (Hangul stores it there with width 0) and is absorbed by the band. After the lines, the
+    /// flow is at least `end` below the paragraph's top (if the paragraph is still on its first page).
+    Here {
+        shift_line: Option<usize>,
+        shift: f64,
+        end: f64,
+    },
+    /// The band does not fit what is left of the page: the lines stay, the shape moves to the top of the
+    /// next page (its offset dropped) and the flow there resumes `height` down. Stored-lineseg sample (a
+    /// 위아래 table again): host line kept at 74,178, next paragraph at 19,994 = 141 + 19,712 + 141 on the
+    /// next page. ⚠️ An assumption not confirmed by a stored sample for shapes — ONE table sample, assumed
+    /// to hold for shapes (like the outer-margin assumption of `shape_box`). ⚠️ The plan is made before the
+    /// lines are laid: if the host's own text lines then run over the page (a line overflow), the band still
+    /// moves one page further after them — so a page holding only those lines comes before the shape. No
+    /// sample shows what Hangul does there (an assumption on top of an assumption).
+    NextPage { height: f64 },
+}
+
+impl FloatBandPlan {
+    /// Whether line `index` of the paragraph is the one the band pushes down (the first text line it
+    /// overlaps). Such a line may then not fit and move to the next page / column — the band and the
+    /// paragraph's anchor stay where the band was placed.
+    pub fn pushes_line(&self, index: usize) -> bool {
+        matches!(self, Self::Here { shift_line: Some(at), .. } if *at == index)
+    }
+}
+
+/// The [`FloatBandPlan`] for paragraph `p` laid out as `lines`, starting `vert` down a page (or column)
+/// whose height is `avail_h`. `None` when the paragraph has no [`FloatBand`].
+pub fn float_band_plan(
+    p: &Paragraph,
+    lines: &[LineSeg],
+    ratio: f64,
+    vert: f64,
+    avail_h: f64,
+) -> Option<FloatBandPlan> {
+    let band = floating_flow_band(p)?;
+    // Like a table kept whole: never at the top of a page, and never for a band no page can hold.
+    if vert > 0.0 && vert + band.bottom > avail_h && band.height <= avail_h {
+        return Some(FloatBandPlan::NextPage {
+            height: band.height,
+        });
+    }
+    // Any text, a lone space included (stored: a " " host line goes below the band; an empty one stays).
+    let has_text = p
+        .runs
+        .iter()
+        .flat_map(|run| &run.content)
+        .any(|inline| matches!(inline, Inline::Text(t) if !t.is_empty()));
+    let (mut shift_line, mut shift) = (None, 0.0);
+    if has_text {
+        let mut y = 0.0;
+        for (i, line) in lines.iter().enumerate() {
+            if y < band.bottom && y + line.vert_size > band.top {
+                shift_line = Some(i);
+                shift = band.bottom - y;
+                break;
+            }
+            y += line_advance(line, ratio);
+        }
+    }
+    Some(FloatBandPlan::Here {
+        shift_line,
+        shift,
+        end: band.bottom,
+    })
 }
 
 /// One line's vertical advance under its paragraph's line-spacing `ratio`. A text line scales its
