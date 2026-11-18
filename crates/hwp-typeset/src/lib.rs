@@ -1826,60 +1826,16 @@ pub fn layout_paragraph(
                         object_heights.push(0.0);
                     }
                 }
-                Inline::Image(image) => {
-                    chars.push(('\u{FFFC}', 1));
-                    run_sizes.push(size);
-                    advs.push(if image.treat_as_char {
-                        image.width.max(0) as f64
-                    } else {
-                        0.0
-                    });
-                    object_heights.push(if image.treat_as_char {
-                        image.height.max(0) as f64
-                    } else {
-                        0.0
-                    });
+                // One slot per object, by the same rule the editor caret uses to map slots back to
+                // model chars ([`inline_object_slot`]). U+FFFC is only the metric proxy; its size is 1.
+                other => {
+                    if let Some((width, height)) = inline_object_slot(other) {
+                        chars.push(('\u{FFFC}', 1));
+                        run_sizes.push(size);
+                        advs.push(width);
+                        object_heights.push(height);
+                    }
                 }
-                Inline::Equation(equation) => {
-                    chars.push(('\u{FFFC}', 1));
-                    run_sizes.push(size);
-                    advs.push(if equation.treat_as_char {
-                        equation.width.max(0) as f64
-                    } else {
-                        0.0
-                    });
-                    object_heights.push(if equation.treat_as_char {
-                        equation.height.max(0) as f64
-                    } else {
-                        0.0
-                    });
-                }
-                // #542: a 글자처럼 취급 도형 is one inline atom of its line — its box (outer margins
-                // included) sets the line height like a picture's, every kind alike (only a `rect` is
-                // drawn). A floating shape takes NO slot: a paragraph holding only that still lays out
-                // as an empty one (PR-3 places floating shapes). `place::paragraph_atoms` mirrors this.
-                Inline::Shape(shape) if shape.treat_as_char => {
-                    let (width, height) = shape_box(shape);
-                    chars.push(('\u{FFFC}', 1));
-                    run_sizes.push(size);
-                    advs.push(width);
-                    object_heights.push(height);
-                }
-                Inline::Chart(chart) => {
-                    chars.push(('\u{FFFC}', 1));
-                    run_sizes.push(size);
-                    advs.push(if chart.treat_as_char {
-                        chart.width.max(0) as f64
-                    } else {
-                        0.0
-                    });
-                    object_heights.push(if chart.treat_as_char {
-                        chart.height.max(0) as f64
-                    } else {
-                        0.0
-                    });
-                }
-                _ => {}
             }
         }
     }
@@ -2204,12 +2160,44 @@ pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64, trailing: 
 
 /// The line space a 글자처럼 취급 도형 takes: its box (`<hp:sz>`) plus its outer margins — `(advance,
 /// height)` in HWPUNIT. Hangul stores the host line's `vertsize` as exactly this height (#542).
+///
+/// ⚠️ The outer-margin terms are NOT confirmed by a sample: every shape in the public corpus that
+/// fixed the `vertsize` rule has outer margins of 0, so "+ margins" (and where `place_shape` offsets
+/// the drawn box) is an assumption to check once a sample with non-zero `<hp:outMargin>` turns up.
 pub(crate) fn shape_box(shape: &ShapeRef) -> (f64, f64) {
     let [left, right, top, bottom] = shape.out_margin.map(|m| m.max(0) as f64);
     (
         shape.width.max(0) as f64 + left + right,
         shape.height.max(0) as f64 + top + bottom,
     )
+}
+
+/// The flow slot an object inline takes in [`layout_paragraph`] — `Some((advance, height))` in HWPUNIT —
+/// or `None` when it takes none. Text is not an object: it takes one slot per char. A picture, equation
+/// or chart always takes a slot (zero-sized when it floats); a 도형 takes one only when it is 글자처럼
+/// 취급 (#542 — a floating one is placed by PR-3, not on the line). `place::paragraph_atoms` builds the
+/// same slots, and the editor caret uses this to tell a layout slot from a model char.
+pub fn inline_object_slot(inline: &Inline) -> Option<(f64, f64)> {
+    let tac_box = |treat_as_char: bool, width: i32, height: i32| {
+        if treat_as_char {
+            (width.max(0) as f64, height.max(0) as f64)
+        } else {
+            (0.0, 0.0)
+        }
+    };
+    match inline {
+        Inline::Image(image) => Some(tac_box(image.treat_as_char, image.width, image.height)),
+        Inline::Equation(equation) => Some(tac_box(
+            equation.treat_as_char,
+            equation.width,
+            equation.height,
+        )),
+        Inline::Chart(chart) => Some(tac_box(chart.treat_as_char, chart.width, chart.height)),
+        // #542: a 글자처럼 취급 도형 is one inline atom of its line — its box (outer margins included)
+        // sets the line height like a picture's, every kind alike (only a `rect` is drawn).
+        Inline::Shape(shape) if shape.treat_as_char => Some(shape_box(shape)),
+        _ => None,
+    }
 }
 
 /// One line's vertical advance under its paragraph's line-spacing `ratio`. A text line scales its
@@ -3252,9 +3240,9 @@ mod tests {
     }
 
     /// #542 PR-2 — 글자처럼 취급 도형의 호스트 줄: 높이는 도형 `sz` 높이, 진행은 그 높이 + (비율 − 1) × 글자 크기.
-    /// 비교 값은 한글이 저장한 호스트 lineseg(`vertsize` · `spacing`) — 공개 코퍼스
-    /// `hwpxlib_corpus/error/20250808/…재난안전…hwpx` 구역 0 의 b10 · b38 · b75 · b200 · b256 과
-    /// `error/20230728/test.hwpx` 구역 1 의 b392(블록 번호는 구역의 최상위 `<hp:p>` 순서). 종류는 묶음 개체도
+    /// 비교 값은 한글이 저장한 호스트 lineseg(`vertsize` · `spacing`) — 공개 코퍼스에서, 아래 값 표의 순서대로
+    /// `hwpxlib_corpus/error/20250808/…재난안전…hwpx` 구역 0 의 b10 · b38 · b75 · b200, `error/20230728/test.hwpx`
+    /// 구역 1 의 b392, 다시 재난안전 구역 0 의 b256(블록 번호는 구역의 최상위 `<hp:p>` 순서). 종류는 묶음 개체도
     /// 같다 — 자리는 모든 종류가 갖고, 그리기만 `rect` 다.
     #[test]
     fn a_tac_shape_sets_its_host_line_like_hangul_stores_it() {

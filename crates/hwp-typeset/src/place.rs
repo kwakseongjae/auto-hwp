@@ -3762,6 +3762,7 @@ fn place_shape(
         });
         return;
     }
+    // ⚠️ Unconfirmed, like `crate::shape_box`: no public sample has a non-zero outer margin here.
     let [left, _, top, _] = shape.out_margin.map(|m| m.max(0) as f64);
     let (bx, by) = (x + left, line_top + top);
     let (bw, bh) = (shape.width.max(0) as f64, shape.height.max(0) as f64);
@@ -8264,6 +8265,31 @@ mod tests {
             next.baseline
         );
         assert!(page.undrawn_shapes.is_empty(), "{:?}", page.undrawn_shapes);
+    }
+
+    /// #542 — 줄바꿈이 잰 도형 폭과 그릴 때의 도형 진행이 같다: 도형 뒤 첫 글자는 도형 오른쪽(폭 20,000)에서
+    /// 시작한다. 바깥 여백이 있으면 두 걸음이 함께 그만큼 더 간다(`shape_box` 한 규칙). 여백 쪽 값은 한글 참값이
+    /// 아니라 두 걸음이 어긋나지 않는다는 잠금이다 — 바깥 여백이 있는 표본은 아직 확인하지 못했다.
+    #[test]
+    fn the_first_glyph_after_a_tac_shape_starts_at_the_shape_width() {
+        for (out_margin, want) in [([0, 0, 0, 0], 20_000.0), ([300, 200, 0, 0], 20_500.0)] {
+            let mut shape = text_box_rect(Vec::new(), "TOP");
+            shape.out_margin = out_margin;
+            let mut p = shape_para(shape);
+            p.runs[0].content.push(Inline::Text("가나".into()));
+            let doc = shape_doc(vec![Block::Paragraph(p)]);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let first = placed.pages[0]
+                .glyphs
+                .iter()
+                .find(|g| g.ch == '가')
+                .expect("도형 뒤 글자");
+            assert!(
+                (first.x - want).abs() < 1e-6,
+                "바깥 여백 {out_margin:?}: 첫 글자 x {} ≠ {want}",
+                first.x
+            );
+        }
     }
 
     /// 글상자 본문은 세로 정렬을 따른다 — 위 < 가운데 < 아래.
