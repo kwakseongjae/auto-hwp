@@ -4152,13 +4152,101 @@ pub(crate) mod tests {
         }
     }
 
+    /// #543 PR-2 — 캡션 있는 표 하나를 `edit` 로 고쳐 저장한 `(패키지, section0.xml)` 와 고치기 전 캡션.
+    fn save_captioned_table(
+        attrs: &str,
+        edit: impl Fn(&mut Table),
+    ) -> (Vec<u8>, String, TableCaption) {
+        let section = captioned_table_xml(attrs, "");
+        let bytes = build_test_hwpx(&[
+            ("mimetype", b"application/hwp+zip"),
+            ("Contents/header.xml", b"<hh:head></hh:head>"),
+            ("Contents/section0.xml", section.as_bytes()),
+        ]);
+        let mut doc = parse_semantic(&bytes).expect("parse test hwpx");
+        let before = first_table(&doc.sections[0].blocks)
+            .caption
+            .clone()
+            .expect("캡션");
+        let sec = &mut doc.sections[0];
+        sec.dirty.mark();
+        let t = sec
+            .blocks
+            .iter_mut()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("표");
+        t.dirty.mark();
+        edit(t);
+        let out = crate::serialize::serialize(&doc).expect("serialize");
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(out.clone())).unwrap();
+        let mut xml = String::new();
+        std::io::Read::read_to_string(&mut z.by_name("Contents/section0.xml").unwrap(), &mut xml)
+            .unwrap();
+        (out, xml, before)
+    }
+
+    /// 캡션 비교 열쇠 — 위치 · 간격 · 너비 · 최대 너비 · fullSz · 글.
+    fn caption_key(c: &TableCaption) -> (TableCaptionPosition, i32, i32, i32, bool, String) {
+        (
+            c.position,
+            c.spacing,
+            c.width,
+            c.max_width,
+            c.include_margin,
+            block_text(&c.blocks),
+        )
+    }
+
+    const TOP_CAPTION: &str = r#"side="TOP" fullSz="0" width="8504" gap="850" lastWidth="48047""#;
+
+    /// #543 PR-2 — 칸 글만 고친 표(칸 조각 고치기 경로)와 행 · 열 구조를 고친 표(구조 다시 쓰기 경로)는 캡션을
+    /// 원본 바이트 그대로 둔다 — 하나만 · 빠짐없이. 가장 흔한 고침(칸 채우기)이 캡션을 잃거나 둘로 만들면 안 된다.
+    #[test]
+    fn cell_and_structural_edits_keep_the_caption_bytes() {
+        let original = captioned_table_xml(TOP_CAPTION, "");
+        let open = original.find("<hp:caption ").unwrap();
+        let close = original.find("</hp:caption>").unwrap() + "</hp:caption>".len();
+        let caption_bytes = &original[open..close];
+        let set_cell_text = |t: &mut Table| {
+            let cell = &mut t.cells[0];
+            let Some(Block::Paragraph(p)) = cell.blocks.first_mut() else {
+                panic!("칸 문단")
+            };
+            p.runs[0].content = vec![Inline::Text("칸 고침".into())];
+            p.dirty.mark();
+            cell.dirty.mark();
+        };
+        for structural in [false, true] {
+            let name = if structural { "구조" } else { "칸 글" };
+            let (out, xml, before) = save_captioned_table(TOP_CAPTION, |t| {
+                set_cell_text(t);
+                t.structure_edited = structural;
+            });
+            assert!(xml.contains("칸 고침"), "{name}: 칸 글을 고쳤다: {xml}");
+            assert_eq!(xml.matches("<hp:caption ").count(), 1, "{name}: {xml}");
+            assert!(
+                xml.contains(caption_bytes),
+                "{name}: 캡션 바이트 그대로: {xml}"
+            );
+            let reread = parse_semantic(&out).expect("다시 읽기");
+            let after = first_table(&reread.sections[0].blocks)
+                .caption
+                .clone()
+                .expect("다시 읽은 캡션");
+            assert_eq!(caption_key(&after), caption_key(&before), "{name}");
+        }
+    }
+
     /// #543 PR-2 — 캡션이 있는 표를 통째로 다시 쓰면(열 너비 편집) `<hp:caption>` 이 OWPML 자리(바깥 여백 다음 ·
     /// 안 여백 앞)에 같은 속성 · 글로 써지고, 다시 읽으면 같은 캡션이다. 예전에는 캡션이 빠졌다.
     #[test]
     fn a_rewritten_tables_caption_is_written_back() {
         for (attrs, written) in [
             (
-                r#"side="TOP" fullSz="0" width="8504" gap="850" lastWidth="48047""#,
+                TOP_CAPTION,
                 r#"<hp:caption side="TOP" fullSz="0" width="8504" gap="850" lastWidth="48047">"#,
             ),
             (
@@ -4166,38 +4254,10 @@ pub(crate) mod tests {
                 r#"<hp:caption side="LEFT" fullSz="1" width="3000" gap="300" lastWidth="9000">"#,
             ),
         ] {
-            let section = captioned_table_xml(attrs, "");
-            let bytes = build_test_hwpx(&[
-                ("mimetype", b"application/hwp+zip"),
-                ("Contents/header.xml", b"<hh:head></hh:head>"),
-                ("Contents/section0.xml", section.as_bytes()),
-            ]);
-            let mut doc = parse_semantic(&bytes).expect("parse test hwpx");
-            let before = first_table(&doc.sections[0].blocks)
-                .caption
-                .clone()
-                .expect("캡션");
-            let sec = &mut doc.sections[0];
-            sec.dirty.mark();
-            let t = sec
-                .blocks
-                .iter_mut()
-                .find_map(|b| match b {
-                    Block::Table(t) => Some(t),
-                    _ => None,
-                })
-                .expect("표");
-            t.col_widths = vec![18_000];
-            t.geometry_edited = true;
-            t.dirty.mark();
-            let out = crate::serialize::serialize(&doc).expect("serialize");
-            let mut z = zip::ZipArchive::new(std::io::Cursor::new(out.clone())).unwrap();
-            let mut xml = String::new();
-            std::io::Read::read_to_string(
-                &mut z.by_name("Contents/section0.xml").unwrap(),
-                &mut xml,
-            )
-            .unwrap();
+            let (out, xml, before) = save_captioned_table(attrs, |t| {
+                t.col_widths = vec![18_000];
+                t.geometry_edited = true;
+            });
             assert!(
                 xml.contains(r#"<hp:cellSz width="18000""#),
                 "표를 통째로 다시 썼다: {xml}"
@@ -4221,24 +4281,7 @@ pub(crate) mod tests {
             let reread = parse_semantic(&out).expect("다시 읽기");
             let blocks = &reread.sections[0].blocks;
             let after = first_table(blocks).caption.clone().expect("다시 읽은 캡션");
-            assert_eq!(
-                (
-                    after.position,
-                    after.spacing,
-                    after.width,
-                    after.max_width,
-                    after.include_margin,
-                    block_text(&after.blocks)
-                ),
-                (
-                    before.position,
-                    before.spacing,
-                    before.width,
-                    before.max_width,
-                    before.include_margin,
-                    block_text(&before.blocks)
-                ),
-            );
+            assert_eq!(caption_key(&after), caption_key(&before));
             assert!(
                 !block_text(blocks).contains("캡션 글"),
                 "본문 흐름에 섞이지 않는다"
