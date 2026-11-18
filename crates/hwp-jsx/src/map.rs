@@ -402,6 +402,9 @@ mod shape_serde {
         page_break_before: bool,
         numbering_id: u16,
         border_fill_id: u16,
+        /// #557 — an explicit 0% line spacing. Absent in older projects → `false` ("not set").
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        zero_line_spacing: bool,
     }
 
     impl From<&ParaShape> for ParaShapeSerde {
@@ -424,6 +427,7 @@ mod shape_serde {
                 page_break_before: s.page_break_before,
                 numbering_id: s.numbering_id,
                 border_fill_id: s.border_fill_id,
+                zero_line_spacing: s.zero_line_spacing,
             }
         }
     }
@@ -480,6 +484,7 @@ mod shape_serde {
                 page_break_before: s.page_break_before,
                 numbering_id: s.numbering_id,
                 border_fill_id: s.border_fill_id,
+                zero_line_spacing: s.zero_line_spacing,
             }
         }
     }
@@ -525,6 +530,12 @@ mod tests {
         };
         let back = decls_to_para_shape(&para_shape_to_decls(&s));
         assert_eq!(back, s);
+        // #557 — 0% 표지도 왕복한다.
+        let zero = ParaShape {
+            zero_line_spacing: true,
+            ..Default::default()
+        };
+        assert_eq!(decls_to_para_shape(&para_shape_to_decls(&zero)), zero);
     }
 
     #[test]

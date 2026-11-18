@@ -1875,9 +1875,10 @@ pub fn layout_paragraph(
     }
     let n = chars.len();
     let adv = |i: usize| advs[i];
-    let percent_spacing = doc.para_shapes.get(p.para_shape).is_some_and(|s| {
-        s.line_spacing_type == LineSpacingType::Percent && s.line_spacing_value > 0
-    });
+    let percent_spacing = doc
+        .para_shapes
+        .get(p.para_shape)
+        .is_some_and(|s| percent_ratio(s).is_some());
 
     if n == 0 {
         // An empty paragraph still occupies one line — height = the object's if it anchors one.
@@ -2209,15 +2210,28 @@ pub(crate) fn line_leading(line: &LineSeg, ratio: f64) -> f64 {
     line_advance(line, ratio) - line.vert_size
 }
 
-/// A paragraph's line-spacing ratio for [`line_advance`] — percent spacing as a ratio, else the default
-/// 160%. Public so a caller that walks laid-out lines (caret geometry) advances them the way placement does.
-pub fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
-    match doc.para_shapes.get(p.para_shape) {
-        Some(s) if s.line_spacing_type == LineSpacingType::Percent && s.line_spacing_value > 0 => {
-            s.line_spacing_value as f64 / 100.0
-        }
-        _ => DEFAULT_LINESPACE,
+/// A paragraph shape's percent line spacing as a ratio, when it has one: a set percent value, or an
+/// explicit 0% (#557 — not "unset"). `None` = not percent spacing, or no value.
+fn percent_ratio(s: &ParaShape) -> Option<f64> {
+    if s.line_spacing_type != LineSpacingType::Percent {
+        return None;
     }
+    if s.line_spacing_value > 0 {
+        Some(s.line_spacing_value as f64 / 100.0)
+    } else if s.zero_line_spacing {
+        Some(0.0)
+    } else {
+        None
+    }
+}
+
+/// A paragraph's line-spacing ratio for [`line_advance`] — its percent spacing (an explicit 0% included, #557), else the default 160%.
+/// Public so a caller that walks laid-out lines (caret geometry) advances them the way placement does.
+pub fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
+    doc.para_shapes
+        .get(p.para_shape)
+        .and_then(percent_ratio)
+        .unwrap_or(DEFAULT_LINESPACE)
 }
 
 /// Placeholder metrics provider (flat ~0.5em). Prefer [`ApproxFontMetrics`] (per-script).
@@ -3119,6 +3133,37 @@ mod tests {
         assert!(
             (h - 29_196.0).abs() < 1.0,
             "칸 문단 높이 {h} — 그림 29,196 그대로여야 한다"
+        );
+    }
+
+    /// #557 — 표지가 있는 0% 문단은 줄 진행이 0 이다(한글 저장: 간격 = −줄 높이 → 다음 문단이 같은 자리 —
+    /// 공개 코퍼스 `hwpxlib_corpus/error/20250808/…재난안전…hwpx` 의 출처 줄 · 빈 줄). 표지 없는 0 은 예전처럼
+    /// 기본 160% 다.
+    #[test]
+    fn an_explicit_zero_percent_line_advances_nothing_and_an_unset_zero_keeps_the_default() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape {
+            height: 1_200,
+            ..Default::default()
+        });
+        doc.para_shapes.push(ParaShape {
+            zero_line_spacing: true,
+            ..Default::default()
+        });
+        doc.para_shapes.push(ParaShape::default());
+        let mut p = para("자료제공 : 기관");
+        let lines = layout_paragraph(&p, &doc, 40_000.0, &ApproxFontMetrics);
+        assert_eq!(line_spacing_ratio(&p, &doc), 0.0);
+        assert_eq!(
+            line_advance(&lines[0], 0.0),
+            0.0,
+            "0% 줄은 자리를 차지하지 않는다"
+        );
+        p.para_shape = 1;
+        assert_eq!(
+            line_spacing_ratio(&p, &doc),
+            DEFAULT_LINESPACE,
+            "표지 없는 0 은 값 없음"
         );
     }
 }
