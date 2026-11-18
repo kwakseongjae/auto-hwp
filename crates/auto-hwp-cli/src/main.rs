@@ -10,6 +10,7 @@ mod fill;
 mod font_registry;
 mod inspect_layout;
 mod layout_score;
+mod page_starts;
 mod xlsx_roster;
 use hwp_model::types::SourceFormat;
 
@@ -194,6 +195,12 @@ enum Cmd {
         /// 같은 방식이다. 진단 전용 — 오라클 점수·baseline 은 건드리지 않는다.
         #[arg(long, conflicts_with_all = ["rows", "cells", "pages", "json"])]
         rendered: bool,
+        /// 쪽이 **어디서** 시작하는가 — 우리 흐름 vs 파일에 저장된 줄 배치(lineseg). 쪽 수는 우연히
+        /// 맞을 수 있다(여기서 한 쪽 더, 저기서 한 쪽 덜). 줄마다 「저장 배치가 여기서 쪽을 넘기는가 ·
+        /// 우리도 넘기는가」를 맞대서 같은 줄 수 · 최대 어긋남(쪽)을 낸다. 쪽을 넘는 표는 양쪽 다 한 번으로
+        /// 센다. 다단 문서는 재지 않는다. `--json` 이면 파일마다 JSON.
+        #[arg(long, conflicts_with_all = ["rows", "cells", "pages", "rendered"])]
+        page_starts: bool,
         /// JSON array of per-file scores (issue #72 corpus sweep). No cell text. Incompatible with
         /// `--rows`/`--cells`.
         #[arg(long)]
@@ -366,8 +373,11 @@ fn run() -> Result<(), String> {
             every_cell,
             pages,
             rendered,
+            page_starts,
         } => {
-            if rendered {
+            if page_starts {
+                page_starts::run(&files, json)?;
+            } else if rendered {
                 if files.len() != 1 {
                     return Err("--rendered takes one file".into());
                 }

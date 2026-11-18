@@ -1903,6 +1903,234 @@ pub struct RowAudit {
     pub delta: f64,
 }
 
+/// Where pages start: OUR engine vs the layout **stored in the file** (`<hp:lineseg>` / HWP5
+/// `PARA_LINE_SEG`) — a per-document measurement for pagination work (`layout-check --page-starts`).
+///
+/// Page indices do not line up by themselves: a page break INSIDE a table that spans pages leaves no
+/// mark on body lines (one public document stores 62 vertpos resets for 76 pages). So this compares
+/// page-break **events** between consecutive body lines instead:
+///
+/// - stored: the paragraph starts with a 쪽 나누기 / 구역 나누기 (Hangul honours each one, even on a page
+///   that holds only a floating object), or its `vertpos` is smaller than the previous line's and in
+///   the top half of the body (empty lines Hangul hides at a page's foot keep odd positions there), or
+///   the previous line hosts an in-flow table that cannot fit the rest of the body from where it starts.
+///   Equal positions are not a break: 0% lines and hidden empty lines share one spot;
+/// - ours: the next line lands on a later page ([`hwp_typeset::block_line_pages`] — the same walk as
+///   placement). A table anchor counts at the page its table starts on, like the stored host line.
+///
+/// A table is one event on each side however many pages it spans. A stored paragraph's line `l` pairs
+/// with our line `min(l, n − 1)`. Paragraphs without stored lines are skipped on both sides.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PageStartAlignment {
+    /// Page-break events in the stored layout (≈ stored pages − 1, tables counted once).
+    pub stored_breaks: usize,
+    /// Our page-break events over the same lines.
+    pub our_breaks: usize,
+    /// Stored page breaks we make at the same line.
+    pub matched: usize,
+    /// Largest |our events − stored events| so far, over all lines — how many pages ahead or behind
+    /// our flow ever runs.
+    pub max_drift: usize,
+    /// The stored page (1-based) at whose start the counts first differ; `None` when they never do.
+    pub first_drift_page: Option<usize>,
+    /// Body lines compared (stored lines of paired paragraphs).
+    pub lines: usize,
+    /// Pages in our flow (the walk's last page + 1).
+    pub our_pages: usize,
+    /// Every line where either side breaks the page, in order — positions only, no text.
+    pub events: Vec<PageBreakEvent>,
+    /// Why the document was not measured (`multi-column`: column breaks also reset vertpos;
+    /// `no-stored-layout`: no stored line positions).
+    pub skipped: Option<&'static str>,
+}
+
+/// One body line where the stored layout, our flow, or both start a new page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageBreakEvent {
+    /// Section, top-level paragraph (counting paragraphs only) and stored line within it.
+    pub section: usize,
+    pub paragraph: usize,
+    pub line: usize,
+    pub stored: bool,
+    pub ours: bool,
+}
+
+/// [`PageStartAlignment`] for a document whose OUR side is the rhwp lift (`.hwp`).
+#[cfg(feature = "rhwp")]
+pub fn page_start_alignment(bytes: &[u8]) -> Result<PageStartAlignment> {
+    let our = guarded("page_start_alignment/lift", || {
+        lift::parse_to_semantic(bytes)
+    })?;
+    page_start_alignment_inner(bytes, &our, AnchorOrder::AnchorFirst)
+}
+
+/// [`PageStartAlignment`] for a [`SemanticDoc`] from the production HWPX parser.
+#[cfg(feature = "rhwp")]
+pub fn page_start_alignment_for_doc(bytes: &[u8], our: &SemanticDoc) -> Result<PageStartAlignment> {
+    page_start_alignment_inner(bytes, our, AnchorOrder::TablesFirst)
+}
+
+/// Where a table anchor paragraph sits relative to its tables: the rhwp lift emits `[anchor, Table…]`,
+/// the HWPX parser `[Table…, anchor]` (byte-preserving order — see `hwp_typeset::section_page_breaks`).
+#[cfg(feature = "rhwp")]
+#[derive(Clone, Copy)]
+enum AnchorOrder {
+    AnchorFirst,
+    TablesFirst,
+}
+
+#[cfg(feature = "rhwp")]
+fn page_start_alignment_inner(
+    bytes: &[u8],
+    our: &SemanticDoc,
+    order: AnchorOrder,
+) -> Result<PageStartAlignment> {
+    use rhwp::model::control::Control;
+    use rhwp::model::shape::{TextWrap, VertRelTo};
+
+    let rdoc = guarded("page_start_alignment/parse_document", || {
+        rhwp::parse_document(bytes).map_err(|e| Error::Parse(e.to_string()))
+    })?;
+    #[cfg(feature = "shaper")]
+    let fonts = hwp_typeset::RealFontMetrics::new();
+    #[cfg(not(feature = "shaper"))]
+    let fonts = hwp_typeset::ApproxFontMetrics;
+
+    let mut out = PageStartAlignment::default();
+    let Some(pages) = hwp_typeset::block_line_pages(our, &fonts) else {
+        out.skipped = Some("multi-column");
+        return Ok(out);
+    };
+    // A multi-column section resets vertpos at each column too.
+    let multi_column = rdoc.sections.iter().any(|sec| {
+        sec.paragraphs.iter().any(|p| {
+            p.column_type == rhwp::model::paragraph::ColumnBreakType::MultiColumn
+                || p.controls
+                    .iter()
+                    .any(|c| matches!(c, Control::ColumnDef(cd) if cd.column_count > 1))
+        })
+    });
+    if multi_column {
+        out.skipped = Some("multi-column");
+        return Ok(out);
+    }
+    // (vertpos, does it host a table that cannot fit from there, our page)
+    let mut prev: Option<(i32, bool, usize)> = None;
+    let mut drift: i64 = 0;
+    for (si, ((rsec, osec), sec_pages)) in rdoc
+        .sections
+        .iter()
+        .zip(&our.sections)
+        .zip(&pages)
+        .enumerate()
+    {
+        let (_, _, _, body_h) = hwp_typeset::body_box(&osec.page);
+        let ours: Vec<(usize, &Paragraph)> = osec
+            .blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(bi, b)| match b {
+                Block::Paragraph(p) => Some((bi, p)),
+                Block::Table(_) => None,
+            })
+            .collect();
+        for (pi, (rp, &(bi, op))) in rsec.paragraphs.iter().zip(&ours).enumerate() {
+            let stored: Vec<&rhwp::model::paragraph::LineSeg> = rp
+                .line_segs
+                .iter()
+                .filter(|ls| !ls.is_missing_lineseg_placeholder() && ls.tag & 0x8000_0000 == 0)
+                .collect();
+            if stored.is_empty() {
+                continue;
+            }
+            // Our pages for this paragraph's lines. A table anchor stands at the page its first table
+            // starts on, like the stored host line (whose position is the table's).
+            let line_pages: Vec<usize> = if op.is_table_anchor {
+                let first_table = match order {
+                    AnchorOrder::AnchorFirst => (bi + 1 < osec.blocks.len()
+                        && matches!(osec.blocks[bi + 1], Block::Table(_)))
+                    .then_some(bi + 1),
+                    AnchorOrder::TablesFirst => {
+                        let mut first = bi;
+                        while first > 0 && matches!(osec.blocks[first - 1], Block::Table(_)) {
+                            first -= 1;
+                        }
+                        (first < bi).then_some(first)
+                    }
+                };
+                vec![sec_pages[first_table.unwrap_or(bi)][0]]
+            } else {
+                sec_pages[bi].clone()
+            };
+            // An in-flow table that cannot fit the rest of the body from where it starts breaks the
+            // page inside itself — the stored body lines alone do not show it.
+            let table_overflows = |vpos: i32| {
+                rp.controls.iter().any(|c| match c {
+                    Control::Table(t) => {
+                        let c = &t.common;
+                        let in_flow = c.treat_as_char
+                            || (matches!(c.text_wrap, TextWrap::TopAndBottom | TextWrap::Square)
+                                && c.vert_rel_to == VertRelTo::Para);
+                        let top = vpos as f64
+                            + if c.treat_as_char {
+                                0.0
+                            } else {
+                                c.vertical_offset as f64
+                            };
+                        in_flow && top + c.height as f64 > body_h + 1.0
+                    }
+                    _ => false,
+                })
+            };
+            for (l, ls) in stored.iter().enumerate() {
+                let page = line_pages[l.min(line_pages.len() - 1)];
+                let hosts_overflow = l == 0 && table_overflows(ls.vertical_pos);
+                if let Some((pv, p_overflow, pp)) = prev {
+                    use rhwp::model::paragraph::ColumnBreakType;
+                    let forced = l == 0
+                        && matches!(
+                            rp.column_type,
+                            ColumnBreakType::Page | ColumnBreakType::Section
+                        );
+                    let reset = ls.vertical_pos < pv && f64::from(ls.vertical_pos) < body_h / 2.0;
+                    let stored_break = forced || reset || p_overflow;
+                    let our_break = page > pp;
+                    out.stored_breaks += usize::from(stored_break);
+                    out.our_breaks += usize::from(our_break);
+                    out.matched += usize::from(stored_break && our_break);
+                    if stored_break || our_break {
+                        out.events.push(PageBreakEvent {
+                            section: si,
+                            paragraph: pi,
+                            line: l,
+                            stored: stored_break,
+                            ours: our_break,
+                        });
+                    }
+                    drift += i64::from(our_break) - i64::from(stored_break);
+                    if drift != 0 && out.first_drift_page.is_none() {
+                        out.first_drift_page = Some(out.stored_breaks + 1);
+                    }
+                    out.max_drift = out.max_drift.max(drift.unsigned_abs() as usize);
+                }
+                out.lines += 1;
+                prev = Some((ls.vertical_pos, hosts_overflow, page));
+            }
+        }
+    }
+    out.our_pages = pages
+        .iter()
+        .flatten()
+        .flatten()
+        .copied()
+        .max()
+        .map_or(0, |last| last + 1);
+    if out.lines == 0 {
+        out.skipped = Some("no-stored-layout");
+    }
+    Ok(out)
+}
+
 /// A table's full row-by-row audit (issue 020 standing diagnostic).
 #[derive(Clone, Debug, Default)]
 pub struct TableRowAuditReport {
@@ -2124,6 +2352,19 @@ pub fn layout_fidelity(_bytes: &[u8]) -> Result<LayoutFidelity> {
 
 #[cfg(not(feature = "rhwp"))]
 pub fn layout_fidelity_for_doc(_bytes: &[u8], _our: &SemanticDoc) -> Result<LayoutFidelity> {
+    Err(Error::CapabilityUnavailable(NOT_WIRED))
+}
+
+#[cfg(not(feature = "rhwp"))]
+pub fn page_start_alignment(_bytes: &[u8]) -> Result<PageStartAlignment> {
+    Err(Error::CapabilityUnavailable(NOT_WIRED))
+}
+
+#[cfg(not(feature = "rhwp"))]
+pub fn page_start_alignment_for_doc(
+    _bytes: &[u8],
+    _our: &SemanticDoc,
+) -> Result<PageStartAlignment> {
     Err(Error::CapabilityUnavailable(NOT_WIRED))
 }
 

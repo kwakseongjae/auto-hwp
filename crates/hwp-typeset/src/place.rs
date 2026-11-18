@@ -1005,7 +1005,27 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
     if crate::uses_column_flow(doc) {
         return block_pages_columns(doc, fonts);
     }
-    let mut out: Vec<Vec<usize>> = Vec::with_capacity(doc.sections.len());
+    walk_block_pages(doc, fonts)
+        .into_iter()
+        .map(|sec| sec.into_iter().map(|units| units[0]).collect())
+        .collect()
+}
+
+/// The page of every LINE of each top-level paragraph and the first / last page of each top-level
+/// table — `out[section][block]`: a paragraph's lines in order (one entry for an empty paragraph or a
+/// table anchor), a table's `[start, end]`. The same walk as [`block_pages`] (so the same accounting as
+/// [`place_doc`]); what a measurement needs to say WHERE a page starts, not just which block. `None`
+/// for a multi-column document (its flow breaks columns, not only pages).
+pub fn block_line_pages(
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Option<Vec<Vec<Vec<usize>>>> {
+    (!crate::uses_column_flow(doc)).then(|| walk_block_pages(doc, fonts))
+}
+
+/// The single-column walk behind [`block_pages`] and [`block_line_pages`].
+fn walk_block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Vec<Vec<usize>>> {
+    let mut out: Vec<Vec<Vec<usize>>> = Vec::with_capacity(doc.sections.len());
     let mut page_idx = 0usize; // current (global) page index
     let mut started = false;
     for sec in &doc.sections {
@@ -1034,7 +1054,7 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     // A pure table anchor reserves no height; still record ONE start page (block→page must
                     // stay 1:1) at the current page, then skip. Mirrors NaiveLayout + place_doc.
                     if p.is_table_anchor {
-                        sec_pages.push(page_idx);
+                        sec_pages.push(vec![page_idx]);
                         started = true;
                         continue;
                     }
@@ -1044,7 +1064,7 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     let ratio = line_spacing_ratio(p, doc);
                     let ind = indent_of(p, doc, body_w);
                     let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
-                    let mut recorded = false;
+                    let mut line_pages = Vec::with_capacity(lines.len().max(1));
                     for ls in &lines {
                         // 이슈 302 — `NaiveLayout`·`place_doc` 과 같은 판정을 쓴다(불변식 2).
                         if vert + ls.vert_size > body_h
@@ -1062,15 +1082,13 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                         if ls.horz_size > 0.0 {
                             last_drawn = page_idx; // 이슈 307
                         }
-                        if !recorded {
-                            sec_pages.push(page_idx); // the block starts where its first line lands
-                            recorded = true;
-                        }
+                        line_pages.push(page_idx); // the block starts where its first line lands
                         vert += ls.vert_size * ratio;
                     }
-                    if !recorded {
-                        sec_pages.push(page_idx);
+                    if line_pages.is_empty() {
+                        line_pages.push(page_idx);
                     }
+                    sec_pages.push(line_pages);
                     vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
                     started = true;
                 }
@@ -1134,7 +1152,7 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                         page_idx += 1;
                         vert = 0.0;
                     }
-                    sec_pages.push(page_idx); // the table starts here (where its first row lands)
+                    let table_start = page_idx; // the table starts here (where its first row lands)
                     let repeated_header = if t.repeat_first_row {
                         row_h.first().copied().unwrap_or(0.0)
                     } else {
@@ -1183,6 +1201,7 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     }
                     vert += (t.outer_margin_bottom.max(0) + t.source_anchor_spacing_after.max(0))
                         as f64;
+                    sec_pages.push(vec![table_start, page_idx]);
                     // No trailing page-slice (matches place_doc/NaiveLayout): a leftover over-tall row /
                     // margin spill is resolved by the next block's reserve, so the recorded start pages
                     // stay aligned with place_doc's fragment pages.

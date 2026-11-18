@@ -93,6 +93,15 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 추가 (Added)
 
+- **`auto-hwp layout-check --page-starts` — 쪽이 어디서 시작하는지를 파일에 저장된 줄 배치와 맞댄다 (#559).** 쪽 수는 우연히 맞을 수 있다(여기서
+  한 쪽 더, 저기서 한 쪽 덜). 본문 줄이 이어지는 자리마다 「저장 배치가 여기서 쪽을 넘기는가 · 우리도 넘기는가」를 보고, 같은 줄에서 넘긴 수 ·
+  최대 어긋남(쪽) · 처음 어긋난 저장 쪽을 낸다(`--json` 이면 파일마다 JSON, 한 파일이면 어긋난 자리 목록). 저장 쪽 나눔은 쪽 나누기 ·
+  구역 나누기, 본문 위쪽으로 되돌아간 줄 위치, 남은 높이에 안 들어가는 표로 센다 — 쪽을 넘는 표는 양쪽 다 한 번으로 센다. 다단 문서는
+  재지 않는다. 라이브러리: `hwp_rhwp::page_start_alignment(_for_doc)` · `hwp_typeset::block_line_pages`(`--features rhwp`).
+  *(EN — Added: `layout-check --page-starts` compares where pages start in our flow with the layout stored in the file
+  (page-break events per body line: matched breaks, largest drift in pages, first drifting stored page). Multi-column documents are
+  skipped. Library: `hwp_rhwp::page_start_alignment(_for_doc)`, `hwp_typeset::block_line_pages`.)*
+
 - **`hwp_rhwp::scope_svg_ids(svg, prefix)` · `hwp_rhwp::render_document_svgs(bytes, scope)`.** 앞의 것은 조각이 정의한 id 와 태그 안 참조
   (`url(#X)` · `href="#X"` · `xlink:href="#X"`)에만 접두를 붙인다(정의 안 된 참조 · data URI · `data-id` · 글자 데이터는 그대로). 뒤의 것은
   한 번 파싱으로 모든 쪽을 그려 `{scope}p{N}-` 로 범위를 나눈다(`--features rhwp`, 패닉은 오류로 바뀐다). 여러 쪽 SVG 를 한 문서에 넣는 호스트
