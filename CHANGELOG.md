@@ -42,6 +42,10 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 파괴 변경 (Breaking)
 
+- **`BreakReason::FloatingObject` 변형이 늘었다 (#542).** 떠 있는 「자리 차지」 도형이 남은 자리에 안 들어가 다음 쪽 맨 위로 간
+  쪽 넘김이다. 마이그레이션: `BreakReason` 을 빠짐없이 `match` 하는 코드는 이 팔을 더한다. Rust 크레이트 전용.
+  *(EN — Breaking: new `BreakReason::FloatingObject` variant; exhaustive matches add an arm. Rust only.)*
+
 - **`PlacedPage.undrawn_shapes` 필드가 늘었다 (#558).** 쪽이 품었지만 그리지 않은 도형과 그 이유(`UndrawnShape`)다.
   마이그레이션: `PlacedPage` 를 직접 만드는 코드는 빈 목록을 채운다. Rust 크레이트 전용.
   *(EN — Breaking: new public field `PlacedPage.undrawn_shapes`; code building `PlacedPage` fills an empty list. Rust only.)*
@@ -121,6 +125,23 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   verification gates are unchanged; CLI warning). Dash-wrapped numbers are spaced like Hancom: `- 1 -`.)*
 
 ### 추가 (Added)
+
+- **본문의 떠 있는 글상자(`rect`)를 `<hp:pos>` 자리에 그리고, 문단 기준 「자리 차지」 도형은 흐름을 민다 (#542 의 3단계).**
+  떠 있는 `rect`(글 앞 · 글 뒤 · 어울림 · 위아래)는 앵커 문단이 놓인 쪽에, 가로 종이 · 쪽 · 단 · 문단 · 세로 종이 · 쪽 · 문단 기준으로
+  채움 · 테두리 · 글상자 본문을 그린다 — 흐름 · 쪽 나눔은 움직이지 않는다. 문단 기준 위아래(`TOP_AND_BOTTOM` · `PARA`) 도형은 종류와
+  상관없이 [오프셋, 오프셋 + 바깥 위 + 높이 + 바깥 아래] 띠를 차지한다: 띠에 걸린 글 줄은 띠 아래로 내려가고, 빈 문단의 줄은 띠에 흡수되고,
+  띠가 남은 자리에 안 들어가면 도형은 다음 쪽 맨 위로 간다. 규칙은 한글이 저장한 줄 배치에서 왔는데, 공개 코퍼스의 그런 도형 표본이 하나뿐이라
+  같은 배치의 떠 있는 표 저장 값으로 세웠다. 공개 코퍼스에서 이 규칙으로 쪽 나눔이 바뀐 문서는 없다. 그리지 못하는 떠 있는 도형(묶음 · 타원
+  등 · 모르는 자리 기준)만 `floating-shape-not-drawn` 알림으로 남는다. 아직 하지 않는 것: 종이 · 쪽 기준 위아래와 어울림의 흐름(줄 밀기 ·
+  좁히기), 겹침 순서(채움은 늘 글자 아래), 떠 있는 그림 · 표의 자리. 음수 오프셋(부호 없는 32비트로 쓴 값)은 이제 음수로 읽는다.
+  라이브러리: `hwp_typeset::floating_flow_band` · `float_band_plan` · `FloatBand` · `FloatBandPlan`(조판 걸음과 캐럿이 함께 쓰는 계획).
+  *(EN — Added: floating text-box rectangles are drawn at their `<hp:pos>` (paper / page / column / paragraph), without moving
+  the flow. A paragraph-relative top-and-bottom floating shape of any kind now takes its band: text lines it overlaps go below it,
+  an empty host line is absorbed, and a band that does not fit moves to the next page top. The rule comes from Hangul's stored line
+  layout of the same placement on tables (one shape sample only); no public document paginates differently. Undrawable floating
+  shapes still raise `floating-shape-not-drawn`. Not yet: paper/page-relative top-and-bottom and square wrap flow, z-order, floating
+  pictures/tables. Negative offsets written as unsigned 32-bit now read negative. Library: `hwp_typeset::floating_flow_band`,
+  `float_band_plan`, `FloatBand`, `FloatBandPlan`.)*
 
 - **본문의 글자처럼 취급 글상자(`rect`)를 자체 조판 · 쪽 SVG · PDF 에 그린다 (#558, #542 의 2단계).** 채움 · 테두리 · 글상자 본문
   (세로 정렬)을 그린다. 글자처럼 취급 도형은 모든 종류가 줄 자리를 갖는다 — 한글이 저장한 호스트 줄 높이가 도형 높이다(공개 코퍼스
