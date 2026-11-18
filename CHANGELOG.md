@@ -42,6 +42,10 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 파괴 변경 (Breaking)
 
+- **`PlacedPage.undrawn_shapes` 필드가 늘었다 (#558).** 쪽이 품었지만 그리지 않은 도형과 그 이유(`UndrawnShape`)다.
+  마이그레이션: `PlacedPage` 를 직접 만드는 코드는 빈 목록을 채운다. Rust 크레이트 전용.
+  *(EN — Breaking: new public field `PlacedPage.undrawn_shapes`; code building `PlacedPage` fills an empty list. Rust only.)*
+
 - **`ParaShape.zero_line_spacing` 필드가 늘었다 (#557).** HWPX 머리말이 퍼센트 0 을 명시했는지다(값 없는 0 과 가른다).
   마이그레이션: `ParaShape` 를 필드를 다 적어 만드는 코드는 `false` 를 채운다. 프로젝트 JSON 의 문단 모양에는 켜졌을 때만
   `zero_line_spacing: true` 가 실린다(생략 = 아님). Rust 크레이트 전용.
@@ -117,6 +121,14 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   verification gates are unchanged; CLI warning). Dash-wrapped numbers are spaced like Hancom: `- 1 -`.)*
 
 ### 추가 (Added)
+
+- **본문의 글자처럼 취급 글상자(`rect`)를 자체 조판 · 쪽 SVG · PDF 에 그린다 (#558, #542 의 2단계).** 채움 · 테두리 · 글상자 본문
+  (세로 정렬)을 그린다. 글자처럼 취급 도형은 모든 종류가 줄 자리를 갖는다 — 한글이 저장한 호스트 줄 높이가 도형 높이다(공개 코퍼스
+  21줄 모두). 그런 도형이 있는 문서는 쪽 나눔이 달라진다. 아직 그리지 않는 도형(묶음 개체 · 타원 등 · 떠 있는 도형 · 본문에 표가 든
+  글상자)은 조용히 빠지지 않고 PDF 알림 `text-box`(`PdfExport.notices`, 쪽마다 이유별 한 건)와 CLI 경고 한 줄로 알린다.
+  *(EN — Added: inline (treat-as-char) text-box rectangles are drawn — fill, outline and body with its vertical alignment. Every
+  inline shape now takes its line space, as Hangul stores it, so such documents paginate differently. Shapes not drawn yet are
+  reported as `text-box` notices and one CLI warning.)*
 
 - **`auto-hwp layout-check --page-starts` — 쪽이 어디서 시작하는지를 파일에 저장된 줄 배치와 맞댄다 (#559).** 쪽 수는 우연히 맞을 수 있다(여기서
   한 쪽 더, 저기서 한 쪽 덜). 본문 줄이 이어지는 자리마다 「저장 배치가 여기서 쪽을 넘기는가 · 우리도 넘기는가」를 보고, 같은 줄에서 넘긴 수 ·
