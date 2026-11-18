@@ -1717,7 +1717,12 @@ fn place_paragraph(
         }
         Some(crate::FloatBandPlan::NextPage { height }) => {
             new_page(pages, page);
-            spill = Some((pages.len() - 1, mt));
+            spill = Some(FloatSpill {
+                page: pages.len() - 1,
+                top: mt,
+                column: (ml, body_w),
+                para: (ml + ind.left, ind.wrap_w),
+            });
             *vert = height;
             *last_drawn = pages.len() - 1;
         }
@@ -1868,7 +1873,14 @@ fn place_paragraph_columns(
             if flow.advance_column() {
                 new_page(pages, page);
             }
-            spill = Some((pages.len() - 1, mt + flow.y()));
+            // The NEXT column's box (after `advance_column`) — not the anchor's.
+            let next = flow.box_now();
+            spill = Some(FloatSpill {
+                page: pages.len() - 1,
+                top: mt + flow.y(),
+                column: (ml + next.x, next.width),
+                para: (ml + next.x + ind.left, ind.wrap_w),
+            });
             flow.add(height);
         }
         _ => {}
@@ -4069,6 +4081,18 @@ struct FloatFrame {
     para_top: f64,
 }
 
+/// Where a paragraph-relative 「자리 차지」 도형 goes when [`crate::FloatBandPlan::NextPage`] moved its band:
+/// the page, the page y its band starts at, and the column / paragraph boxes there — in multi-column flow
+/// that is the NEXT column, not the anchor's (#565 리뷰 r2: drawing it in the anchor's column covered that
+/// column's text).
+#[derive(Clone, Copy, Debug)]
+struct FloatSpill {
+    page: usize,
+    top: f64,
+    column: (f64, f64),
+    para: (f64, f64),
+}
+
 /// One floating 도형's box on its page (HWPUNIT, page-top-left origin), from its `<hp:pos>` — or `None`
 /// for a placement token not handled (then it is not drawn and the page says so).
 ///
@@ -4112,8 +4136,8 @@ fn floating_box(
 /// Draw the floating 도형 (`treatAsChar="0"`) paragraph `p` anchors, on the page its first line is on
 /// (`anchor_page`), at their `<hp:pos>` (#542 PR-3) — a `rect` like a 글자처럼 취급 one (fill, outline,
 /// 글상자 body), but over or under the text without moving it (a 「자리 차지」 one's room is
-/// [`crate::float_band_plan`]'s). When the plan moved that room to the next page (`spill` = that page and
-/// its body top), a 「자리 차지」 paragraph-relative shape is drawn there, its offset dropped.
+/// [`crate::float_band_plan`]'s). When the plan moved that room to the next page or column (`spill`), a
+/// 「자리 차지」 paragraph-relative shape is drawn there — that column's box, its offset dropped.
 ///
 /// What is not drawn is recorded on the anchor page (`floating-shape-not-drawn`): another kind than
 /// `rect` (a group, an ellipse, …), a placement token not handled, or a wrap whose text flow is not laid
@@ -4125,7 +4149,7 @@ fn place_floating_shapes(
     p: &Paragraph,
     anchor_page: usize,
     frame: FloatFrame,
-    spill: Option<(usize, f64)>,
+    spill: Option<FloatSpill>,
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
     section: usize,
@@ -4140,10 +4164,12 @@ fn place_floating_shapes(
         }
         let pushes_flow = shape.text_wrap == "TOP_AND_BOTTOM" && shape.vert_rel_to == "PARA";
         let (page_idx, frame) = match spill {
-            Some((spilled, top)) if pushes_flow => (
-                spilled,
+            Some(to) if pushes_flow => (
+                to.page,
                 FloatFrame {
-                    para_top: top - shape.vert_offset as f64,
+                    column: to.column,
+                    para: to.para,
+                    para_top: to.top - shape.vert_offset as f64,
                     ..frame
                 },
             ),
@@ -9292,5 +9318,135 @@ mod tests {
             (42_500.0, 67_300.0)
         );
         assert_eq!(at(shape("PARA", "LEFT", "PARA", "TOP")), (3_500.0, 4_700.0));
+    }
+
+    /// 두 단(27,000 · 간격 2,000 · 27,000 — 본문 폭에 맞춰 늘어난다) — 떠 있는 도형 시험용.
+    fn two_columns() -> ColumnLayout {
+        ColumnLayout {
+            widths: vec![27_000, 27_000],
+            gaps: vec![2_000],
+            ..ColumnLayout::default()
+        }
+    }
+
+    /// #565 리뷰 r2 — 다단에서 띠가 남은 단 높이에 안 들어가 다음 **단**으로 가면(NextPage), 도형은 그 단의
+    /// x · 폭으로 그 단 맨 위에 그린다. 원래 단의 글(앞 문단 · 호스트 글)을 덮지 않는다.
+    #[test]
+    fn a_band_moved_to_the_next_column_is_drawn_in_that_column() {
+        let mut lead = para(&["나"; 6].join("\n"));
+        lead.column_layout_before = Some(two_columns());
+        let mut shape = floating_shape("TOP_AND_BOTTOM", "PARA", 0, 17_000, 0);
+        shape.fill = Color::from_hex("#FFFFFF");
+        let mut doc = shape_doc(vec![
+            Block::Paragraph(lead),
+            Block::Paragraph(floating_para(shape, "가")),
+            Block::Paragraph(para("끝")),
+        ]);
+        doc.sections[0].page.height = 26_000;
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 1, "다음 단(같은 쪽)으로 간다");
+        let page = &placed.pages[0];
+        let fills: Vec<_> = page.rects.iter().filter(|r| r.fill.is_some()).collect();
+        assert_eq!(fills.len(), 1);
+        let second = crate::column_boxes(&two_columns(), 60_000.0)[1];
+        assert_eq!((fills[0].x, fills[0].y), (second.x, 0.0), "둘째 단 맨 위");
+        let host = page
+            .glyphs
+            .iter()
+            .find(|g| g.ch == '가')
+            .expect("호스트 글");
+        assert!(host.x < 27_000.0, "호스트 글은 첫 단에 남는다");
+        let end = page.glyphs.iter().find(|g| g.ch == '끝').expect("끝");
+        assert!(
+            end.x >= 29_000.0 && end.baseline > 17_000.0,
+            "「끝」은 둘째 단의 띠 아래"
+        );
+    }
+
+    /// #565 리뷰 1 · r2 — 성질 시험(결정적 의사 난수): 한 단 · 두 단, 앞 문단 줄 수, 띠의 오프셋 · 높이, 호스트가
+    /// 빈 문단인지 글 문단인지, 뒤 문단 수, 쪽 높이를 바꿔 가며 놓고 둘을 단언한다.
+    /// 1. 그려진 문단 기준 위아래 도형의 상자는 같은 쪽의 본문 글리프와 겹치지 않는다(띠가 글을 비켜 놓으므로).
+    /// 2. 그 상자는 한 단(한 단 흐름이면 본문 상자) 안에 있고 본문 위보다 아래에서 시작한다.
+    ///
+    /// 리뷰어가 퍼징으로 찾은 두 구멍(밀린 첫 줄을 따라 쪽을 넘긴 도형 · 다음 단으로 간 도형의 가로)과 다단 길의
+    /// 내린 글 위 그리기(dc56a3c)를 모두 이 시험이 잡는다(되돌려 넣어 확인).
+    #[test]
+    fn drawn_band_shapes_never_cover_body_text_and_stay_in_their_column() {
+        let mut seed: u64 = 0x5eed_0542;
+        let mut next = |n: u64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % n
+        };
+        let mut drawn = 0;
+        for case in 0..600 {
+            let columns = next(2) == 1;
+            let page_h = 20_000 + next(60_000) as i32;
+            let mut blocks = Vec::new();
+            let lead_lines = next(14) as usize;
+            if lead_lines > 0 {
+                blocks.push(Block::Paragraph(para(&vec!["나"; lead_lines].join("\n"))));
+            }
+            let mut shape = floating_shape(
+                "TOP_AND_BOTTOM",
+                "PARA",
+                next(6_000) as i32,
+                1_000 + next(30_000) as i32,
+                next(400) as i32,
+            );
+            shape.fill = Color::from_hex("#FFFFFF");
+            let host_text = ["", "가", "가가가가\n가가", " "][next(4) as usize];
+            blocks.push(Block::Paragraph(floating_para(shape, host_text)));
+            for _ in 0..next(4) {
+                blocks.push(Block::Paragraph(para("다다다\n다")));
+            }
+            if columns {
+                if let Block::Paragraph(first) = &mut blocks[0] {
+                    first.column_layout_before = Some(two_columns());
+                }
+            }
+            let mut doc = shape_doc(blocks);
+            doc.sections[0].page.height = page_h;
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let lanes: Vec<(f64, f64)> = if columns {
+                crate::column_boxes(&two_columns(), 60_000.0)
+                    .iter()
+                    .map(|b| (b.x, b.width))
+                    .collect()
+            } else {
+                vec![(0.0, 60_000.0)]
+            };
+            for (pi, page) in placed.pages.iter().enumerate() {
+                for r in page.rects.iter().filter(|r| r.fill.is_some()) {
+                    drawn += 1;
+                    let ctx = format!(
+                        "case {case}: columns={columns} page_h={page_h} lead={lead_lines} \
+                         host={host_text:?} page {pi} rect ({}, {}) {}x{}",
+                        r.x, r.y, r.w, r.h
+                    );
+                    assert!(
+                        lanes
+                            .iter()
+                            .any(|&(x, w)| r.x >= x - 1e-6 && r.x + r.w <= x + w + 1e-6),
+                        "{ctx}: 한 단 안"
+                    );
+                    assert!(r.y >= -1e-6, "{ctx}: 본문 위보다 아래");
+                    for g in &page.glyphs {
+                        let mid = g.baseline - g.size / 2.0;
+                        let covered = g.x + 1.0 > r.x
+                            && g.x + 1.0 < r.x + r.w
+                            && mid > r.y
+                            && mid < r.y + r.h;
+                        assert!(
+                            !covered,
+                            "{ctx}: 글 {:?} ({}, {}) 를 덮음",
+                            g.ch, g.x, g.baseline
+                        );
+                    }
+                }
+            }
+        }
+        assert!(drawn > 500, "그려진 도형 수 {drawn}");
     }
 }
