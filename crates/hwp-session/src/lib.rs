@@ -1792,6 +1792,15 @@ fn body_paragraph_geom(
         // to the next page. `emptyParaBoxes` rejects that band (`h <= 0`) and resolves the real
         // positive-height fragment, so lift the same rule into the engine contract.
         let (empty_page, empty_band) = bands.iter().copied().find(|(_, band)| band.h > 0.0)?;
+        // #542 — a floating 「자리 차지」 도형 stretches the paragraph's band to its own height; the caret is
+        // still the one empty line (the band absorbs the line, it does not grow it).
+        let height = if hwp_typeset::floating_flow_band(p).is_some() {
+            hwp_typeset::layout_paragraph(p, doc, empty_band.w.max(1.0), fonts)
+                .first()
+                .map_or(empty_band.h, |line| line.vert_size.min(empty_band.h))
+        } else {
+            empty_band.h
+        };
         return Some(BodyParagraphGeom {
             section,
             block,
@@ -1803,7 +1812,7 @@ fn body_paragraph_geom(
                 x0: empty_band.x,
                 end_x: empty_band.x,
                 top: empty_band.y,
-                height: empty_band.h,
+                height,
                 chars: chars
                     .iter()
                     .enumerate()
@@ -3679,6 +3688,30 @@ mod tests {
                 c.y * HWPUNIT_PER_PX
             );
         }
+    }
+
+    /// #542 PR-3 — 빈 문단이 문단 기준 위아래 도형을 품으면 문단 띠는 도형 높이까지 늘지만, 캐럿은 빈 줄 하나의
+    /// 높이다(문단 띠 높이가 아니다).
+    #[test]
+    fn body_caret_on_an_empty_floating_band_host_is_one_line_tall() {
+        use hwp_model::document::{Block, Inline};
+        let mut doc = shape_text_para_doc(10_000, "", None);
+        let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] else {
+            panic!("문단");
+        };
+        let Inline::Shape(shape) = &mut p.runs[0].content[0] else {
+            panic!("도형");
+        };
+        shape.treat_as_char = false;
+        shape.text_wrap = "TOP_AND_BOTTOM".into();
+        shape.vert_rel_to = "PARA".into();
+        shape.height = 20_000;
+        let c = body_caret_rect(&doc, 0, 0, 0, 0).expect("빈 문단 캐럿");
+        assert!(
+            c.h * HWPUNIT_PER_PX < 3_000.0,
+            "캐럿 높이 {} 는 빈 줄 하나",
+            c.h * HWPUNIT_PER_PX
+        );
     }
 
     #[test]
