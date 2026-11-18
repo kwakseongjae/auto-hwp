@@ -463,6 +463,12 @@ struct TblFrame {
     /// new page; retained only as a render-cache lower bound for clean HWPX input.
     cur_cell_last_vert: Option<i32>,
     cur_cell_page_segments: usize,
+    /// #544 — `<hp:tbl textWrap zOrder>`, read into [`Table::float_placement`] at the table's own `<hp:pos>`.
+    text_wrap: String,
+    z_order: i32,
+    /// The table's own `<hp:pos>` (its first, before any cell) was seen — later ones belong to a caption's
+    /// or a cell's objects.
+    pos_seen: bool,
 }
 
 impl TblFrame {
@@ -481,6 +487,9 @@ impl TblFrame {
             cur_cell_margin: None,
             cur_cell_last_vert: None,
             cur_cell_page_segments: 0,
+            text_wrap: String::new(),
+            z_order: 0,
+            pos_seen: false,
         }
     }
 }
@@ -1108,7 +1117,7 @@ pub(crate) fn parse_section(
                             .as_deref()
                             .is_some_and(|value| value.eq_ignore_ascii_case("CELL"));
                         let repeat_first_row = attr_usize(&e, b"repeatHeader") == Some(1);
-                        tbls.push(TblFrame::new(
+                        let mut frame = TblFrame::new(
                             Table {
                                 rows,
                                 cols,
@@ -1120,7 +1129,10 @@ pub(crate) fn parse_section(
                             pos_before,
                             border_ref,
                             no_adjust,
-                        ));
+                        );
+                        frame.text_wrap = attr_str(&e, b"textWrap").unwrap_or_default();
+                        frame.z_order = attr_i32(&e, b"zOrder").unwrap_or(0);
+                        tbls.push(frame);
                     }
                     b"tc" => {
                         blocks.push(Vec::new());
@@ -1361,6 +1373,31 @@ pub(crate) fn parse_section(
                             f.table.outer_margin_bottom = attr_i32(&e, b"bottom").unwrap_or(0);
                         }
                     }
+                }
+                // #544 — 표 자신의 `<hp:pos>`(첫 행 앞의 첫 것). 글 앞 · 글 뒤로 띄운 표면 그 배치를
+                // `float_placement` 로 읽는다 — .hwp 리프트(`lift_table_float`)와 같은 조건 · 같은 필드라
+                // 조판(흐름을 쓰지 않음)과 내보내기(떠 있는 `<hp:pos>` 를 그대로 다시 씀)가 함께 읽는다.
+                // 오프셋은 도형과 같은 `attr_offset`(부호 없는 32비트로 쓴 음수, #572).
+                b"pos" => {
+                    if let Some(f) = tbls.last_mut().filter(|f| f.cell.is_none() && !f.pos_seen) {
+                        f.pos_seen = true;
+                        let floats = attr_usize(&e, b"treatAsChar") == Some(0)
+                            && matches!(f.text_wrap.as_str(), "IN_FRONT_OF_TEXT" | "BEHIND_TEXT");
+                        if floats {
+                            let token = |name: &[u8]| attr_str(&e, name).unwrap_or_default();
+                            f.table.float_placement = Some(TableFloat {
+                                text_wrap: f.text_wrap.clone(),
+                                vert_rel_to: token(b"vertRelTo"),
+                                horz_rel_to: token(b"horzRelTo"),
+                                vert_align: token(b"vertAlign"),
+                                horz_align: token(b"horzAlign"),
+                                vert_offset: attr_offset(&e, b"vertOffset"),
+                                horz_offset: attr_offset(&e, b"horzOffset"),
+                                z_order: f.z_order,
+                            });
+                        }
+                    }
+                    mark_not_simple(&mut paras);
                 }
                 // Batch C: the table-DEFAULT cell padding (`<hp:inMargin>` sits before the first row,
                 // so `f.cell` is None then; a picture's inMargin is handled by the pic arm above).

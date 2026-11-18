@@ -776,12 +776,15 @@ pub struct Table {
     /// EXPORT ONLY (#441): `<hp:pos treatAsChar>` for a table the serializer synthesizes. `None` = the
     /// legacy `"1"`; parsed tables keep their original `<hp:pos>` byte-verbatim and never read this.
     pub treat_as_char: Option<bool>,
-    /// EXPORT ONLY (#467): floating placement for a table that sits in front of / behind the text
-    /// (`<hp:tbl textWrap zOrder>` + `<hp:pos>` offsets). `None` = the legacy inline `<hp:pos>`.
-    /// The lift fills it only for `IN_FRONT_OF_TEXT`/`BEHIND_TEXT` tables — those take no flow space
-    /// in Hancom, so emitting them inline pushed the text down (기안문 직인 box → 빈 둘째 쪽).
-    /// Non-inline `TOP_AND_BOTTOM`/`SQUARE` tables are deliberately left `None` for now (they still
-    /// ship as inline, which lays out nearly the same). Layout does not read this.
+    /// Floating placement for a table that sits in front of / behind the text (#467 export, #544
+    /// layout) — `<hp:tbl textWrap zOrder>` + the table's own `<hp:pos>` offsets. `None` = inline
+    /// (`<hp:pos treatAsChar="1">` on export) or a table in the text flow.
+    /// The .hwp lift and the HWPX parser fill it only for `IN_FRONT_OF_TEXT`/`BEHIND_TEXT` tables —
+    /// those take no flow space in Hancom, so emitting them inline pushed the text down (기안문 직인
+    /// box → 빈 둘째 쪽). Non-inline `TOP_AND_BOTTOM`/`SQUARE` tables are deliberately left `None` for
+    /// now (they ship as inline and lay out in the flow, which is nearly the same).
+    /// LAYOUT READS THIS (#544, `hwp_typeset::table_floats_over_text`): such a table takes no flow height
+    /// and is drawn at its `<hp:pos>` against its host paragraph, whose line it leaves in place.
     pub float_placement: Option<TableFloat>,
     /// EXPORT (#483 `SetTableProps`): placement attributes an op set explicitly. The HWPX writer applies
     /// them to the emitted `<hp:tbl pageBreak repeatHeader>` / the table's own `<hp:pos treatAsChar>` —
