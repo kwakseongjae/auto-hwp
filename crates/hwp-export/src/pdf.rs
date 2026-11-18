@@ -23,7 +23,7 @@ use hwp_model::font_class::{classify, FontCategory};
 use hwp_model::layout::{PageLayerTree, PaintOp};
 use hwp_model::prelude::FontMetricsProvider;
 use hwp_model::types::{Color, HwpUnit};
-use hwp_typeset::{BlockKind, PlacedDoc, PlacedGlyph, PlacedGlyphOrigin};
+use hwp_typeset::{BlockKind, PlacedDoc, PlacedGlyph, PlacedGlyphOrigin, UndrawnShape};
 use std::collections::HashSet;
 
 use krilla::color::rgb;
@@ -1058,10 +1058,18 @@ fn undrawn_shape_notices(placed: &PlacedDoc) -> Vec<PdfNotice> {
                 codes.push(code);
             }
         }
-        out.extend(codes.into_iter().map(|code| PdfNotice {
-            page_index,
-            kind: "text-box".into(),
-            code: code.into(),
+        out.extend(codes.into_iter().map(|code| {
+            PdfNotice {
+                page_index,
+                // #544 — 떠 있는 표의 보이지 않는 행은 도형 · 글상자가 아니라 표 알림이다.
+                kind: if code == UndrawnShape::FloatingTableRows.code() {
+                    "floating-table"
+                } else {
+                    "text-box"
+                }
+                .into(),
+                code: code.into(),
+            }
         }));
     }
     out
@@ -3025,5 +3033,53 @@ mod tests {
             ]
         );
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    }
+
+    /// #544 — 다음 쪽이 없어 그리지 못한 떠 있는 표의 행은 `floating-table` 알림 한 건이다(`text-box` 가 아니다).
+    #[test]
+    fn floating_table_rows_with_no_page_left_are_a_floating_table_notice() {
+        let row = |r: usize| Cell {
+            row: r,
+            col: 0,
+            ..Default::default()
+        };
+        let table = Table {
+            rows: 4,
+            cols: 1,
+            cells: (0..4).map(row).collect(),
+            col_widths: vec![20_000],
+            row_heights: vec![30_000; 4],
+            fixed_row_heights: true,
+            float_placement: Some(TableFloat {
+                text_wrap: "IN_FRONT_OF_TEXT".into(),
+                vert_rel_to: "PARA".into(),
+                horz_rel_to: "COLUMN".into(),
+                vert_align: "TOP".into(),
+                horz_align: "LEFT".into(),
+                ..Default::default()
+            }),
+            treat_as_char: Some(false),
+            ..Default::default()
+        };
+        let host = Paragraph {
+            is_table_anchor: true,
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text(String::new())],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let doc = doc_with(vec![Block::Paragraph(host), Block::Table(table)]);
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        assert_eq!(out.pages, 1);
+        assert_eq!(
+            out.notices,
+            vec![PdfNotice {
+                page_index: 0,
+                kind: "floating-table".into(),
+                code: "floating-table-rows-not-drawn".into(),
+            }]
+        );
     }
 }

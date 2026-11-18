@@ -42,6 +42,11 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 파괴 변경 (Breaking)
 
+- **`UndrawnShape::FloatingTableRows` 변형이 늘었다 (#544).** 글 앞 · 글 뒤로 띄운 표의 행 가운데 보이지 않는 것(흐름이 다음 쪽을
+  만들지 않아 이을 곳이 없음 · 종이 아래로 넘침)이 있으면 그 표가 마지막으로 닿은 쪽의 `PlacedPage.undrawn_shapes` 에 이 이유로
+  한 건 실린다(`(section, block)` = 표 블록). 마이그레이션: `UndrawnShape` 를 빠짐없이 `match` 하는 코드는 이 팔을 더한다. Rust 크레이트 전용.
+  *(EN — Breaking: new `UndrawnShape::FloatingTableRows` variant for rows of a floating table no one sees; exhaustive matches add an arm. Rust only.)*
+
 - **`BreakReason::FloatingObject` 변형이 늘었다 (#542).** 떠 있는 「자리 차지」 도형이 남은 자리에 안 들어가 다음 쪽 맨 위로 간
   쪽 넘김이다. 마이그레이션: `BreakReason` 을 빠짐없이 `match` 하는 코드는 이 팔을 더한다. Rust 크레이트 전용.
   *(EN — Breaking: new `BreakReason::FloatingObject` variant; exhaustive matches add an arm. Rust only.)*
@@ -88,6 +93,18 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   at the top of the following pages the flow made (one sample). A public sample goes from 4 to 2 pages (oracle 2). Evidence is thin:
   three such tables in two documents; no behind-text sample. Not yet: in-front/behind paint order, continuation position (assumed
   body top), a caret on the host's blank line, offsets of top-and-bottom/square tables.)*
+
+- **`.hwp` 의 글 앞 · 글 뒤로 띄운 표도 이제 흐름 높이를 쓰지 않는다 (#544).** `.hwp` 리프트는 전부터 그런 표의
+  `float_placement` 를 채웠지만(내보내기 전용) 조판이 읽지 않았다. 이제 HWPX 와 같은 규칙으로 놓인다. 공개 · 비공개 `.hwp` 코퍼스(40개)에는
+  그런 표가 0개라 바뀐 문서는 없다.
+  *(EN — Fixed: floating (in front of / behind text) tables in `.hwp` files now take no flow height either; the lift already filled
+  `float_placement`. No such table exists in the 40-file `.hwp` corpus.)*
+
+- **떠 있는 표의 보이지 않는 행을 알린다 (#544).** 떠 있는 표는 쪽을 더하지 않으므로, 흐름이 다음 쪽을 만들지 않으면 이을 행이 그려지지
+  않고, `keep_together` 표 · 쪽보다 높은 행은 종이 아래로 넘친다. 이제 조용히 넘기지 않는다: PDF 내보내기 알림(`kind: "floating-table"` ·
+  `code: "floating-table-rows-not-drawn"`, 쪽마다 한 건)과 `auto-hwp export-pdf` 경고 한 줄. 공개 코퍼스 두 문서는 알림이 없다.
+  *(EN — Fixed: a floating table's rows that no one sees (no following page to continue on, or past the paper edge) are reported as a PDF
+  notice `floating-table` / `floating-table-rows-not-drawn` and an `export-pdf` warning, instead of vanishing silently.)*
 
 - **글 앞 · 글 뒤로 띄운 표를 고쳐 저장하면 인라인 표로 바뀌어 써지던 것을 고쳤다 (#544).** 파싱한 그런 표를 통째로 다시 쓸 때(열 너비 ·
   행 높이 편집) `treatAsChar="1"` · `textWrap="TOP_AND_BOTTOM"` 으로 써져, 다시 열면 흐름 안 표가 됐다. 이제 떠 있는 배치(`textWrap` ·

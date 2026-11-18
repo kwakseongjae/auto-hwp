@@ -269,7 +269,8 @@ pub struct PlacedPage {
     pub undrawn_shapes: Vec<PlacedUndrawnShape>,
 }
 
-/// One 도형 a page holds but does not draw, with why (#542). `(section, block)` is the host paragraph.
+/// One 도형 a page holds but does not draw, with why (#542). `(section, block)` is the host paragraph — for
+/// [`UndrawnShape::FloatingTableRows`] it is the table block (#544).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlacedUndrawnShape {
     pub section: usize,
@@ -288,6 +289,10 @@ pub enum UndrawnShape {
     Floating,
     /// A `rect` whose 글상자 body holds a table — the box is drawn, the body is not.
     TableInTextBox,
+    /// Rows of a 글 앞 · 글 뒤 table (#544) that are not visible: no page follows to continue them on (a floating
+    /// table never adds a page), or they run past the paper edge (a `keep_together` table, or one row taller
+    /// than the room). Recorded on the last page the table touches.
+    FloatingTableRows,
 }
 
 impl UndrawnShape {
@@ -298,6 +303,7 @@ impl UndrawnShape {
             Self::Shape => "shape-not-drawn",
             Self::Floating => "floating-shape-not-drawn",
             Self::TableInTextBox => "text-box-table-not-drawn",
+            Self::FloatingTableRows => "floating-table-rows-not-drawn",
         }
     }
 }
@@ -4383,15 +4389,17 @@ fn place_floating_table(
         block,
         None,
     );
+    let drawn_h: f64 = row_h[..end].iter().sum();
     pages[page_idx].blocks.push(PlacedBlock {
         x,
         y,
         w: size.0,
-        h: row_h[..end].iter().sum(),
+        h: drawn_h,
         section,
         block,
         kind: BlockKind::Table,
     });
+    report_rows_past_paper(&mut pages[page_idx], y + drawn_h, section, block);
     (end < t.rows).then_some(FloatTableRest {
         block,
         page: page_idx,
@@ -4435,18 +4443,44 @@ fn continue_floating_table(
             rest.block,
             None,
         );
+        let drawn_h: f64 = row_h[first..end].iter().sum();
         pages[page].blocks.push(PlacedBlock {
             x: rest.x,
             y: top,
             w: col_x[t.cols],
-            h: row_h[first..end].iter().sum(),
+            h: drawn_h,
             section,
             block: rest.block,
             kind: BlockKind::Table,
         });
+        report_rows_past_paper(&mut pages[page], top + drawn_h, section, rest.block);
         (first, page) = (end, page + 1);
     }
-    page - 1
+    let last = page - 1;
+    // 흐름이 다음 쪽을 만들지 않아 남은 행 — 쪽을 더하지 않으므로 그리지 못한다. 조용히 넘기지 않는다.
+    if first < t.rows {
+        report_floating_table_rows(&mut pages[last], section, rest.block);
+    }
+    last
+}
+
+/// Record [`UndrawnShape::FloatingTableRows`] on `page` for table block `block` (once per page and table).
+fn report_floating_table_rows(page: &mut PlacedPage, section: usize, block: usize) {
+    let undrawn = PlacedUndrawnShape {
+        section,
+        block,
+        reason: UndrawnShape::FloatingTableRows,
+    };
+    if !page.undrawn_shapes.contains(&undrawn) {
+        page.undrawn_shapes.push(undrawn);
+    }
+}
+
+/// A floating table fragment ending at `bottom` past the paper edge of `page` has rows no one sees.
+fn report_rows_past_paper(page: &mut PlacedPage, bottom: f64, section: usize, block: usize) {
+    if page.height > 0.0 && bottom > page.height + 1e-6 {
+        report_floating_table_rows(page, section, block);
+    }
 }
 
 /// Where a paragraph-relative 「자리 차지」 도형 goes when [`crate::FloatBandPlan::NextPage`] moved its band:
@@ -10077,6 +10111,183 @@ mod tests {
             page_number_texts(&placed),
             vec!["1".to_string(), "7".to_string()]
         );
+    }
+
+    fn table_rows_reports(placed: &PlacedDoc) -> Vec<(usize, usize)> {
+        placed
+            .pages
+            .iter()
+            .enumerate()
+            .flat_map(|(pi, pg)| {
+                pg.undrawn_shapes
+                    .iter()
+                    .filter(|u| u.reason == UndrawnShape::FloatingTableRows)
+                    .map(move |u| (pi, u.block))
+            })
+            .collect()
+    }
+
+    /// 행 넷 × 30,000 의 글 앞 표 — 문단 기준 세로 `v`.
+    fn tall_front_table(v: i32) -> Table {
+        let mut t = fixed_height_table(4, 30_000, false);
+        t.col_widths = vec![20_000];
+        t.float_placement = front_table(1, v, 0).float_placement;
+        t.treat_as_char = Some(false);
+        t
+    }
+
+    /// #544 리뷰 1 — 흐름이 다음 쪽을 만들지 않아 그리지 못한 떠 있는 표의 행, 종이 아래로 넘친 행(`keep_together`)은
+    /// 조용히 사라지지 않고 `FloatingTableRows` 로 알린다(마지막으로 닿은 쪽 · 표 블록). 다 그려진 표는 알리지 않는다.
+    /// 쪽 수는 늘지 않는다.
+    #[test]
+    fn floating_table_rows_that_no_one_sees_are_reported() {
+        // 다음 쪽이 없음: 행 0~1 만 1쪽에, 2~3 은 갈 쪽이 없다.
+        let placed = place_doc(
+            &shape_doc(hosted(tall_front_table(10_000), "", true, 1)),
+            &ApproxFontMetrics,
+        );
+        assert_eq!(placed.pages.len(), 1);
+        assert_eq!(table_rows_reports(&placed), vec![(0, 0)]);
+        // 다음 쪽이 있음: 2쪽에서 이어 다 그린다 → 알림 없음.
+        let mut blocks = hosted(tall_front_table(10_000), "", true, 1);
+        blocks.extend((0..60).map(|_| Block::Paragraph(para("가"))));
+        let placed = place_doc(&shape_doc(blocks), &ApproxFontMetrics);
+        assert_eq!(table_rows_reports(&placed), vec![]);
+        // 들어가는 표 → 알림 없음.
+        let placed = place_doc(
+            &shape_doc(hosted(front_table(30_000, 500, 0), "", true, 1)),
+            &ApproxFontMetrics,
+        );
+        assert_eq!(table_rows_reports(&placed), vec![]);
+        // keep_together: 통째로 그려 종이(80,000) 아래로 넘친다 — 같은 신호.
+        let mut kept = tall_front_table(10_000);
+        kept.keep_together = true;
+        let mut blocks = hosted(kept, "", true, 1);
+        blocks.extend((0..60).map(|_| Block::Paragraph(para("가"))));
+        let placed = place_doc(&shape_doc(blocks), &ApproxFontMetrics);
+        assert_eq!(table_on(&placed, 0).len(), 1, "통째로 한 조각");
+        assert_eq!(table_rows_reports(&placed), vec![(0, 0)]);
+    }
+
+    /// #544 리뷰 2 Mf — 잇는 행의 경계: 행이 본문 아래 끝에 딱 맞으면 그 쪽에 들어간다(문단 위 0 + 20,000 + 2 × 30,000
+    /// = 80,000 = 본문 높이).
+    #[test]
+    fn a_floating_table_row_ending_exactly_at_the_body_bottom_stays_on_the_page() {
+        let mut blocks = hosted(tall_front_table(20_000), "", true, 1);
+        blocks.extend((0..60).map(|_| Block::Paragraph(para("가"))));
+        let placed = place_doc(&shape_doc(blocks), &ApproxFontMetrics);
+        let pieces: Vec<_> = placed
+            .pages
+            .iter()
+            .enumerate()
+            .flat_map(|(pi, pg)| {
+                pg.tables
+                    .iter()
+                    .filter(|t| t.block == 0 && t.ancestors.is_empty())
+                    .map(move |t| (pi, t.y, t.first_row, t.last_row))
+            })
+            .collect();
+        assert_eq!(pieces, vec![(0, 20_000.0, 0, 2), (1, 0.0, 2, 4)]);
+    }
+
+    /// #544 리뷰 2 Mb — 떠 있는 표와 흐름 표를 함께 품은 빈 호스트는 줄을 쓰지 않는다(흐름 표가 그 자리를 차지한다).
+    /// ⚠️ 표본 없음 — 가정이다(`SectionFloatTables::of` 주석). 떠 있는 표는 호스트가 그리지 않으므로 제 블록 자리
+    /// (지금 커서)에 그린다.
+    #[test]
+    fn a_host_holding_a_floating_and_a_flow_table_reserves_no_line() {
+        let mut floating = front_table(5_000, 300, 0);
+        floating.src_span = Some((1_010, 1_100));
+        let mut flow = fixed_height_table(1, 10_000, false);
+        flow.src_span = Some((1_200, 1_800));
+        let mut host = para("");
+        host.is_table_anchor = true;
+        host.source = Some(ParaSource {
+            span: (1_000, 1_900),
+            ..Default::default()
+        });
+        let doc = shape_doc(vec![
+            Block::Table(floating),
+            Block::Table(flow),
+            Block::Paragraph(host),
+            Block::Paragraph(para("끝")),
+        ]);
+        let [placed_end, naive_end, walked_end] = end_line_in_three_walks(&doc);
+        assert_eq!(placed_end, (0, 10_000.0), "흐름 표 높이만 — 호스트 줄 없음");
+        assert_eq!(naive_end, (0, 10_000.0));
+        assert_eq!(walked_end.0, 0);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(table_on(&placed, 0), vec![(0, 0.0, 300.0, 5_000.0)]);
+    }
+
+    /// #544 리뷰 2 Mc — HWPX 순서에서 뒤 문단의 원본 범위가 표 범위를 품지 않으면 그 문단은 호스트가 아니다(편집으로
+    /// 블록이 옮겨진 경우). 앵커는 품은 표가 없으니 예전처럼 줄을 쓰지 않고, 떠 있는 표는 제 블록 자리에 그린다.
+    #[test]
+    fn a_paragraph_whose_span_does_not_hold_the_table_is_not_its_host() {
+        let mut table = front_table(5_000, 300, 0);
+        table.src_span = Some((5_010, 5_100));
+        let mut anchor = para("");
+        anchor.is_table_anchor = true;
+        anchor.source = Some(ParaSource {
+            span: (1_000, 1_900),
+            ..Default::default()
+        });
+        let doc = shape_doc(vec![
+            Block::Table(table),
+            Block::Paragraph(anchor),
+            Block::Paragraph(para("끝")),
+        ]);
+        let [placed_end, naive_end, walked_end] = end_line_in_three_walks(&doc);
+        assert_eq!(placed_end, (0, 0.0));
+        assert_eq!(naive_end, (0, 0.0));
+        assert_eq!(walked_end.0, 0);
+        assert_eq!(
+            table_on(&place_doc(&doc, &ApproxFontMetrics), 0),
+            vec![(0, 0.0, 300.0, 5_000.0)]
+        );
+    }
+
+    /// #544 리뷰 2 Md — 호스트 문단이 쪽을 넘어 이어지면, 표를 그린 문단 위 쪽(앞 쪽)으로 `last_drawn` 을 되돌리지
+    /// 않는다. 되돌리면 다음 문단의 쪽 나누기가 「그린 것 없는 쪽」으로 보여 무동작이 된다(이슈 307).
+    #[test]
+    fn a_floating_table_never_moves_last_drawn_back_to_an_earlier_page() {
+        // 호스트 글 60줄(50줄 = 한 쪽) → 1 · 2쪽. 표는 1쪽(문단 위)에 그려진다.
+        let host_text = vec!["가"; 60].join("\n");
+        let mut blocks = hosted(front_table(5_000, 300, 0), &host_text, true, 1);
+        let mut end = para("끝");
+        end.page_break_before = true;
+        blocks.push(Block::Paragraph(end));
+        let doc = shape_doc(blocks);
+        let [placed_end, naive_end, walked_end] = end_line_in_three_walks(&doc);
+        assert_eq!(placed_end, (2, 0.0));
+        assert_eq!(naive_end, (2, 0.0));
+        assert_eq!(walked_end.0, 2);
+    }
+
+    /// #544 리뷰 2 Mg — 호스트를 찾지 못한 떠 있는 표는 제 블록 자리의 커서를 문단 위로 삼는다 — 다단에서는 그 단의
+    /// 지금 자리(단 맨 위가 아니다). 한 단도 같다.
+    #[test]
+    fn a_hostless_floating_table_sits_at_the_cursor_in_columns_too() {
+        for columns in [false, true] {
+            let mut lead = para("가\n가\n가");
+            lead.source = Some(ParaSource {
+                span: (0, 10),
+                ..Default::default()
+            });
+            if columns {
+                lead.column_layout_before = Some(two_columns());
+            }
+            let doc = shape_doc(vec![
+                Block::Paragraph(lead),
+                Block::Table(front_table(5_000, 300, 0)),
+                Block::Paragraph(para("끝")),
+            ]);
+            // 호스트 없음(뒤 문단 · 원본 범위 없음 · 앞 문단은 원본 범위가 있어 .hwp 순서도 아님).
+            assert_eq!(
+                table_on(&place_doc(&doc, &ApproxFontMetrics), 1),
+                vec![(0, 0.0, 3.0 * 1_600.0 + 300.0, 5_000.0)],
+                "columns={columns}"
+            );
+        }
     }
 
     /// #544 — 오프셋으로 옮겨 그린 떠 있는 표에서도 칸 캐럿은 그려진 칸 안에 있다.

@@ -2379,6 +2379,8 @@ impl SectionFloatTables {
             if !p.is_table_anchor {
                 continue;
             }
+            // ⚠️ 표본 없음 — 가정: 떠 있는 표와 흐름 표를 함께 품은 빈 호스트는 지금처럼 줄을 쓰지 않는다(흐름 표가
+            // 그 자리를 차지한다). 코퍼스(HWPX 86 · .hwp 40)에 그런 호스트는 0개다.
             let mut owned = (0..n).filter(|&t| host[t] == Some(i)).peekable();
             anchor_line[i] = owned.peek().is_some() && owned.all(|t| floats(&sec.blocks[t]));
         }

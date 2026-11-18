@@ -197,3 +197,21 @@ fn unedited_save_keeps_floating_tables_byte_for_byte() {
         );
     }
 }
+
+/// #544 리뷰 1 — 공개 두 문서의 떠 있는 표는 모두 보인다: 「보이지 않는 행」 알림이 없다.
+#[test]
+fn public_floating_tables_have_no_unseen_rows() {
+    for rel in [
+        "error/20250523/프로젝트 계획서.hwpx",
+        "error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx",
+    ] {
+        let placed = place_doc(&open(rel), &ApproxFontMetrics);
+        let reports: Vec<_> = placed
+            .pages
+            .iter()
+            .flat_map(|pg| &pg.undrawn_shapes)
+            .filter(|u| u.reason == hwp_typeset::UndrawnShape::FloatingTableRows)
+            .collect();
+        assert!(reports.is_empty(), "{rel}: {reports:?}");
+    }
+}
