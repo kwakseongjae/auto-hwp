@@ -166,3 +166,245 @@ fn roundtrip_preserves_stored_row_height_floors() {
         "{mismatched}개 표의 저장 행높이 floor가 왕복에서 변동"
     );
 }
+
+/// #543 PR-2 — `.hwp` → HWPX 변환이 표 캡션을 `<hp:caption>` 으로 쓴다(전에는 빠졌다). 다시 열면(생산 HWPX 파서)
+/// 같은 위치 · 간격 · 너비 · 최대 너비 · 글이고, 쪽 수도 같다. 공개 문서 셋: `benchmark.hwp`(위 1) · `benchmark2.hwp`
+/// (위 2) · `corpus/hwp/tac-img-02.hwp`(아래 6).
+#[test]
+fn converted_hwpx_keeps_table_captions() {
+    fn captions(d: &SemanticDoc) -> Vec<(TableCaptionPosition, i32, i32, i32, bool, String)> {
+        let mut out = Vec::new();
+        for sec in &d.sections {
+            for b in &sec.blocks {
+                let Block::Table(t) = b else { continue };
+                let Some(c) = &t.caption else { continue };
+                let text: String = c
+                    .blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        Block::Paragraph(p) => Some(p),
+                        Block::Table(_) => None,
+                    })
+                    .flat_map(|p| &p.runs)
+                    .flat_map(|r| &r.content)
+                    .filter_map(|i| match i {
+                        Inline::Text(t) => Some(t.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                out.push((
+                    c.position,
+                    c.spacing,
+                    c.width,
+                    c.max_width,
+                    c.include_margin,
+                    text,
+                ));
+            }
+        }
+        out
+    }
+    let fonts = fonts();
+    for (rel, want) in [
+        ("benchmarks/benchmark.hwp", 1),
+        ("benchmarks/benchmark2.hwp", 2),
+        ("corpus/hwp/tac-img-02.hwp", 6),
+    ] {
+        let path = format!("{}/../../{rel}", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let orig = parse(&bytes);
+        let before = captions(&orig);
+        assert_eq!(before.len(), want, "{rel}: 원본 캡션 수");
+        let hwpx = hwp_hwpx::serialize::serialize(&orig).expect("serialize to HWPX");
+        let pkg = hwp_hwpx::package::Package::open(&hwpx).expect("package");
+        let xml_captions: usize = pkg
+            .section_part_names()
+            .iter()
+            .map(|p| {
+                let xml = pkg.read_part(p).expect("section part");
+                String::from_utf8_lossy(&xml)
+                    .matches("<hp:caption ")
+                    .count()
+            })
+            .sum();
+        assert_eq!(xml_captions, want, "{rel}: <hp:caption> 수");
+        let reopened = reopen_hwpx(&hwpx);
+        assert_eq!(captions(&reopened), before, "{rel}: 다시 연 캡션");
+        assert_eq!(
+            page_counts(&reopened, &fonts),
+            page_counts(&orig, &fonts),
+            "{rel}: 쪽 수"
+        );
+    }
+}
+
+/// #543 PR-2 — 캡션에서만 쓰는 글자 모양 · 문단 모양 · 그림도 변환 결과에 실린다(모양 · 그림 모으기가 캡션 블록을 돈다).
+/// ⚠️ 표본 없음 · 가정: 공개 · 비공개 코퍼스의 캡션은 본문과 같은 모양을 쓰고 그림이 없어, 캡션 전용 모양 · 그림을
+/// 시험이 만들어 넣는다. 모으기가 캡션을 건너뛰면 모양은 기본 모양으로 바뀌고(조용히), 그림은 매니페스트에 없는
+/// 참조가 되어 변환이 거부된다.
+#[test]
+fn a_caption_only_shape_and_image_survive_conversion() {
+    fn first_caption_para(d: &mut SemanticDoc) -> &mut Paragraph {
+        d.sections
+            .iter_mut()
+            .flat_map(|s| s.blocks.iter_mut())
+            .find_map(|b| match b {
+                Block::Table(t) => t.caption.as_mut(),
+                Block::Paragraph(_) => None,
+            })
+            .and_then(|c| {
+                c.blocks.iter_mut().find_map(|b| match b {
+                    Block::Paragraph(p) => Some(p),
+                    Block::Table(_) => None,
+                })
+            })
+            .expect("캡션 문단")
+    }
+    fn strip_images(blocks: &mut [Block], found: &mut Option<Inline>) {
+        for b in blocks {
+            match b {
+                Block::Paragraph(p) => {
+                    for r in &mut p.runs {
+                        r.content.retain(|i| {
+                            if matches!(i, Inline::Image(_)) {
+                                found.get_or_insert_with(|| i.clone());
+                                false
+                            } else {
+                                true
+                            }
+                        });
+                    }
+                }
+                Block::Table(t) => {
+                    for c in &mut t.cells {
+                        strip_images(&mut c.blocks, found);
+                    }
+                    if let Some(c) = t.caption.as_mut() {
+                        strip_images(&mut c.blocks, found);
+                    }
+                }
+            }
+        }
+    }
+    let path = format!(
+        "{}/../../corpus/hwp/tac-img-02.hwp",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let mut doc = parse(&std::fs::read(&path).expect("read tac-img-02.hwp"));
+    // 캡션 전용 모양: 기존 모양을 복제해 본문에 없는 값으로.
+    let (cs, ps) = {
+        let p = first_caption_para(&mut doc);
+        (p.runs[0].char_shape, p.para_shape)
+    };
+    let mut char_shape = doc.char_shapes[cs].clone();
+    char_shape.height = 1_777;
+    let mut para_shape = doc.para_shapes[ps].clone();
+    para_shape.left_margin = 1_234;
+    doc.char_shapes.push(char_shape);
+    doc.para_shapes.push(para_shape);
+    let (new_cs, new_ps) = (doc.char_shapes.len() - 1, doc.para_shapes.len() - 1);
+    // 그림은 캡션에만: 본문 · 칸의 그림을 모두 걷고 첫 그림 하나를 캡션에 넣는다.
+    let mut image = None;
+    for s in &mut doc.sections {
+        strip_images(&mut s.blocks, &mut image);
+    }
+    let image = image.expect("tac-img-02 에 그림이 있다");
+    let p = first_caption_para(&mut doc);
+    p.para_shape = new_ps;
+    for r in &mut p.runs {
+        r.char_shape = new_cs;
+    }
+    p.runs[0].content.push(image);
+
+    let hwpx = hwp_hwpx::serialize::serialize(&doc).expect("캡션 그림이 매니페스트에 실린다");
+    let pkg = hwp_hwpx::package::Package::open(&hwpx).expect("package");
+    assert!(
+        pkg.part_names.iter().any(|n| n.contains("BinData/")),
+        "캡션의 그림 바이트가 실렸다: {:?}",
+        pkg.part_names
+    );
+    let mut reopened = reopen_hwpx(&hwpx);
+    let (rcs, rps) = {
+        let p = first_caption_para(&mut reopened);
+        (p.runs[0].char_shape, p.para_shape)
+    };
+    assert_eq!(reopened.char_shapes[rcs].height, 1_777, "캡션 글자 모양");
+    assert_eq!(
+        reopened.para_shapes[rps].left_margin, 1_234,
+        "캡션 문단 모양"
+    );
+}
+
+/// #543 PR-2 리뷰 — 캡션 안 표의 칸에 본문에 없는 테두리 · 음영을 주고 `.hwp` → HWPX 로 변환해도 다시 열면 같다. 테두리
+/// 모으기가 캡션 블록을 건너뛰면 그 칸은 알림 없이 검은 실선 · 음영 없음이 된다(리뷰 실측). 코퍼스 캡션에는 표가 없어
+/// 시험이 만들어 넣는다.
+#[test]
+fn a_caption_tables_borders_survive_conversion() {
+    fn caption_table(d: &mut SemanticDoc) -> &mut TableCaption {
+        d.sections
+            .iter_mut()
+            .flat_map(|s| s.blocks.iter_mut())
+            .find_map(|b| match b {
+                Block::Table(t) => t.caption.as_mut(),
+                Block::Paragraph(_) => None,
+            })
+            .expect("캡션")
+    }
+    fn inner(c: &TableCaption) -> &Cell {
+        c.blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => t.cells.first(),
+                Block::Paragraph(_) => None,
+            })
+            .expect("캡션 안 표의 칸")
+    }
+    let path = format!(
+        "{}/../../benchmarks/benchmark.hwp",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let mut doc = parse(&std::fs::read(&path).expect("read benchmark.hwp"));
+    let edge = CellEdge {
+        color: Color::from_hex("#FF0000").expect("색"),
+        style: LineStyle::Dotted,
+        width_px: 1.0,
+    };
+    let cell = Cell {
+        row: 0,
+        col: 0,
+        row_span: 1,
+        col_span: 1,
+        active: true,
+        blocks: vec![Block::Paragraph(Paragraph {
+            runs: vec![Run {
+                content: vec![Inline::Text("안쪽".into())],
+                ..Default::default()
+            }],
+            ..Default::default()
+        })],
+        borders: [Some(edge); 4],
+        shade_color: Color::from_hex("#00FF00"),
+        ..Default::default()
+    };
+    caption_table(&mut doc).blocks.push(Block::Table(Table {
+        rows: 1,
+        cols: 1,
+        cells: vec![cell],
+        col_widths: vec![5_000],
+        row_heights: vec![1_000],
+        fixed_row_heights: true,
+        ..Default::default()
+    }));
+    let hwpx = hwp_hwpx::serialize::serialize(&doc).expect("serialize to HWPX");
+    let mut reopened = reopen_hwpx(&hwpx);
+    let got = inner(caption_table(&mut reopened)).clone();
+    let style = |c: &Cell| -> Vec<Option<(LineStyle, Color)>> {
+        c.borders
+            .iter()
+            .map(|e| e.map(|e| (e.style, e.color)))
+            .collect()
+    };
+    let want = inner(caption_table(&mut doc)).clone();
+    assert_eq!(style(&got), style(&want), "캡션 안 표 칸의 테두리");
+    assert_eq!(got.shade_color, want.shade_color, "캡션 안 표 칸의 음영");
+}
