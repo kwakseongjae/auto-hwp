@@ -862,8 +862,8 @@ fn collect_bf_specs(doc: &SemanticDoc) -> BTreeMap<String, BfSpec> {
                         }
                         walk(&c.blocks, out);
                     }
-                    // #543 — 캡션 안 표 · 각주의 테두리. ⚠️ 표본 없음 · 가정: 코퍼스 캡션에 표 · 각주가 0이라
-                    // 시험이 없다 — 칸과 같은 규칙(내보내는 블록의 테두리는 모두 모은다)을 따른다.
+                    // #543 — 캡션 안 표의 테두리 · 음영도 모은다(roundtrip_pages
+                    // `a_caption_tables_borders_survive_conversion`).
                     if let Some(caption) = &t.caption {
                         walk(&caption.blocks, out);
                     }
@@ -2009,9 +2009,40 @@ fn valid_cell_span(original: &str, open_end: usize, e0: usize, c: &Cell) -> Opti
     })
 }
 
+/// #543 — where a table's OWN rows start in its body XML (the text after `<hp:tbl …>`): the first
+/// `<hp:tr` past the table's caption. A caption may hold a table with rows of its own, and taking ITS
+/// `<hp:tr` cut the copied head mid-caption — the saved section no longer parsed (review of #578).
+fn first_row_offset(body: &str) -> Option<usize> {
+    const OPEN: &str = "<hp:caption";
+    const CLOSE: &str = "</hp:caption>";
+    let tr = body.find("<hp:tr")?;
+    let mut from = 0;
+    if let Some(start) = body[..tr].find(OPEN) {
+        let (mut depth, mut i) = (0usize, start);
+        loop {
+            let close = i + body[i..].find(CLOSE)?;
+            match body[i..].find(OPEN).map(|k| i + k) {
+                Some(open) if open < close => {
+                    depth += 1;
+                    i = open + OPEN.len();
+                }
+                _ => {
+                    depth = depth.saturating_sub(1);
+                    i = close + CLOSE.len();
+                    if depth == 0 {
+                        from = i;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    body[from..].find("<hp:tr").map(|k| from + k)
+}
+
 /// #442 — re-emit a table whose ROW/COLUMN STRUCTURE an op changed (`Table::structure_edited`) from
 /// its ORIGINAL XML: the `<hp:tbl>` open tag (rowCnt/colCnt patched), every table-level child before
-/// the first `<hp:tr>` (sz height/width patched, pos/margins/caption verbatim), then fresh `<hp:tr>`
+/// its own first `<hp:tr>` ([`first_row_offset`] — sz height/width patched, pos/margins/caption verbatim), then fresh `<hp:tr>`
 /// rows whose `<hp:tc>`s are each cell's original XML (body byte-verbatim unless its content was
 /// edited) with `cellAddr`/`cellSpan`/`cellSz` re-written. A NEW cell copies a template `<hp:tc>`
 /// (look + fallback shape refs), body rebuilt from its own content and `name` cleared: a cloned row's
@@ -2034,7 +2065,7 @@ fn structural_table_xml(
 ) -> Option<String> {
     let close = e0.checked_sub("</hp:tbl>".len())?;
     let body = original.get(open_end..close)?;
-    let first_tr = body.find("<hp:tr")?;
+    let first_tr = first_row_offset(body)?;
     let last_tr = body.rfind("</hp:tr>")? + "</hp:tr>".len();
     let (prefix, tail) = (&body[..first_tr], &body[last_tr..]);
     let (rows, cols) = (t.rows.max(1), t.cols.max(1));

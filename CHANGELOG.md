@@ -106,6 +106,8 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   전처럼 원본 바이트 그대로다.
   *(EN — Fixed: converting `.hwp` to HWPX, or saving a table rewritten after a column/row edit, no longer drops its caption — it is
   written as `<hp:caption>` and reads back the same.)*
+  - 캡션 안에 표가 있는 표의 행 · 열 구조를 고쳐 저장하면 저장 XML 이 깨져 다시 열 때 그 구역이 통째로 비던 것도 고쳤다(전부터 있던 결함 —
+    구조 다시 쓰기가 캡션 안 표의 첫 행을 표 자신의 첫 행으로 잡았다).
 
 - **글 앞 · 글 뒤로 띄운 표가 흐름 높이를 쓰지 않는다 (#544).** 한글은 그런 표(`textWrap="IN_FRONT_OF_TEXT"` ·
   `"BEHIND_TEXT"`, 글자처럼 취급 아님)가 없는 것처럼 글을 흘리고, 표만 품은 호스트 문단도 보통 빈 줄 하나를 쓴다. 엔진은 표를 흐름

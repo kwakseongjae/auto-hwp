@@ -334,3 +334,77 @@ fn a_caption_only_shape_and_image_survive_conversion() {
         "캡션 문단 모양"
     );
 }
+
+/// #543 PR-2 리뷰 — 캡션 안 표의 칸에 본문에 없는 테두리 · 음영을 주고 `.hwp` → HWPX 로 변환해도 다시 열면 같다. 테두리
+/// 모으기가 캡션 블록을 건너뛰면 그 칸은 알림 없이 검은 실선 · 음영 없음이 된다(리뷰 실측). 코퍼스 캡션에는 표가 없어
+/// 시험이 만들어 넣는다.
+#[test]
+fn a_caption_tables_borders_survive_conversion() {
+    fn caption_table(d: &mut SemanticDoc) -> &mut TableCaption {
+        d.sections
+            .iter_mut()
+            .flat_map(|s| s.blocks.iter_mut())
+            .find_map(|b| match b {
+                Block::Table(t) => t.caption.as_mut(),
+                Block::Paragraph(_) => None,
+            })
+            .expect("캡션")
+    }
+    fn inner(c: &TableCaption) -> &Cell {
+        c.blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => t.cells.first(),
+                Block::Paragraph(_) => None,
+            })
+            .expect("캡션 안 표의 칸")
+    }
+    let path = format!(
+        "{}/../../benchmarks/benchmark.hwp",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let mut doc = parse(&std::fs::read(&path).expect("read benchmark.hwp"));
+    let edge = CellEdge {
+        color: Color::from_hex("#FF0000").expect("색"),
+        style: LineStyle::Dotted,
+        width_px: 1.0,
+    };
+    let cell = Cell {
+        row: 0,
+        col: 0,
+        row_span: 1,
+        col_span: 1,
+        active: true,
+        blocks: vec![Block::Paragraph(Paragraph {
+            runs: vec![Run {
+                content: vec![Inline::Text("안쪽".into())],
+                ..Default::default()
+            }],
+            ..Default::default()
+        })],
+        borders: [Some(edge); 4],
+        shade_color: Color::from_hex("#00FF00"),
+        ..Default::default()
+    };
+    caption_table(&mut doc).blocks.push(Block::Table(Table {
+        rows: 1,
+        cols: 1,
+        cells: vec![cell],
+        col_widths: vec![5_000],
+        row_heights: vec![1_000],
+        fixed_row_heights: true,
+        ..Default::default()
+    }));
+    let hwpx = hwp_hwpx::serialize::serialize(&doc).expect("serialize to HWPX");
+    let mut reopened = reopen_hwpx(&hwpx);
+    let got = inner(caption_table(&mut reopened)).clone();
+    let style = |c: &Cell| -> Vec<Option<(LineStyle, Color)>> {
+        c.borders
+            .iter()
+            .map(|e| e.map(|e| (e.style, e.color)))
+            .collect()
+    };
+    let want = inner(caption_table(&mut doc)).clone();
+    assert_eq!(style(&got), style(&want), "캡션 안 표 칸의 테두리");
+    assert_eq!(got.shade_color, want.shade_color, "캡션 안 표 칸의 음영");
+}

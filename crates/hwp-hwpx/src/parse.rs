@@ -4157,7 +4157,14 @@ pub(crate) mod tests {
         attrs: &str,
         edit: impl Fn(&mut Table),
     ) -> (Vec<u8>, String, TableCaption) {
-        let section = captioned_table_xml(attrs, "");
+        save_captioned_section(&captioned_table_xml(attrs, ""), edit)
+    }
+
+    /// [`save_captioned_table`] for a given section XML whose first block is the captioned table.
+    fn save_captioned_section(
+        section: &str,
+        edit: impl Fn(&mut Table),
+    ) -> (Vec<u8>, String, TableCaption) {
         let bytes = build_test_hwpx(&[
             ("mimetype", b"application/hwp+zip"),
             ("Contents/header.xml", b"<hh:head></hh:head>"),
@@ -4240,6 +4247,80 @@ pub(crate) mod tests {
         }
     }
 
+    /// #543 PR-2 리뷰 — 캡션 안에 표가 있는 표의 행 · 열 구조를 고쳐 저장해도 XML 이 깨지지 않는다. 구조 다시 쓰기가
+    /// 원본에서 행 앞까지를 베낄 때 캡션 안 표의 `<hp:tr` 을 표 자신의 첫 행으로 잡아 캡션을 반쯤 자르고, 다시 열면 그
+    /// 구역의 블록이 0개였다(main 에도 있던 결함). 열 너비 편집(통째로 다시 쓰기)도 같은 문서로 본다.
+    #[test]
+    fn a_table_in_a_caption_survives_structural_and_whole_rewrites() {
+        let inner = r#"<hp:tbl id="8" rowCnt="1" colCnt="1"><hp:sz width="5000" height="1000"/><hp:pos treatAsChar="1"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:inMargin left="141" right="141" top="141" bottom="141"/><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>안쪽</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="5000" height="1000"/></hp:tc></hp:tr></hp:tbl>"#;
+        let section = captioned_table_xml(TOP_CAPTION, "").replacen(
+            "<hp:t>캡션 글</hp:t></hp:run>",
+            &format!("<hp:t>캡션 글</hp:t>{inner}</hp:run>"),
+            1,
+        );
+        let open = section.find("<hp:caption ").unwrap();
+        let close = section.find("</hp:caption>").unwrap() + "</hp:caption>".len();
+        let caption_bytes = &section[open..close];
+        let set_cell_text = |t: &mut Table| {
+            let cell = &mut t.cells[0];
+            let Some(Block::Paragraph(p)) = cell.blocks.first_mut() else {
+                panic!("칸 문단")
+            };
+            p.runs[0].content = vec![Inline::Text("칸 고침".into())];
+            p.dirty.mark();
+            cell.dirty.mark();
+        };
+        for (name, structural) in [("구조", true), ("통째로", false)] {
+            let (out, xml, before) = save_captioned_section(&section, |t| {
+                set_cell_text(t);
+                if structural {
+                    t.structure_edited = true;
+                } else {
+                    t.col_widths = vec![18_000];
+                    t.geometry_edited = true;
+                }
+            });
+            assert_eq!(xml.matches("<hp:caption ").count(), 1, "{name}: {xml}");
+            if structural {
+                assert!(
+                    xml.contains(caption_bytes),
+                    "{name}: 캡션 바이트 그대로: {xml}"
+                );
+            }
+            let reread = parse_semantic(&out).expect("다시 읽기");
+            let blocks = &reread.sections[0].blocks;
+            assert!(body_text(blocks).contains("본문"), "{name}: 본문이 남는다");
+            let t = first_table(blocks);
+            assert_eq!(block_text(&t.cells[0].blocks), "칸 고침", "{name}: 칸 글");
+            let after = t.caption.clone().expect("다시 읽은 캡션");
+            // 통째로 다시 쓰기는 표를 품은 문단에 빈 앵커 문단을 하나 더 만든다 — 칸 글과 같은 기존 쓰기
+            // 동작(글은 잃지 않는다). 그래서 빈 문단을 빼고 견준다.
+            let key = |c: &TableCaption| {
+                let mut k = caption_key(c);
+                k.5 =
+                    k.5.split('|')
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join("|");
+                k
+            };
+            assert_eq!(key(&after), key(&before), "{name}");
+            let nested = after
+                .blocks
+                .iter()
+                .find_map(|b| match b {
+                    Block::Table(nt) => Some(nt),
+                    Block::Paragraph(_) => None,
+                })
+                .expect("캡션 안 표");
+            assert_eq!(
+                block_text(&nested.cells[0].blocks),
+                "안쪽",
+                "{name}: 캡션 안 표"
+            );
+        }
+    }
+
     /// #543 PR-2 — 캡션이 있는 표를 통째로 다시 쓰면(열 너비 편집) `<hp:caption>` 이 OWPML 자리(바깥 여백 다음 ·
     /// 안 여백 앞)에 같은 속성 · 글로 써지고, 다시 읽으면 같은 캡션이다. 예전에는 캡션이 빠졌다.
     #[test]
@@ -4252,6 +4333,14 @@ pub(crate) mod tests {
             (
                 r#"side="LEFT" fullSz="1" width="3000" gap="300" lastWidth="9000""#,
                 r#"<hp:caption side="LEFT" fullSz="1" width="3000" gap="300" lastWidth="9000">"#,
+            ),
+            (
+                r#"side="RIGHT" fullSz="0" width="2500" gap="200" lastWidth="7000""#,
+                r#"<hp:caption side="RIGHT" fullSz="0" width="2500" gap="200" lastWidth="7000">"#,
+            ),
+            (
+                r#"side="BOTTOM" fullSz="1" width="6000" gap="500" lastWidth="30000""#,
+                r#"<hp:caption side="BOTTOM" fullSz="1" width="6000" gap="500" lastWidth="30000">"#,
             ),
         ] {
             let (out, xml, before) = save_captioned_table(attrs, |t| {
