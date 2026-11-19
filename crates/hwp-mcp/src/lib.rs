@@ -2514,6 +2514,31 @@ fn lockstep_verdict(before: &LayoutEvidence, after: &LayoutEvidence) -> Lockstep
     }
 }
 
+/// #393 — what a [`LockstepVerdict`] adds to a proposal's verification: `(structural failure, advisory)`.
+/// Only a mismatch the edit introduced blocks the commit; one that predates the edit is reported as an
+/// advisory and does not veto it; an in-step result adds nothing.
+fn lockstep_findings(verdict: LockstepVerdict) -> (Option<&'static str>, Option<&'static str>) {
+    match verdict {
+        LockstepVerdict::InStep => (None, None),
+        LockstepVerdict::Preexisting => (None, Some("layout-lockstep-mismatch-preexisting")),
+        LockstepVerdict::Introduced => (Some("layout-lockstep-mismatch"), None),
+    }
+}
+
+/// #393 — record the edit's lockstep verdict ([`lockstep_findings`]) into a verification's failures and
+/// advisories. One call in [`verify_proposal`]; unit-tested on its own because no real document keeps a
+/// pre-existing mismatch to drive it end to end any more.
+fn push_lockstep_findings(
+    before: &LayoutEvidence,
+    after: &LayoutEvidence,
+    failures: &mut Vec<String>,
+    advisories: &mut Vec<String>,
+) {
+    let (failure, advisory) = lockstep_findings(lockstep_verdict(before, after));
+    failures.extend(failure.map(String::from));
+    advisories.extend(advisory.map(String::from));
+}
+
 fn verify_proposal(
     before: &hwp_model::prelude::SemanticDoc,
     after: &hwp_model::prelude::SemanticDoc,
@@ -2555,13 +2580,16 @@ fn verify_proposal(
         .collect();
 
     let mut structural_failures = Vec::new();
+    let mut advisories = Vec::new();
     if !semantic.unexpected_changes.is_empty() {
         structural_failures.push("declared-unaffected-semantic-change".into());
     }
-    let lockstep = lockstep_verdict(&before_layout, &after_layout);
-    if lockstep == LockstepVerdict::Introduced {
-        structural_failures.push("layout-lockstep-mismatch".into());
-    }
+    push_lockstep_findings(
+        &before_layout,
+        &after_layout,
+        &mut structural_failures,
+        &mut advisories,
+    );
     if after_placeholders > before_placeholders {
         structural_failures.push("placeholder-rendered-object".into());
     }
@@ -2578,12 +2606,8 @@ fn verify_proposal(
     }
     structural_failures.sort();
     structural_failures.dedup();
-    let mut advisories = Vec::new();
     if pdf.is_none() {
         advisories.push("pdf-evidence-unavailable".into());
-    }
-    if lockstep == LockstepVerdict::Preexisting {
-        advisories.push("layout-lockstep-mismatch-preexisting".into());
     }
     if page_artifacts
         .iter()
@@ -5710,6 +5734,47 @@ mod tests {
             "one undo reverts the whole proposal"
         );
         assert_eq!(export_bytes(&s).unwrap(), before_bytes);
+    }
+
+    /// #393 — the wiring: only an introduced mismatch blocks; a pre-existing one is an advisory only. (The
+    /// fixture that once covered this through a real document is in step since #537/#564 — no real
+    /// document keeps a mismatch to build one from.)
+    #[test]
+    fn only_an_introduced_lockstep_mismatch_blocks_a_proposal() {
+        use LockstepVerdict::*;
+        assert_eq!(lockstep_findings(InStep), (None, None));
+        assert_eq!(
+            lockstep_findings(Preexisting),
+            (None, Some("layout-lockstep-mismatch-preexisting"))
+        );
+        assert_eq!(
+            lockstep_findings(Introduced),
+            (Some("layout-lockstep-mismatch"), None)
+        );
+        // …and what lands in the verification's lists.
+        let l = |pages: usize, lockstep_pages: usize| LayoutEvidence {
+            pages,
+            lockstep_pages,
+            lines: 0,
+            glyphs: 0,
+            blocks: 0,
+            tables: 0,
+            images: 0,
+        };
+        for ((before, after), failures, advisories) in [
+            ((l(5, 5), l(5, 5)), vec![], vec![]),
+            (
+                (l(18, 17), l(18, 17)),
+                vec![],
+                vec!["layout-lockstep-mismatch-preexisting"],
+            ),
+            ((l(5, 5), l(6, 5)), vec!["layout-lockstep-mismatch"], vec![]),
+        ] {
+            let (mut f, mut a) = (Vec::new(), Vec::new());
+            push_lockstep_findings(&before, &after, &mut f, &mut a);
+            let strings = |v: Vec<&str>| v.into_iter().map(String::from).collect::<Vec<_>>();
+            assert_eq!((f, a), (strings(failures), strings(advisories)));
+        }
     }
 
     #[test]

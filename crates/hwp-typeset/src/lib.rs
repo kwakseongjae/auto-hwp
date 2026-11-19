@@ -518,11 +518,14 @@ impl LayoutEngine for NaiveLayout {
         }
         let mut pages = vec![PageLayout::default()];
         let mut breaks: Vec<PageBreakInfo> = Vec::new();
+        // #537 — 앞 구역에 놓은 블록이 있는가(place_doc · block_pages 의 `started` 와 같은 판정). 「마지막 쪽에
+        // 줄이 있는가」로 보면 표의 행만 있는 쪽 뒤에서 다음 구역을 같은 쪽에 이어 놓아 쪽 수가 갈렸다.
+        let mut started = false;
         for sec in &doc.sections {
             let page = &sec.page;
             let (_, _, body_w, body_h) = body_box(page);
             // Each section starts on a fresh page (matches OWPML section→page).
-            if !pages.last().map(|p| p.lines.is_empty()).unwrap_or(true) {
+            if started {
                 // 구역은 새 쪽에서 시작한다 — 우리 판단이 아니라 문서 구조다.
                 break_page(
                     &mut pages,
@@ -578,7 +581,9 @@ impl LayoutEngine for NaiveLayout {
                             vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
                         }
                         let ratio = line_spacing_ratio(p, doc);
-                        let lines = layout_paragraph(p, doc, body_w, fonts);
+                        // #537 — 문단 왼 · 오른 여백을 뺀 폭에서 줄을 나눈다(place_doc · block_pages 와 같은 폭).
+                        let lines =
+                            layout_paragraph(p, doc, paragraph_wrap_width(p, doc, body_w), fonts);
                         // #542 — 떠 있는 「자리 차지」 도형의 띠. 세 걸음 · 캐럿이 같은 계획을 따른다.
                         let band = float_band_plan(p, &lines, ratio, vert, body_h);
                         let (band_page, band_top) = (pages.len() - 1, vert);
@@ -821,6 +826,7 @@ impl LayoutEngine for NaiveLayout {
                     }
                 }
             }
+            started |= !sec.blocks.is_empty();
         }
         Ok(LayoutResult { pages, breaks })
     }
@@ -830,16 +836,15 @@ impl LayoutEngine for NaiveLayout {
 /// selected for every document without an explicit column-zone/break signal.
 fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutResult {
     let mut pages = vec![PageLayout::default()];
+    // #537 — 한 단 걸음과 같은 판정(앞 구역에 놓은 블록이 있는가 — place_doc_columns 의 `started`).
+    let mut started = false;
     for section in &doc.sections {
         let page = &section.page;
         let (_, _, body_w, body_h) = body_box(page);
-        if !pages
-            .last()
-            .map(|value| value.lines.is_empty())
-            .unwrap_or(true)
-        {
+        if started {
             pages.push(PageLayout::default());
         }
+        started |= !section.blocks.is_empty();
         if let Some(output) = pages.last_mut() {
             let (width, height) = display_paper(page);
             output.width = width as f64;
@@ -871,7 +876,12 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
                         flow.add(shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64);
                     }
                     let ratio = line_spacing_ratio(paragraph, doc);
-                    let lines = layout_paragraph(paragraph, doc, flow.min_width(), fonts);
+                    let lines = layout_paragraph(
+                        paragraph,
+                        doc,
+                        paragraph_wrap_width(paragraph, doc, flow.min_width()),
+                        fonts,
+                    );
                     // #542 — 떠 있는 「자리 차지」 도형의 띠(한 단 걸음과 같은 계획).
                     let band = float_band_plan(
                         paragraph,
@@ -2283,6 +2293,18 @@ fn empty_para_size(p: &Paragraph, doc: &SemanticDoc) -> i32 {
 /// 「그렸다」의 정의는 세 경로가 **똑같아야** 한다(불변식 2) — `horz_size > 0` 인 줄,
 /// 또는 표의 행. 글리프 유무로 재면 갈린다(공백만 있는 줄은 폭이 있는데 글리프가 없다).
 pub(crate) const NOTHING_DRAWN: usize = usize::MAX;
+
+/// #537 — the width a body paragraph's lines break at: `avail_w` minus the paragraph's left and right
+/// margins (≥ 1). One rule for every walk — NaiveLayout wrapped at the full body width while place_doc ·
+/// block_pages took the margins off, so a margin paragraph had more lines in two walks than in the third
+/// (k-water-rfp: 5 against 4) and the page starts drifted apart until a taller table turned the drift
+/// into a different page count.
+pub fn paragraph_wrap_width(p: &Paragraph, doc: &SemanticDoc, avail_w: f64) -> f64 {
+    let ps = doc.para_shapes.get(p.para_shape);
+    let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
+    let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
+    (avail_w - left - right).max(1.0)
+}
 
 pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64, trailing: bool) -> bool {
     // 그리는 줄은 언제나 끊는다 — 어딘가에는 그려져야 한다.

@@ -1832,10 +1832,10 @@ fn body_paragraph_geom(
     let body_w = first_band.w.max(1.0);
     let ps = doc.para_shapes.get(p.para_shape);
     let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
-    let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
     let indent = ps.map(|s| s.indent).unwrap_or(0) as f64;
     let first_extra = indent.max(-left);
-    let wrap_w = (body_w - left - right).max(1.0);
+    // #564 — the same wrap width every walk uses.
+    let wrap_w = hwp_typeset::paragraph_wrap_width(p, doc, body_w);
     let align = ps.map(|s| s.align).unwrap_or_default();
     let laid = hwp_typeset::layout_paragraph(p, doc, wrap_w, fonts);
     if laid.is_empty() {
