@@ -10717,16 +10717,33 @@ mod tests {
             grown > before && grown > 4_000.0,
             "편집한 칸은 내용만큼: {before} → {grown}"
         );
-        // 열 너비를 고친 표도 저장 줄이 낡았다.
+        // 칸 안 문단만 고친 경우(서식 편집은 칸이 아니라 문단에 표시한다)도 칸의 저장 줄이 낡았다.
+        let mut para_edited = fixed_height_table(1, 1_000, false);
+        para_edited.cells[0].blocks = vec![Block::Paragraph(para(&["가"; 4].join("\n")))];
+        para_edited.cells[0].stored_line_extent = Some(1_000);
+        if let Block::Paragraph(p) = &mut para_edited.cells[0].blocks[0] {
+            p.dirty.mark();
+        }
+        assert!(
+            row_h(&para_edited) > 4_000.0,
+            "칸 안 문단을 고친 칸도 내용만큼"
+        );
+        // 열 너비를 고친 표는 모든 칸의 저장 줄이 낡았다(줄은 열 너비에서 나뉜다).
         let mut regeom = fixed_height_table(1, 1_000, false);
         regeom.cells[0].blocks = vec![Block::Paragraph(para(&["가"; 4].join("\n")))];
         regeom.geometry_edited = true;
+        assert_eq!(
+            row_h(&regeom),
+            1_000.0,
+            "행 높이 편집(geometry_edited 만)은 저장 줄을 낡게 하지 않는다"
+        );
+        regeom.col_widths_edited = true;
         assert!(row_h(&regeom) > 4_000.0, "열 너비를 고친 표는 내용만큼");
     }
 
-    /// #537 — 한 쪽짜리(글자처럼 취급) 표는 키운 합이 한글이 저장한 표 개체 높이를 넘지 않는다(개체 높이 ≥ 저장 행 합일
-    /// 때). 키운 양은 행마다 그 비율로 줄인다(⚠️ 가정 — 파일에는 표 전체 높이만 있다). 개체 높이가 저장 행 합보다 작거나, 칸 ·
-    /// 열을 고친 표는 상한을 쓰지 않는다.
+    /// #537 — 글자처럼 취급 표는 저장 줄로 키운 합이 한글이 저장한 표 개체 높이를 넘지 않는다(개체 높이 ≥ 저장 행 합일 때).
+    /// 키운 양은 행마다 그 비율로 줄인다(⚠️ 가정 — 파일에는 표 전체 높이만 있다). 개체 높이가 저장 행 합보다 작거나 내용으로
+    /// 정하는 행(높이 0)이 있으면 상한을 쓰지 않는다. 편집한 칸의 조판 내용은 상한 위에 얹고, 다른 행은 그대로다.
     #[test]
     fn a_grown_fixed_table_stops_at_hanguls_object_height() {
         let rows_of = |t: &Table| {
@@ -10748,8 +10765,30 @@ mod tests {
         assert_eq!(rows_of(&t), vec![3_000.0, 2_000.0]);
         t.stored_object_height = Some(2_000); // 저장 행 합과 같음 → 한글은 키우지 않았다
         assert_eq!(rows_of(&t), vec![1_000.0, 1_000.0]);
-        t.cells[0].dirty.mark(); // 편집한 칸은 상한을 넘을 수 있다
-        assert!(rows_of(&t).iter().sum::<f64>() > 2_000.0);
+        // 칸 하나를 고치면 그 칸만 조판 내용으로 — 다른 행의 상한은 그대로다.
+        let mut edited = t.clone();
+        edited.stored_object_height = Some(3_500); // 고치기 전: [2,000, 1,500]
+        edited.cells[0].blocks = vec![Block::Paragraph(para(&["가"; 4].join("\n")))];
+        edited.cells[0].dirty.mark();
+        let rows = rows_of(&edited);
+        assert!(rows[0] > 4_000.0, "고친 칸은 내용만큼: {rows:?}");
+        assert_eq!(
+            rows[1], 1_500.0,
+            "다른 행은 고치기 전 그대로(상한 몫은 저장한 그대로의 표로 정한다)"
+        );
+        // 행 높이 편집(geometry_edited)은 상한을 끄지 않는다.
+        let mut row_edit = t.clone();
+        row_edit.geometry_edited = true;
+        assert_eq!(rows_of(&row_edit), vec![1_000.0, 1_000.0]);
+        // 내용으로 정하는 행(높이 0)이 있는 표는 상한을 쓰지 않는다(쓰개가 그 행을 잴 수 없어 두 걸음이 갈린다).
+        let mut zero = fixed_height_table(3, 1_000, false);
+        zero.padding = Some([0, 0, 0, 0]);
+        zero.row_heights[2] = 0;
+        zero.cells[0].stored_line_extent = Some(30_000);
+        zero.stored_object_height = Some(5_000); // 저장 합(2,000 + 내용 행)보다 크고 키운 합보다 작다
+        assert_eq!(rows_of(&zero)[0], 30_000.0, "높이 0 행이 있으면 상한 없음");
+        zero.row_heights[2] = 1_000;
+        assert!(rows_of(&zero)[0] < 30_000.0, "모든 행이 저장 높이면 상한");
     }
 
     /// #537 — 여러 행을 덮는 칸의 저장 줄이 덮는 행들의 합보다 길면 모자란 만큼만 마지막 행에 더한다.
@@ -10771,6 +10810,21 @@ mod tests {
             &ApproxFontMetrics,
         );
         assert_eq!(rows, vec![1_000.0, 2_000.0]);
+    }
+
+    /// #537 — 병합 칸이 덮는 행 가운데 하나라도 내용으로 정하는 행(높이 0)이면 그 칸의 저장 줄로 키우지 않는다(그 행은
+    /// 이미 내용 높이를 받는다).
+    #[test]
+    fn a_span_over_a_content_sized_row_does_not_grow() {
+        let mut t = fixed_height_table(2, 1_000, false);
+        t.padding = Some([0, 0, 0, 0]);
+        t.row_heights[1] = 0;
+        t.cells[0].row_span = 2;
+        t.cells[1].active = false;
+        t.cells[0].stored_line_extent = Some(30_000);
+        let doc = shape_doc(vec![Block::Table(t.clone())]);
+        let rows = crate::table_row_heights(&t, 60_000.0, &doc, &ApproxFontMetrics);
+        assert!(rows.iter().sum::<f64>() < 30_000.0, "{rows:?}");
     }
 
     /// #537 PR-1 — 왼 · 오른 여백이 있는 문단은 세 걸음 모두 여백을 뺀 폭에서 줄을 나눈다. NaiveLayout 만 본문 폭 그대로

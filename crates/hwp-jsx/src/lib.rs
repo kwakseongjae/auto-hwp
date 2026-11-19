@@ -1204,6 +1204,7 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         fixed_row_heights: false,
         // A JSX projection carries no op-edit history — geometry re-emit fidelity is the HWPX lane's.
         geometry_edited: false,
+        col_widths_edited: false,
         outer_margin_top: el
             .attrs
             .get("data-omt")

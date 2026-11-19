@@ -3128,6 +3128,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             }
             t.col_widths = widths.clone();
             t.geometry_edited = true;
+            t.col_widths_edited = true; // #537: lines wrap at the column width — stored lines go stale
             t.dirty.mark();
             sec.dirty.mark();
             Ok(())

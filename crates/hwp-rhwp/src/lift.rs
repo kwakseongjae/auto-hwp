@@ -659,12 +659,8 @@ impl<'a> Lifter<'a> {
             // #467: a table floating in front of / behind the text (기안문 직인 box) takes no flow
             // space in Hancom; exporting it inline pushed the form onto a second page.
             treat_as_char: lift_table_float(&t.common).map(|_| false),
-            // #537 — the object height Hangul drew a one-fragment (글자처럼 취급) table at.
-            stored_object_height: t
-                .common
-                .treat_as_char
-                .then(|| i32::try_from(t.common.height).ok())
-                .flatten(),
+            // #537 — the object height Hangul drew a 글자처럼 취급 table at.
+            stored_object_height: lift_object_height(&t.common),
             float_placement: lift_table_float(&t.common),
             provenance: Provenance {
                 source: Some(SourceFormat::Hwp5),
@@ -1402,6 +1398,15 @@ fn border_width_to_px(width: u8) -> f64 {
     px.max(HAIRLINE_MIN_PX)
 }
 
+/// #537 — the object height Hangul stored for a 글자처럼 취급 (treat-as-char) table — what it drew
+/// ([`Table::stored_object_height`]). `None` for any other table (a floating or wrapped table's
+/// object height is not the space it takes in the text).
+fn lift_object_height(c: &rhwp::model::shape::CommonObjAttr) -> Option<HwpUnit> {
+    c.treat_as_char
+        .then(|| HwpUnit::try_from(c.height).ok())
+        .flatten()
+}
+
 /// Floating placement of a non-inline table whose text wrap lets it overlap the text
 /// (`IN_FRONT_OF_TEXT`/`BEHIND_TEXT`) — see [`Table::float_placement`]. Other tables → `None`.
 /// Offsets are stored HWPUNIT as-is (unlike paragraph margins they are not doubled in HWP5).
@@ -1591,6 +1596,30 @@ mod tests {
             ..stamp
         };
         assert!(lift_table_float(&inline).is_none());
+    }
+
+    /// #537: only a 글자처럼 취급 table records its object height.
+    #[test]
+    fn only_a_treat_as_char_table_records_its_object_height() {
+        use rhwp::model::shape::{CommonObjAttr, TextWrap};
+        let inline = CommonObjAttr {
+            treat_as_char: true,
+            height: 7_972,
+            ..Default::default()
+        };
+        assert_eq!(lift_object_height(&inline), Some(7_972));
+        for text_wrap in [
+            TextWrap::TopAndBottom,
+            TextWrap::InFrontOfText,
+            TextWrap::BehindText,
+        ] {
+            let placed = CommonObjAttr {
+                treat_as_char: false,
+                text_wrap,
+                ..inline.clone()
+            };
+            assert_eq!(lift_object_height(&placed), None);
+        }
     }
 
     #[test]

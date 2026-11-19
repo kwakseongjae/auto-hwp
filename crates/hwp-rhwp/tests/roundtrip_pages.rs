@@ -159,7 +159,7 @@ fn roundtrip_preserves_stored_row_height_floors() {
             for b in &s.blocks {
                 if let Block::Table(t) = b {
                     let mut rows: Vec<f64> = t.row_heights.iter().map(|&h| f64::from(h)).collect();
-                    t.grow_fixed_rows(&mut rows, |i| t.stored_lines_need(i, 280.0));
+                    t.grow_fixed_rows(&mut rows, hwp_model::document::CELL_PAD_DEFAULT, |_| 0.0);
                     out.push(rows.iter().map(|&h| h.ceil() as HwpUnit).collect());
                 }
             }
@@ -447,26 +447,53 @@ fn converted_hwpx_keeps_rows_grown_for_stored_lines() {
             .collect()
     }
     let fonts = fonts();
-    for rel in [
-        "benchmarks/benchmark.hwp",
-        "benchmarks/benchmark1.hwp",
-        "benchmarks/benchmark2.hwp",
-        "corpus/hwp/tac-img-02.hwp",
+    // (문서, 쪽 수도 대조하나). 복학원서는 굽기와 무관하게 다시 열면 1 → 2쪽이 되는 기존 왕복 차이가 있어 표만 본다 —
+    // 그 문서의 한 표는 높이 0(내용으로 정하는) 행이 있고 개체 높이 상한이 걸리는 자리라, 굽기가 조판과 같은
+    // 바탕으로 상한을 판단하는지를 잡는다.
+    for (rel, pages) in [
+        ("benchmarks/benchmark.hwp", true),
+        ("benchmarks/benchmark1.hwp", true),
+        ("benchmarks/benchmark2.hwp", true),
+        ("corpus/hwp/tac-img-02.hwp", true),
+        ("corpus/hwp/복학원서.hwp", false),
     ] {
         let path = format!("{}/../../{rel}", env!("CARGO_MANIFEST_DIR"));
         let orig = parse(&std::fs::read(&path).unwrap_or_else(|e| panic!("read {path}: {e}")));
         let hwpx = hwp_hwpx::serialize::serialize(&orig).expect("serialize to HWPX");
         let reopened = reopen_hwpx(&hwpx);
-        assert_eq!(
-            page_counts(&reopened, &fonts),
-            page_counts(&orig, &fonts),
-            "{rel}: 쪽 수"
-        );
-        // 키운 행은 다시 연 문서에서도 그대로다(짧아지지 않는다). ⚠️ 자기 칸이 없는 행(병합 칸만 지나는 행)은
-        // 다시 열 때 다음 행에 높이를 넘기는 기존 왕복 차이가 있어(benchmark2 의 한 표 60 → +60) 같음 대신
-        // 「줄지 않음」을 본다 — #537 과 무관하다(굽기 전에도 같다).
+        if pages {
+            assert_eq!(
+                page_counts(&reopened, &fonts),
+                page_counts(&orig, &fonts),
+                "{rel}: 쪽 수"
+            );
+        }
+        // 키운 행은 다시 연 문서에서도 그대로다: 표 합계가 같고(굽기의 올림만큼 — 행 수 이내) 어느 행도 줄지 않는다.
+        // ⚠️ 자기 칸이 없는 행(병합 칸만 지나는 행)은 다시 열 때 다음 행에 높이를 넘기는 기존 왕복 차이가 있어
+        // (benchmark2 의 한 표 60 → +60) 행마다 같음 대신 「줄지 않음」을 본다 — #537 과 무관하다(굽기 전에도 같다).
         let (r1, r0) = (rows(&reopened, &fonts), rows(&orig, &fonts));
         assert_eq!(r1.len(), r0.len(), "{rel}: 표 수");
+        let stored: Vec<&Vec<HwpUnit>> = orig
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .filter_map(|b| match b {
+                Block::Table(t) => Some(&t.row_heights),
+                Block::Paragraph(_) => None,
+            })
+            .collect();
+        let reshaped: Vec<bool> = r0
+            .iter()
+            .zip(&stored)
+            .map(|(laid, st)| {
+                laid.iter()
+                    .zip(st.iter())
+                    .any(|(&l, &s)| (l - i64::from(s)).abs() > 1)
+            })
+            .collect();
+        let grown_tables = reshaped.iter().filter(|&&r| r).count();
+        // 복학원서(쪽 수를 대조하지 않는 문서)는 합계 대조가 실제로 도는지 — 그 표가 여기 걸려야 한다.
+        assert!(grown_tables > 0 || pages, "{rel}: 합계를 대조할 표가 있다");
         for (ti, (a, b)) in r1.iter().zip(&r0).enumerate() {
             assert_eq!(a.len(), b.len(), "{rel}: 표 {ti} 행 수");
             for (ri, (h1, h0)) in a.iter().zip(b).enumerate() {
@@ -475,6 +502,16 @@ fn converted_hwpx_keeps_rows_grown_for_stored_lines() {
                     "{rel}: 표 {ti} 행 {ri} — 다시 연 {h1} < 원본 {h0}"
                 );
             }
+            // 합계는 원본에서 행이 저장 높이와 달라진(키웠거나 내용으로 정한) 표만 본다 — 나머지는 #537 과 무관한
+            // 위 왕복 차이가 합계를 바꿀 수 있다.
+            if !reshaped[ti] {
+                continue;
+            }
+            let (s1, s0): (i64, i64) = (a.iter().sum(), b.iter().sum());
+            assert!(
+                (s1 - s0).abs() <= a.len() as i64,
+                "{rel}: 표 {ti} 합계 — 다시 연 {s1} ≠ 원본 {s0}\n  다시 연 {a:?}\n  원본    {b:?}"
+            );
         }
     }
 }
