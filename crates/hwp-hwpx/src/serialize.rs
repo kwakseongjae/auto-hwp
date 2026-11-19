@@ -2920,11 +2920,17 @@ fn bake_stored_line_rows(blocks: &mut [Block]) {
 
 /// The `<hp:outMargin>` to write for `t`, `None` = unknown (→ the legacy 283 box).
 ///
-/// A table read from a binary `.hwp` (`provenance.source == Hwp5`) always carries its 바깥 여백 —
-/// the binary stores it as a fixed field — so all-zero there is a real value and is written as 0.
-/// Writing 283 instead made every such table 566 HWPUNIT taller after conversion, enough to push a
-/// table onto the next page. Any other table keeps the old reading: all-zero = nothing captured
-/// (an editor-inserted table, or HWPX input whose `<hp:outMargin>` was absent).
+/// A table read from a binary `.hwp` carries its 바깥 여백 — the binary stores it as a fixed field —
+/// so all-zero there is a real value and is written as 0. Writing 283 instead made every such table
+/// 566 HWPUNIT taller after conversion, enough to push a table onto the next page (#537).
+///
+/// "Read from a `.hwp`" = `provenance.source == Hwp5` AND the table-default padding was captured
+/// (`padding.is_some()`): both `.hwp` readers capture padding together with the margins (054 F2),
+/// while a JSX projection keeps the Hwp5 provenance but drops both (its margins are unknown, not
+/// zero). Any other table keeps the old reading: all-zero = nothing captured (an editor-inserted
+/// table, a JSX table, or HWPX input whose `<hp:outMargin>` was absent).
+/// ⚠️ The rhwp lift also stamps Hwp5 on HWPX bytes it lifts; Hangul writes `<hp:outMargin>` on every
+/// table, so all-zero there is real too.
 fn emit_outer_margin(t: &Table) -> Option<[i32; 4]> {
     let m = [
         t.outer_margin_left,
@@ -2932,7 +2938,8 @@ fn emit_outer_margin(t: &Table) -> Option<[i32; 4]> {
         t.outer_margin_top,
         t.outer_margin_bottom,
     ];
-    (t.provenance.source == Some(SourceFormat::Hwp5) || m.iter().any(|&v| v != 0)).then_some(m)
+    let captured = t.provenance.source == Some(SourceFormat::Hwp5) && t.padding.is_some();
+    (captured || m.iter().any(|&v| v != 0)).then_some(m)
 }
 
 fn placed_cells(t: &Table) -> Vec<PlacedCell> {
@@ -3929,7 +3936,7 @@ mod tests {
     /// conversion and pushed it onto the next page.)
     #[test]
     fn zero_outer_margin_is_kept_for_hwp5_tables_only() {
-        let emit = |source: Option<SourceFormat>| {
+        let emit = |source: Option<SourceFormat>, padding: Option<[i32; 4]>| {
             let mut doc = parse_semantic(&showcase()).unwrap();
             let cell = Cell {
                 row: 0,
@@ -3953,6 +3960,7 @@ mod tests {
                 cells: vec![cell],
                 col_widths: vec![8000],
                 row_heights: vec![1500],
+                padding,
                 provenance: Provenance { source, raw: None },
                 dirty: Dirty(true),
                 ..Default::default()
@@ -3961,6 +3969,8 @@ mod tests {
             let out = serialize(&doc).unwrap();
             let pkg = Package::open(&out).unwrap();
             let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+            // The pushed table is the section's last table (the base document has its own tables).
+            let sec0 = sec0[sec0.rfind("<hp:tbl ").expect("a table")..].to_string();
             let doc2 = parse_semantic(&out).unwrap();
             let t = doc2.sections[0]
                 .blocks
@@ -3981,18 +3991,32 @@ mod tests {
                 ],
             )
         };
-        let (xml, reopened) = emit(Some(SourceFormat::Hwp5));
+        let read = Some([510, 510, 141, 141]); // the .hwp readers capture padding with the margins
+        let zero = r#"<hp:outMargin left="0" right="0" top="0" bottom="0"/>"#;
+        let legacy = r#"<hp:outMargin left="283" right="283" top="283" bottom="283"/>"#;
+        let (xml, reopened) = emit(Some(SourceFormat::Hwp5), read);
         assert!(
-            xml.contains(r#"<hp:outMargin left="0" right="0" top="0" bottom="0"/>"#),
+            xml.contains(zero),
             ".hwp 표의 바깥 여백 0 은 실제 값으로 적는다"
         );
         assert_eq!(reopened, [0; 4], "다시 열어도 0");
-        let (xml, reopened) = emit(None);
-        assert!(
-            xml.contains(r#"<hp:outMargin left="283" right="283" top="283" bottom="283"/>"#),
-            "출처 없는 표의 0 은 「모름」 — 기존 283 상자"
-        );
-        assert_eq!(reopened, [283; 4]);
+        for (source, padding, why) in [
+            (None, None, "출처 없는 표(편집기로 넣은 표)"),
+            (
+                Some(SourceFormat::Hwpx),
+                read,
+                "HWPX 표(outMargin 속성이 없으면 0 으로 읽힌다)",
+            ),
+            (
+                Some(SourceFormat::Hwp5),
+                None,
+                "JSX 로 거친 .hwp 표(여백을 싣지 않는다)",
+            ),
+        ] {
+            let (xml, reopened) = emit(source, padding);
+            assert!(xml.contains(legacy), "{why}: 0 은 「모름」 — 기존 283 상자");
+            assert_eq!(reopened, [283; 4], "{why}");
+        }
     }
 
     /// #467: a floating table (글 앞으로 · 직인 상자) keeps its wrap, z-order and offsets — emitted
