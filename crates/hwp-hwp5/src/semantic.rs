@@ -2303,6 +2303,16 @@ fn parse_inline_table(
         }
         cell_heights.push(cell_height as HwpUnit);
         cell_width_refs.push(width_ref);
+        let stored_line_extent = hwp_model::document::stored_line_extent(
+            blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Paragraph(p) => Some(p),
+                    Block::Table(_) => None,
+                })
+                .flat_map(|p| &p.source_line_geometry)
+                .map(|l| (i64::from(l.vertical_pos), i64::from(l.height))),
+        );
         cells.push(Cell {
             row,
             col,
@@ -2318,6 +2328,9 @@ fn parse_inline_table(
             // bits (protect/header/form) were rejected with the width-reference word above.
             padding: (width_ref == 0x0501).then_some(cell_padding.map(|value| value as HwpUnit)),
             width: Some(layout_width as HwpUnit),
+            // #537 — the cell's stored line extent, as the rhwp lift records it (same rule, same lines:
+            // the cell's own paragraphs, not a nested table's).
+            stored_line_extent,
             ..Cell::default()
         });
     }
