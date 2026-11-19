@@ -304,6 +304,7 @@ fn serialize_from_scratch(doc: &SemanticDoc) -> Result<Vec<u8>> {
     for sec in &mut seeded.sections {
         sec.provenance.raw = Some(base_section0.clone());
         sec.dirty.mark();
+        bake_stored_line_rows(&mut sec.blocks);
         for block in &mut sec.blocks {
             mark_block_dirty(block);
         }
@@ -2913,6 +2914,31 @@ fn emit_outer_margin(t: &Table) -> Option<[i32; 4]> {
     ];
     let captured = t.provenance.source == Some(SourceFormat::Hwp5) && t.padding.is_some();
     (captured || m.iter().any(|&v| v != 0)).then_some(m)
+}
+
+/// #537 — bake the rows a `.hwp` table grows for its stored lines into its stored heights, in place and
+/// recursively (cells' and captions' tables too). A `.hwp` → HWPX conversion writes `noAdjust="1"` (exact
+/// heights) and does not carry the stored lines, so without this the reopened document would clip again
+/// what the original draws. Same rows, same rule as the typesetter (`Table::grow_fixed_rows` with
+/// `Table::stored_lines_need`); 280 is the typesetter's default cell padding (`CELL_PAD`) for a cell that
+/// declares none. Runs BEFORE the conversion marks every block dirty — an edited cell (dirty before that)
+/// is not baked: its need is a laid-out height and this writer does no layout.
+fn bake_stored_line_rows(blocks: &mut [Block]) {
+    for b in blocks {
+        let Block::Table(t) = b else { continue };
+        for c in &mut t.cells {
+            bake_stored_line_rows(&mut c.blocks);
+        }
+        if let Some(caption) = t.caption.as_mut() {
+            bake_stored_line_rows(&mut caption.blocks);
+        }
+        if !t.fixed_row_heights || t.cells.iter().all(|c| c.stored_line_extent.is_none()) {
+            continue;
+        }
+        let mut rows: Vec<f64> = t.row_heights.iter().map(|&h| f64::from(h)).collect();
+        t.grow_fixed_rows(&mut rows, |i| t.stored_lines_need(i, 280.0));
+        t.row_heights = rows.iter().map(|&h| h.ceil() as HwpUnit).collect();
+    }
 }
 
 /// Project a table's ACTIVE cells to [`PlacedCell`]s, recursively projecting each cell's content.

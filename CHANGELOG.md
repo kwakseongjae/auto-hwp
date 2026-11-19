@@ -88,6 +88,16 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   값을 쓰고, 편집기로 넣은 표 · JSX 를 거친 표 · 바깥 여백 속성이 없는 HWPX 표는 그대로 283 이다.
   *(EN — Fixed: converting `.hwp` to HWPX keeps a table's all-zero outer margin as 0 instead of the legacy 283; tables without
   captured margins still get 283.)*
+- **`.hwp` 의 고정 높이 행이 한글이 저장한 줄보다 낮으면 행을 키워 글을 다 그린다 (#537).** 한글이 저장한 칸 높이가 그 칸에 한글 자신이
+  저장한 줄보다 작은 경우가 있는데, 한글은 행을 키워 다 그리고 이 엔진은 저장 높이에서 잘랐다(표 아래 내용이 수십 pt 올라가고 글이
+  사라짐). 이제 고치지 않은 칸은 저장된 줄 + 칸 위 · 아래 여백이 저장 높이보다 크면 그만큼, 편집한 칸(또는 열 너비를 고친 표)은 조판한
+  내용만큼 행을 키운다. 그 밖의 고정 행은 지금처럼 정확값이다(#247). `.hwp` → HWPX 변환도 키운 높이로 써서 다시 연 문서가 같다.
+  - 쪽 수가 바뀌는 문서: 공개 tac-img-02 63 → 65쪽(오라클 66), 비공개 4문서 +1쪽. 게이트 문서(8 · 18 · 24 · 6)는 그대로이고, 칸 안에서
+    잘린 줄은 127문서 합계 784 → 517 이다. ⚠️ 판단 기준은 한글이 저장한 줄이다 — 한글 PDF 와 행마다 맞춰 보지는 않았다.
+  - 동작 변화: 편집으로 넘친 고정 칸이 잘리지 않고 행이 늘어난다. `tableCellFits` 의 `overflow` 는 키운 행 기준이라 넘침이 줄어든다.
+  *(EN — Fixed: a `.hwp` fixed-height row whose stored lines exceed its stored height now grows to them (unedited cells: stored lines +
+  vertical padding; edited cells: laid-out content); conversion to HWPX writes the grown heights. Checked against Hangul's stored
+  lines, not row by row against a Hangul PDF.)*
 - **쪽 수 세기(`NaiveLayout` — 쪽 수 API · 레이아웃 오라클의 우리 쪽 수)가 그리기(`place_doc`)와 갈리던 두 자리를 고쳤다 (#537).**
   ① 구역의 마지막 쪽에 표의 행만 있으면(앞 쪽에서 넘어온 행 · 쪽보다 큰 행) 다음 구역을 같은 쪽에 이어 세었다. ② 왼 · 오른
   여백이 있는 문단을 본문 폭 그대로 줄 나눠 줄을 적게 셌다. 이제 그리기와 같은 판정 · 같은 폭이다. 공개 · 비공개 127문서의
@@ -1244,4 +1254,5 @@ deprecated on 2026-07-29 in favor of >=0.0.2.)*
 >
 > *(EN — No release-comparison links yet: the repository has zero tags, so a Keep a Changelog diff link
 > would be fabricated. Tag `v0.0.2` at publish time and start linking from there.)*
+
 

@@ -151,7 +151,22 @@ fn roundtrip_preserves_stored_row_height_floors() {
         }
         out
     };
-    let a = tables(&orig);
+    // #537 — the conversion writes each row grown where an unedited cell's stored lines need more (the
+    // rows the typesetter grows); every other row keeps its stored floor exactly.
+    let baked = |d: &SemanticDoc| -> Vec<Vec<HwpUnit>> {
+        let mut out = Vec::new();
+        for s in &d.sections {
+            for b in &s.blocks {
+                if let Block::Table(t) = b {
+                    let mut rows: Vec<f64> = t.row_heights.iter().map(|&h| f64::from(h)).collect();
+                    t.grow_fixed_rows(&mut rows, |i| t.stored_lines_need(i, 280.0));
+                    out.push(rows.iter().map(|&h| h.ceil() as HwpUnit).collect());
+                }
+            }
+        }
+        out
+    };
+    let a = baked(&orig);
     let b = tables(&reopened);
     assert_eq!(a.len(), b.len(), "왕복 후 표 개수 보존");
     let mut mismatched = 0usize;
@@ -407,4 +422,59 @@ fn a_caption_tables_borders_survive_conversion() {
     let want = inner(caption_table(&mut doc)).clone();
     assert_eq!(style(&got), style(&want), "캡션 안 표 칸의 테두리");
     assert_eq!(got.shade_color, want.shade_color, "캡션 안 표 칸의 음영");
+}
+
+/// #537 — `.hwp` → HWPX 변환은 저장 줄이 넘친 고정 행을 키운 높이로 써서(`noAdjust="1"`), 다시 연 문서도 원본과 같은
+/// 쪽 수 · 같은 행 높이다. 변환은 저장 줄을 넘기지 않으므로 굽지 않으면 다시 연 문서가 다시 잘린다. 공개 문서 넷 —
+/// tac-img-02 는 키우는 행이 가장 많다(63 → 65쪽).
+#[test]
+fn converted_hwpx_keeps_rows_grown_for_stored_lines() {
+    fn rows(d: &SemanticDoc, f: &dyn FontMetricsProvider) -> Vec<Vec<i64>> {
+        d.sections
+            .iter()
+            .flat_map(|s| {
+                let (_, _, w, _) = hwp_typeset::body_box(&s.page);
+                s.blocks.iter().filter_map(move |b| match b {
+                    Block::Table(t) => Some(
+                        hwp_typeset::row_term_breakdown(t, w, d, f)
+                            .iter()
+                            .map(|r| r.reserved.round() as i64)
+                            .collect(),
+                    ),
+                    Block::Paragraph(_) => None,
+                })
+            })
+            .collect()
+    }
+    let fonts = fonts();
+    for rel in [
+        "benchmarks/benchmark.hwp",
+        "benchmarks/benchmark1.hwp",
+        "benchmarks/benchmark2.hwp",
+        "corpus/hwp/tac-img-02.hwp",
+    ] {
+        let path = format!("{}/../../{rel}", env!("CARGO_MANIFEST_DIR"));
+        let orig = parse(&std::fs::read(&path).unwrap_or_else(|e| panic!("read {path}: {e}")));
+        let hwpx = hwp_hwpx::serialize::serialize(&orig).expect("serialize to HWPX");
+        let reopened = reopen_hwpx(&hwpx);
+        assert_eq!(
+            page_counts(&reopened, &fonts),
+            page_counts(&orig, &fonts),
+            "{rel}: 쪽 수"
+        );
+        // 키운 행은 다시 연 문서에서도 그대로다(짧아지지 않는다). ⚠️ 자기 칸이 없는 행(병합 칸만 지나는 행)은
+        // 다시 열 때 다음 행에 높이를 넘기는 기존 왕복 차이가 있어(benchmark2 의 한 표 60 → +60) 같음 대신
+        // 「줄지 않음」을 본다 — #537 과 무관하다(굽기 전에도 같다).
+        let (r1, r0) = (rows(&reopened, &fonts), rows(&orig, &fonts));
+        assert_eq!(r1.len(), r0.len(), "{rel}: 표 수");
+        for (ti, (a, b)) in r1.iter().zip(&r0).enumerate() {
+            assert_eq!(a.len(), b.len(), "{rel}: 표 {ti} 행 수");
+            for (ri, (h1, h0)) in a.iter().zip(b).enumerate() {
+                assert!(
+                    h1 + 1 >= *h0,
+                    "{rel}: 표 {ti} 행 {ri} — 다시 연 {h1} < 원본 {h0}"
+                );
+            }
+        }
+    }
 }
