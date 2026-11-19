@@ -596,6 +596,7 @@ impl<'a> Lifter<'a> {
                     width: i32::try_from(cell_layout_width(c))
                         .ok()
                         .filter(|width| *width > 0),
+                    stored_line_extent: stored_line_extent(c),
                     ..Default::default()
                 }
             })
@@ -921,6 +922,25 @@ fn splice_inline_objects(runs: &mut Vec<Run>, mut objects: Vec<(usize, Inline)>)
 /// the result as a FLOOR, so content-driven rows are untouched and only genuinely fixed rows grow. A
 /// height of 0 (empty/unsized cell) leaves the row content-sized. See the call site for why this pairs
 /// with the trailing-leading trim to land benchmark1's 18 pages.
+/// #537 — Hangul's stored extent of a cell's lines (HWPUNIT): the last stored line's bottom minus the
+/// first line's top (line positions run on across the cell's paragraphs). When every line sits at
+/// position 0 (a file that leaves positions unfilled) the bare line heights are summed instead.
+/// `None` when the cell stores no lines.
+fn stored_line_extent(c: &rhwp::model::table::Cell) -> Option<i32> {
+    let segs: Vec<_> = c
+        .paragraphs
+        .iter()
+        .flat_map(|p| p.line_segs.iter())
+        .collect();
+    let (first, last) = (segs.first()?, segs.last()?);
+    let extent = if segs.len() == 1 || last.vertical_pos > first.vertical_pos {
+        i64::from(last.vertical_pos) + i64::from(last.line_height) - i64::from(first.vertical_pos)
+    } else {
+        segs.iter().map(|l| i64::from(l.line_height)).sum()
+    };
+    i32::try_from(extent.max(0)).ok()
+}
+
 fn stored_row_heights(cells: &[rhwp::model::table::Cell], rows: usize) -> Vec<i32> {
     let mut row_h = vec![0i32; rows];
     // ① 한 행짜리 셀이 그 행의 저장 높이를 정한다.
