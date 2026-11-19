@@ -6931,6 +6931,19 @@ mod tests {
             },
         )
         .unwrap();
+        // #537 — as if the table came from a file: nothing in it edited, so its stored lines hold.
+        let Block::Table(t) = &mut doc.sections[0].blocks[1] else {
+            panic!("table")
+        };
+        for c in &mut t.cells {
+            c.dirty = Dirty(false);
+            for b in &mut c.blocks {
+                if let Block::Paragraph(p) = b {
+                    p.dirty = Dirty(false);
+                }
+            }
+        }
+        assert!((0..t.cells.len()).all(|i| !t.cell_lines_stale(i)));
         // Correct length sets the proportions.
         apply(
             &mut doc,
@@ -6945,6 +6958,10 @@ mod tests {
             panic!("table")
         };
         assert_eq!(t.col_widths, vec![3, 1, 1]);
+        // #537 — lines wrap at the column width: after a column-width edit every cell's stored lines
+        // are stale (the cells themselves are not marked).
+        assert!(t.col_widths_edited);
+        assert!((0..t.cells.len()).all(|i| t.cell_lines_stale(i)));
         // Wrong length / non-positive is rejected (no partial mutation).
         assert!(apply(
             &mut doc,

@@ -835,9 +835,10 @@ pub struct Table {
     /// genuinely resized table falls back to a whole-table re-emit (which applies the new geometry).
     /// Parsed/lifted tables leave this false; only [`crate`]-level geometry ops set it.
     pub geometry_edited: bool,
-    /// #537: true once an OP changed the column widths (`SetTableColWidths`, column insert/delete) —
-    /// lines wrap at the column width, so every cell's stored lines are stale
-    /// ([`Table::cell_lines_stale`]). A row-height edit sets [`Table::geometry_edited`] but not this.
+    /// #537: true once `SetTableColWidths` changed the column widths — lines wrap at the column width,
+    /// so every cell's stored lines are stale ([`Table::cell_lines_stale`]). Column insert/delete do not
+    /// set it: they mark the cells they move or resize dirty instead (every cell when the table's widths
+    /// are known). A row-height edit sets [`Table::geometry_edited`] but not this.
     pub col_widths_edited: bool,
     /// Outer vertical margins (바깥 여백, HWPUNIT) above/below the table object — the gap HWP keeps
     /// between a table and its neighbours. Lifted from the binary; 0 when unknown. Without these,
