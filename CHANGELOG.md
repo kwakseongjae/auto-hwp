@@ -83,6 +83,11 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 고침 (Fixed)
 
+- **`.hwp` → HWPX 변환에서 표 바깥 여백 0 을 0 으로 쓴다.** `.hwp` 는 표 바깥 여백을 늘 적으므로 네 방향 0 도 실제 값인데, 쓰개가
+  이것을 「모름」으로 보고 예전 283 을 써서 다시 연 표가 위 · 아래 283 씩 커졌다(쪽이 밀릴 수 있다). 이제 `.hwp` 읽개가 담은 표는 실제
+  값을 쓰고, 편집기로 넣은 표 · JSX 를 거친 표 · 바깥 여백 속성이 없는 HWPX 표는 그대로 283 이다.
+  *(EN — Fixed: converting `.hwp` to HWPX keeps a table's all-zero outer margin as 0 instead of the legacy 283; tables without
+  captured margins still get 283.)*
 - **쪽 수 세기(`NaiveLayout` — 쪽 수 API · 레이아웃 오라클의 우리 쪽 수)가 그리기(`place_doc`)와 갈리던 두 자리를 고쳤다 (#537).**
   ① 구역의 마지막 쪽에 표의 행만 있으면(앞 쪽에서 넘어온 행 · 쪽보다 큰 행) 다음 구역을 같은 쪽에 이어 세었다. ② 왼 · 오른
   여백이 있는 문단을 본문 폭 그대로 줄 나눠 줄을 적게 셌다. 이제 그리기와 같은 판정 · 같은 폭이다. 공개 · 비공개 127문서의
