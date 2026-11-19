@@ -2299,7 +2299,7 @@ pub(crate) const NOTHING_DRAWN: usize = usize::MAX;
 /// block_pages took the margins off, so a margin paragraph had more lines in two walks than in the third
 /// (k-water-rfp: 5 against 4) and the page starts drifted apart until a taller table turned the drift
 /// into a different page count.
-pub(crate) fn paragraph_wrap_width(p: &Paragraph, doc: &SemanticDoc, avail_w: f64) -> f64 {
+pub fn paragraph_wrap_width(p: &Paragraph, doc: &SemanticDoc, avail_w: f64) -> f64 {
     let ps = doc.para_shapes.get(p.para_shape);
     let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
     let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;

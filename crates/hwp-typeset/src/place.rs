@@ -10541,6 +10541,146 @@ mod tests {
         }
     }
 
+    /// #564 수용 기준 2 — 왼 · 오른 여백 · 들여쓰기 · 내어쓰기 문단에 본문보다 넓은 것까지 글자처럼 취급 상자 도형이
+    /// 앞 · 뒤에 붙어도 NaiveLayout 과 다른 걸음의 줄 수 · 쪽 수가 같다(리뷰 탐침 퍼징의 꼴 — main 은 363건이 갈렸다).
+    /// 한 단 · 두 단, 쪽 높이 둘.
+    #[test]
+    fn indented_paragraphs_with_wide_inline_shapes_agree_in_every_walk() {
+        use crate::LayoutEngine;
+        let shape = |width: i32| ShapeRef {
+            kind: ShapeKind::Rect,
+            width,
+            height: 2_000,
+            treat_as_char: true,
+            ..Default::default()
+        };
+        for columns in [false, true] {
+            for height in [15_000, 40_000] {
+                let mut blocks = Vec::new();
+                let mut shapes = Vec::new();
+                for (i, (left, right, indent)) in [
+                    (0, 0, -6_000),
+                    (9_000, 3_000, 4_000),
+                    (15_000, 10_000, -3_000),
+                    (3_000, 0, 6_000),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    for (j, width) in [5_000, 30_000, 70_000].into_iter().enumerate() {
+                        let mut p = para(&"가".repeat(60 + 17 * j));
+                        p.para_shape = 1 + i;
+                        let at = if (i + j) % 2 == 0 { 0 } else { 1 };
+                        p.runs[0].content.insert(at, Inline::Shape(shape(width)));
+                        if blocks.is_empty() && columns {
+                            p.column_layout_before = Some(two_columns());
+                        }
+                        blocks.push(Block::Paragraph(p));
+                    }
+                    shapes.push((left, right, indent));
+                }
+                let mut doc = shape_doc(blocks);
+                doc.sections[0].page.height = height;
+                for (left, right, indent) in shapes {
+                    let mut ps = doc.para_shapes[0].clone();
+                    ps.left_margin = left;
+                    ps.right_margin = right;
+                    ps.indent = indent;
+                    doc.para_shapes.push(ps);
+                }
+                let case = format!("두 단 {columns} · 쪽 높이 {height}");
+                let placed = place_doc(&doc, &ApproxFontMetrics);
+                let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+                assert_eq!(naive.pages.len(), placed.pages.len(), "{case}: LOCKSTEP");
+                if let Some(walked) = block_line_pages(&doc, &ApproxFontMetrics) {
+                    let naive_lines: usize = naive.pages.iter().map(|p| p.lines.len()).sum();
+                    let walked_lines: usize = walked[0].iter().map(Vec::len).sum();
+                    assert_eq!(naive_lines, walked_lines, "{case}: 줄 수");
+                }
+            }
+        }
+    }
+
+    /// #564 리뷰 — 여백 문단의 줄 수 기대값: 본문 60,000 에서 왼 9,000 · 오른 3,000 을 뺀 48,000 이 줄 폭이라 「가」
+    /// 200자(글자 1,000)는 48자씩 다섯 줄이다. 오른 여백을 빼지 않으면 넉 줄(세 걸음이 같이 틀려 LOCKSTEP 으로는 못 잡는다).
+    #[test]
+    fn a_margin_paragraph_wraps_at_body_width_minus_both_margins() {
+        use crate::LayoutEngine;
+        let mut p = para(&"가".repeat(200));
+        p.para_shape = 1;
+        let mut doc = shape_doc(vec![Block::Paragraph(p)]);
+        let mut ps = doc.para_shapes[0].clone();
+        ps.left_margin = 9_000;
+        ps.right_margin = 3_000;
+        doc.para_shapes.push(ps);
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+        assert_eq!(naive.pages[0].lines.len(), 5);
+        let walked = block_line_pages(&doc, &ApproxFontMetrics).unwrap();
+        assert_eq!(walked[0][0].len(), 5);
+    }
+
+    /// #537 PR-1 리뷰 — 구역 시작 판정의 두 꼴: 「앞에 놓은 블록이 있는 구역 → 빈 구역 → 내용 있는 구역」과 「표만 있는
+    /// 구역」. 어느 쪽이든 다음 구역은 앞 구역 뒤 새 쪽에서 시작하고, 세 걸음(place_doc · NaiveLayout · block_pages)이 같다.
+    /// 빈 구역이 「앞에 놓은 것」을 잊게 하거나(`started =`) 문단만 「놓은 것」으로 세면 갈린다. 한 단 · 두 단.
+    #[test]
+    fn section_starts_agree_after_an_empty_or_a_table_only_section() {
+        use crate::LayoutEngine;
+        for columns in [false, true] {
+            for (name, middle) in [
+                ("빈 구역", vec![]),
+                (
+                    "표만 있는 구역",
+                    vec![Block::Table(fixed_height_table(2, 3_000, false))],
+                ),
+            ] {
+                let mut lead = para("앞");
+                if columns {
+                    lead.column_layout_before = Some(two_columns());
+                }
+                let mut doc = shape_doc(vec![Block::Paragraph(lead)]);
+                let mut mid = doc.sections[0].clone();
+                mid.blocks = middle;
+                let mut last = doc.sections[0].clone();
+                last.blocks = vec![Block::Paragraph(para("끝"))];
+                doc.sections.push(mid);
+                doc.sections.push(last);
+                let case = format!("{name} · 두 단 {columns}");
+                let placed = place_doc(&doc, &ApproxFontMetrics);
+                let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+                let walked = block_pages(&doc, &ApproxFontMetrics);
+                let end_page = placed
+                    .pages
+                    .iter()
+                    .position(|pg| pg.glyphs.iter().any(|g| g.ch == '끝'))
+                    .expect("끝 문단");
+                assert!(end_page >= 1, "{case}: 끝 구역은 앞 구역 뒤 새 쪽");
+                assert_eq!(naive.pages.len(), placed.pages.len(), "{case}: LOCKSTEP");
+                assert_eq!(walked[2][0], end_page, "{case}: block_pages");
+            }
+            // 표만 있는 첫 구역 — 표도 「놓은 블록」이다.
+            let mut last = para("끝");
+            if columns {
+                last.column_layout_before = Some(two_columns());
+            }
+            let mut doc = shape_doc(vec![Block::Table(fixed_height_table(2, 3_000, false))]);
+            let mut next = doc.sections[0].clone();
+            next.blocks = vec![Block::Paragraph(last)];
+            doc.sections.push(next);
+            let case = format!("표만 있는 첫 구역 · 두 단 {columns}");
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+            let walked = block_pages(&doc, &ApproxFontMetrics);
+            let end_page = placed
+                .pages
+                .iter()
+                .position(|pg| pg.glyphs.iter().any(|g| g.ch == '끝'))
+                .expect("끝 문단");
+            assert_eq!(end_page, 1, "{case}: 끝 구역은 새 쪽");
+            assert_eq!(naive.pages.len(), placed.pages.len(), "{case}: LOCKSTEP");
+            assert_eq!(walked[1][0], end_page, "{case}: block_pages");
+        }
+    }
+
     /// #537 PR-1 — 왼 · 오른 여백이 있는 문단은 세 걸음 모두 여백을 뺀 폭에서 줄을 나눈다. NaiveLayout 만 본문 폭 그대로
     /// 나눠 줄이 적게 나왔고(공개 k-water-rfp 의 한 문단 4줄 · 다른 두 걸음 5줄), 쪽 시작이 벌어지다 큰 표 하나에 쪽 수까지
     /// 갈렸다. 한 단 · 두 단.
