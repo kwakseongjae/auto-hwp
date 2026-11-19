@@ -1312,6 +1312,7 @@ fn parse_cell(el: &JsxElement) -> Result<Cell> {
         // 저장된 셀 실폭(074)도 JSX 투영 대상이 아니다 — 없으면 조판기가 열 격자로 근사한다.
         width: None,
         source_page_segments: 0,
+        stored_line_extent: None,
         template_span: None,
         height_delta: 0,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),

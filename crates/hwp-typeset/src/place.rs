@@ -10681,6 +10681,70 @@ mod tests {
         }
     }
 
+    /// #537 — 고정 높이 행은 칸이 더 필요할 때만 키운다. 고치지 않은 칸은 한글이 저장한 그 칸 줄의 길이 + 칸 위 · 아래
+    /// 여백(저장 줄이 칸보다 길면 한글은 행을 키워 다 그린다), 편집한 칸 · 열 너비를 고친 표는 조판 내용으로 판단한다.
+    /// 저장 줄이 없고 고치지 않은 칸은 정확값 그대로다(#247). 세 걸음이 같은 높이를 쓴다.
+    #[test]
+    fn a_fixed_row_grows_to_what_its_cells_need() {
+        let row_h = |t: &Table| {
+            let doc = shape_doc(vec![Block::Table(t.clone()), Block::Paragraph(para("끝"))]);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let [placed_end, naive_end, _] = end_line_in_three_walks(&doc);
+            assert_eq!(placed_end.0, naive_end.0, "LOCKSTEP");
+            placed.pages[0].tables[0].h
+        };
+        let mut t = fixed_height_table(1, 1_000, false);
+        t.padding = Some([0, 0, 141, 141]);
+        assert_eq!(row_h(&t), 1_000.0, "저장 줄 없음 · 안 고침 → 정확값");
+        t.cells[0].stored_line_extent = Some(700);
+        assert_eq!(row_h(&t), 1_000.0, "저장 줄 + 여백(982)이 들어감 → 정확값");
+        t.cells[0].stored_line_extent = Some(1_800);
+        assert_eq!(row_h(&t), 2_082.0, "저장 줄 + 여백 1,800 + 282 → 그만큼");
+        t.cells[0].padding = Some([0, 0, 212, 212]);
+        assert_eq!(
+            row_h(&t),
+            2_224.0,
+            "칸 자신의 여백이 표 여백보다 먼저(#247 사례 1,800 + 424)"
+        );
+        // 편집한 칸은 저장 줄이 낡았다 — 조판 내용(글 넉 줄)으로.
+        let mut edited = fixed_height_table(1, 1_000, false);
+        edited.cells[0].blocks = vec![Block::Paragraph(para(&["가"; 4].join("\n")))];
+        edited.cells[0].stored_line_extent = Some(1_000);
+        let before = row_h(&edited);
+        edited.cells[0].dirty.mark();
+        let grown = row_h(&edited);
+        assert!(
+            grown > before && grown > 4_000.0,
+            "편집한 칸은 내용만큼: {before} → {grown}"
+        );
+        // 열 너비를 고친 표도 저장 줄이 낡았다.
+        let mut regeom = fixed_height_table(1, 1_000, false);
+        regeom.cells[0].blocks = vec![Block::Paragraph(para(&["가"; 4].join("\n")))];
+        regeom.geometry_edited = true;
+        assert!(row_h(&regeom) > 4_000.0, "열 너비를 고친 표는 내용만큼");
+    }
+
+    /// #537 — 여러 행을 덮는 칸의 저장 줄이 덮는 행들의 합보다 길면 모자란 만큼만 마지막 행에 더한다.
+    #[test]
+    fn a_row_spanning_cells_stored_lines_extend_its_last_row() {
+        let mut t = fixed_height_table(2, 1_000, false);
+        t.padding = Some([0, 0, 0, 0]);
+        t.cells[0].row_span = 2;
+        t.cells[1].active = false;
+        t.cells[0].stored_line_extent = Some(3_000);
+        let doc = shape_doc(vec![Block::Table(t), Block::Paragraph(para("끝"))]);
+        let rows = crate::table_row_heights(
+            match &doc.sections[0].blocks[0] {
+                Block::Table(t) => t,
+                Block::Paragraph(_) => unreachable!(),
+            },
+            60_000.0,
+            &doc,
+            &ApproxFontMetrics,
+        );
+        assert_eq!(rows, vec![1_000.0, 2_000.0]);
+    }
+
     /// #537 PR-1 — 왼 · 오른 여백이 있는 문단은 세 걸음 모두 여백을 뺀 폭에서 줄을 나눈다. NaiveLayout 만 본문 폭 그대로
     /// 나눠 줄이 적게 나왔고(공개 k-water-rfp 의 한 문단 4줄 · 다른 두 걸음 5줄), 쪽 시작이 벌어지다 큰 표 하나에 쪽 수까지
     /// 갈렸다. 한 단 · 두 단.

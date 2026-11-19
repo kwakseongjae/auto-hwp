@@ -1533,7 +1533,29 @@ pub(crate) fn table_row_heights(
         }
     }
     apply_row_overrides(&mut row_h, t);
+    grow_fixed_rows(&mut row_h, t, need);
     row_h
+}
+
+/// #537 — a fixed-height row (`fixed_row_heights`, every `.hwp` table) keeps its stored height EXCEPT
+/// where a cell needs more: an unedited cell needs Hangul's stored line extent plus its vertical
+/// padding ([`Cell::stored_line_extent`] — Hangul draws those lines even when the stored height is
+/// smaller), an edited cell (or any cell after a column-width edit) needs its laid-out content
+/// (`need` — the stored lines are stale). A cell with neither keeps the exact height (#247). Row-spanning
+/// cells add only their shortfall to the last row they cover, like [`table_row_heights`] step ②.
+///
+/// The «needs» are checked against Hangul's stored lines (measured on the corpus), not row by row
+/// against a Hangul PDF; laid-out content decides only for edited cells, because this engine's cell
+/// content is taller than Hangul's in many unedited rows (#370) and growing those moved pages away
+/// from the stored layout.
+fn grow_fixed_rows(row_h: &mut [f64], t: &Table, need: impl Fn(usize) -> f64) {
+    t.grow_fixed_rows(row_h, |i| {
+        if t.cells[i].dirty.is_dirty() || t.geometry_edited {
+            need(i)
+        } else {
+            t.stored_lines_need(i, CELL_PAD)
+        }
+    });
 }
 
 /// Whether a keep-together table should advance before row 0. The whole measured table must fit a

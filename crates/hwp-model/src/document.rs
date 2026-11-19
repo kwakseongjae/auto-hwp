@@ -950,6 +950,63 @@ pub struct TableCaption {
 }
 
 impl Table {
+    /// #537 — grow this fixed-height table's rows (`rows`: the row heights so far, one per row) where a
+    /// cell wants more: `wants(i)` is cell `i`'s required height (0 = no claim). A one-row cell raises its
+    /// row; a row-spanning cell adds only its shortfall to the last row it covers (narrower spans first).
+    /// Rows without a stored height (`row_heights[r] <= 0`) are left alone. No-op unless
+    /// `fixed_row_heights`. Shared by the typesetter (laid-out rows) and the HWPX writer (the heights it
+    /// bakes into a `.hwp` → HWPX conversion), so both grow the same rows by the same rule.
+    pub fn grow_fixed_rows(&self, rows: &mut [f64], wants: impl Fn(usize) -> f64) {
+        if !self.fixed_row_heights || self.row_heights.len() != rows.len() {
+            return;
+        }
+        let fixed = |r: usize| self.row_heights.get(r).is_some_and(|&h| h > 0);
+        for (i, c) in self.cells.iter().enumerate() {
+            if c.active && c.row_span.max(1) == 1 && c.row < rows.len() && fixed(c.row) {
+                rows[c.row] = rows[c.row].max(wants(i));
+            }
+        }
+        let mut spans: Vec<usize> = (0..self.cells.len())
+            .filter(|&i| {
+                let c = &self.cells[i];
+                c.active && c.row_span.max(1) > 1 && c.row < rows.len()
+            })
+            .collect();
+        spans.sort_by_key(|&i| self.cells[i].row_span);
+        for i in spans {
+            let c = &self.cells[i];
+            let end = (c.row + c.row_span.max(1)).min(rows.len());
+            if !(c.row..end).all(fixed) {
+                continue;
+            }
+            let sum: f64 = rows[c.row..end].iter().sum();
+            let want = wants(i);
+            if want > sum {
+                rows[end - 1] += want - sum;
+            }
+        }
+    }
+
+    /// #537 — the height an UNEDITED cell's stored lines need: [`Cell::stored_line_extent`] plus its vertical
+    /// padding (its own, else the table's, else `default_pad`). 0 when the cell stores no lines, or when
+    /// the stored lines are stale — the cell was edited (`dirty`) or the table's columns were resized.
+    pub fn stored_lines_need(&self, i: usize, default_pad: f64) -> f64 {
+        let Some(c) = self.cells.get(i) else {
+            return 0.0;
+        };
+        if c.dirty.is_dirty() || self.geometry_edited {
+            return 0.0;
+        }
+        let Some(extent) = c.stored_line_extent else {
+            return 0.0;
+        };
+        let pad = match c.padding.as_ref().or(self.padding.as_ref()) {
+            Some(p) => (p[2].max(0) + p[3].max(0)) as f64,
+            None => default_pad,
+        };
+        extent.max(0) as f64 + pad
+    }
+
     /// If this is a 1×1 "frame wrapper" whose single active cell holds exactly ONE multi-row nested table
     /// (plus only empty paragraphs), return that inner table. This is what actually gets RENDERED and
     /// EDITED (e.g. the 자가진단표 = a 17×3 grid wrapped in a 1×1). The render unwrap (hwp_typeset) AND the
@@ -1088,6 +1145,14 @@ pub struct Cell {
     /// `pageBreak="CELL"` continuation; cell/table dirtiness or table geometry edits discard this
     /// stale cache and return pagination to live measurement.
     pub source_page_segments: usize,
+    /// RENDER-IR ONLY (#537): Hangul's stored extent of this cell's lines (HWPUNIT) — from the first
+    /// stored line's top to the last line's bottom (`PARA_LINE_SEG`), `None` when the file stores none.
+    /// A fixed-height row whose stored lines (plus the cell's vertical padding) do not fit the stored
+    /// row height grows to them — what Hangul draws (#537: the stored height can be smaller than the
+    /// lines Hangul itself stored). A cell edit (`dirty`) or a column-width edit makes it stale; live
+    /// measurement then decides instead. ⚠️ The rule is checked against Hangul's stored lines, not
+    /// row by row against a Hangul PDF.
+    pub stored_line_extent: Option<HwpUnit>,
     /// EXPORT PROVENANCE (#457, never serialized itself): a FRESH cell a row op cloned from an
     /// original cell (the template row's cell) — that cell's `<hp:tc>` byte range in
     /// `Section.provenance.raw`. The structural re-emit copies that XML (height · borders · cell
@@ -1220,6 +1285,7 @@ impl Default for Cell {
             padding: None,
             width: None,
             source_page_segments: 0,
+            stored_line_extent: None,
             template_span: None,
             height_delta: 0,
             dirty: Dirty::default(),
