@@ -949,6 +949,21 @@ pub struct TableCaption {
     pub include_margin: bool,
 }
 
+/// #537 — the stored extent of a cell's lines from its stored `(vertical position, line height)` pairs, in
+/// order (positions run on across the cell's paragraphs): the last line's bottom minus the first line's
+/// top. When every line sits at one position (a file that leaves positions unfilled) the bare heights are
+/// summed instead. `None` when there are no lines. Shared by the `.hwp` readers ([`Cell::stored_line_extent`]).
+pub fn stored_line_extent(lines: impl IntoIterator<Item = (i64, i64)>) -> Option<HwpUnit> {
+    let lines: Vec<(i64, i64)> = lines.into_iter().collect();
+    let (&(first_pos, _), &(last_pos, last_height)) = (lines.first()?, lines.last()?);
+    let extent = if lines.len() == 1 || last_pos > first_pos {
+        last_pos + last_height - first_pos
+    } else {
+        lines.iter().map(|&(_, height)| height).sum()
+    };
+    HwpUnit::try_from(extent.max(0)).ok()
+}
+
 impl Table {
     /// #537 — grow this fixed-height table's rows (`rows`: the row heights so far, one per row) where a
     /// cell wants more: `wants(i)` is cell `i`'s required height (0 = no claim). A one-row cell raises its
