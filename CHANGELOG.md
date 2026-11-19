@@ -83,6 +83,13 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 고침 (Fixed)
 
+- **쪽 수 세기(`NaiveLayout` — 쪽 수 API · 레이아웃 오라클의 우리 쪽 수)가 그리기(`place_doc`)와 갈리던 두 자리를 고쳤다 (#537).**
+  ① 구역의 마지막 쪽에 표의 행만 있으면(앞 쪽에서 넘어온 행 · 쪽보다 큰 행) 다음 구역을 같은 쪽에 이어 세었다. ② 왼 · 오른
+  여백이 있는 문단을 본문 폭 그대로 줄 나눠 줄을 적게 셌다. 이제 그리기와 같은 판정 · 같은 폭이다. 공개 · 비공개 127문서의
+  쪽 수는 그대로이고, 행 높이를 키운 표가 있는 문서에서 갈리던 쪽 수가 같아진다.
+  *(EN — Fixed: the page counter (`NaiveLayout`, behind the page-count API and the oracle's own page count) disagreed with
+  placement in two places — a section after a page holding only table rows, and paragraphs with left/right margins wrapped at
+  the full body width. Both now follow placement; corpus page counts are unchanged.)*
 - **HWPX 표 캡션을 읽고 그린다 (#543).** HWPX 파서가 `<hp:caption>` 을 본문 흐름 밖으로 떼어 낸 뒤 버려(이슈 80 격리), 같은 서식이
   `.hwp` 로는 캡션이 그려지고 HWPX 로는 빠졌다. 이제 `side` · `gap` · `width` · `lastWidth` · `fullSz` 와 캡션 문단을 `Table.caption`
   으로 읽고(.hwp 리프트와 같은 값 대응 · 본문 흐름 격리는 그대로), `.hwp` 가 이미 타는 위 · 아래 캡션 흐름으로 그린다. 캡션 높이 ·
@@ -1224,3 +1231,4 @@ deprecated on 2026-07-29 in favor of >=0.0.2.)*
 >
 > *(EN — No release-comparison links yet: the repository has zero tags, so a Keep a Changelog diff link
 > would be fabricated. Tag `v0.0.2` at publish time and start linking from there.)*
+
