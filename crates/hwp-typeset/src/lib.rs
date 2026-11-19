@@ -518,11 +518,14 @@ impl LayoutEngine for NaiveLayout {
         }
         let mut pages = vec![PageLayout::default()];
         let mut breaks: Vec<PageBreakInfo> = Vec::new();
+        // #537 — 앞 구역에 놓은 블록이 있는가(place_doc · block_pages 의 `started` 와 같은 판정). 「마지막 쪽에
+        // 줄이 있는가」로 보면 표의 행만 있는 쪽 뒤에서 다음 구역을 같은 쪽에 이어 놓아 쪽 수가 갈렸다.
+        let mut started = false;
         for sec in &doc.sections {
             let page = &sec.page;
             let (_, _, body_w, body_h) = body_box(page);
             // Each section starts on a fresh page (matches OWPML section→page).
-            if !pages.last().map(|p| p.lines.is_empty()).unwrap_or(true) {
+            if started {
                 // 구역은 새 쪽에서 시작한다 — 우리 판단이 아니라 문서 구조다.
                 break_page(
                     &mut pages,
@@ -821,6 +824,7 @@ impl LayoutEngine for NaiveLayout {
                     }
                 }
             }
+            started |= !sec.blocks.is_empty();
         }
         Ok(LayoutResult { pages, breaks })
     }
@@ -830,16 +834,15 @@ impl LayoutEngine for NaiveLayout {
 /// selected for every document without an explicit column-zone/break signal.
 fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutResult {
     let mut pages = vec![PageLayout::default()];
+    // #537 — 한 단 걸음과 같은 판정(앞 구역에 놓은 블록이 있는가 — place_doc_columns 의 `started`).
+    let mut started = false;
     for section in &doc.sections {
         let page = &section.page;
         let (_, _, body_w, body_h) = body_box(page);
-        if !pages
-            .last()
-            .map(|value| value.lines.is_empty())
-            .unwrap_or(true)
-        {
+        if started {
             pages.push(PageLayout::default());
         }
+        started |= !section.blocks.is_empty();
         if let Some(output) = pages.last_mut() {
             let (width, height) = display_paper(page);
             output.width = width as f64;

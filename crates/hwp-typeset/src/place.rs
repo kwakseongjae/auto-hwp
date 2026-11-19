@@ -10542,6 +10542,55 @@ mod tests {
         }
     }
 
+    /// #537 PR-1 — 구역의 마지막 쪽에 표의 행만 있으면(앞 쪽에서 넘어온 행 · 쪽보다 큰 행) 다음 구역은 새 쪽에서
+    /// 시작한다 — 세 걸음이 같다. NaiveLayout 은 「마지막 쪽에 줄이 있는가」로 구역 쪽을 넘겨, 줄 없이 행만 있는 쪽 뒤에서는
+    /// 다음 구역을 같은 쪽에 이어 놓았다(place_doc · block_pages 는 「앞에 놓은 블록이 있는가」). 고정 행을 내용만큼
+    /// 키우면(#537) 공개 문서 둘에서 드러났고, 고정 표가 아니어도 행 높이를 끌어 키우면(`row_heights` 바닥) 같다.
+    #[test]
+    fn a_section_whose_last_page_holds_only_table_rows_ends_there_in_every_walk() {
+        use crate::LayoutEngine;
+        for columns in [false, true] {
+            for (name, heights, fixed) in [
+                ("넘어온 고정 행", vec![50_000, 50_000], true),
+                ("쪽보다 큰 고정 행", vec![90_000], true),
+                ("끌어 키운 행(바닥)", vec![50_000, 50_000], false),
+            ] {
+                let mut table = n_row_table(heights.len());
+                table.row_heights = heights.clone();
+                table.fixed_row_heights = fixed;
+                let mut lead = para("앞");
+                if columns {
+                    lead.column_layout_before = Some(two_columns());
+                }
+                let mut doc = shape_doc(vec![Block::Paragraph(lead), Block::Table(table)]);
+                let mut next = doc.sections[0].clone();
+                next.blocks = vec![Block::Paragraph(para("끝"))];
+                doc.sections.push(next);
+                let placed = place_doc(&doc, &ApproxFontMetrics);
+                let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+                let walked = block_pages(&doc, &ApproxFontMetrics);
+                let end_page = placed
+                    .pages
+                    .iter()
+                    .position(|pg| pg.glyphs.iter().any(|g| g.ch == '끝'))
+                    .expect("끝 문단");
+                let table_last = placed
+                    .pages
+                    .iter()
+                    .rposition(|pg| pg.blocks.iter().any(|b| b.section == 0 && b.block == 1))
+                    .expect("표");
+                let case = format!("{name} · 두 단 {columns}");
+                assert_eq!(end_page, table_last + 1, "{case}: 다음 구역은 새 쪽");
+                assert_eq!(
+                    naive.pages.len(),
+                    placed.pages.len(),
+                    "{case}: LOCKSTEP place_doc · NaiveLayout"
+                );
+                assert_eq!(walked[1][0], end_page, "{case}: block_pages");
+            }
+        }
+    }
+
     /// #543 리뷰 — 여러 줄 캡션이 붙은 표를 쪽 끝 근처로 밀어 가며, place_doc ↔ block_pages 가 **표 블록 쪽**(아래 캡션은 표 뒤
     /// 「끝」 문단 쪽도)에서 같고 place_doc ↔ NaiveLayout 이 쪽 수에서 같은지 본다(성질 시험). 캡션 높이 규칙(마지막 줄 간격 빼기)을 한 걸음만
     /// 빠뜨리면 경계 근처에서 표 쪽이 갈린다. 위 · 아래 캡션, 한 단 · 두 단.
