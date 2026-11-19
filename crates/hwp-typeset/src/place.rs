@@ -10586,9 +10586,10 @@ mod tests {
         use crate::LayoutEngine;
         for columns in [false, true] {
             for (name, heights, fixed) in [
-                ("넘어온 고정 행", vec![50_000, 50_000], true),
+                // 네 행 — 두 단에서도 마지막 쪽이 행만 남도록(한 단에 한 행씩).
+                ("넘어온 고정 행", vec![50_000; 4], true),
                 ("쪽보다 큰 고정 행", vec![90_000], true),
-                ("끌어 키운 행(바닥)", vec![50_000, 50_000], false),
+                ("끌어 키운 행(바닥)", vec![50_000; 4], false),
             ] {
                 let mut table = n_row_table(heights.len());
                 table.row_heights = heights.clone();
