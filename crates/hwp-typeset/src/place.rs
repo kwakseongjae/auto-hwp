@@ -1821,7 +1821,6 @@ struct Indent {
 fn indent_of(p: &Paragraph, doc: &SemanticDoc, avail_w: f64) -> Indent {
     let ps = doc.para_shapes.get(p.para_shape);
     let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
-    let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
     let indent = ps.map(|s| s.indent).unwrap_or(0) as f64;
     // First-line indent: positive shifts in (들여쓰기); negative is hanging (내어쓰기) — clamp so the
     // first line's start never crosses left of the block left inset (i.e. first_extra >= -left… but
@@ -1830,7 +1829,7 @@ fn indent_of(p: &Paragraph, doc: &SemanticDoc, avail_w: f64) -> Indent {
     // not going past the page/body left). Hanging text simply starts back at the block left edge.
     let first_extra = indent.max(-left);
     // Wrap width shrinks by left+right block margins so line breaking respects the inset. Keep ≥1.
-    let wrap_w = (avail_w - left - right).max(1.0);
+    let wrap_w = crate::paragraph_wrap_width(p, doc, avail_w);
     Indent {
         left,
         first_extra,
@@ -10539,6 +10538,42 @@ mod tests {
             let placed = place_doc(&doc, &ApproxFontMetrics);
             assert_eq!(caption_reports(&placed), vec![(0, 1)], "{position:?}");
             assert_eq!(caption_glyphs(&placed), 0, "{position:?}");
+        }
+    }
+
+    /// #537 PR-1 — 왼 · 오른 여백이 있는 문단은 세 걸음 모두 여백을 뺀 폭에서 줄을 나눈다. NaiveLayout 만 본문 폭 그대로
+    /// 나눠 줄이 적게 나왔고(공개 k-water-rfp 의 한 문단 4줄 · 다른 두 걸음 5줄), 쪽 시작이 벌어지다 큰 표 하나에 쪽 수까지
+    /// 갈렸다. 한 단 · 두 단.
+    #[test]
+    fn a_margin_paragraph_breaks_at_the_same_width_in_every_walk() {
+        use crate::LayoutEngine;
+        for columns in [false, true] {
+            let mut blocks = Vec::new();
+            for i in 0..10 {
+                let mut p = para(&"가".repeat(200));
+                p.para_shape = 1;
+                if i == 0 && columns {
+                    p.column_layout_before = Some(two_columns());
+                }
+                blocks.push(Block::Paragraph(p));
+            }
+            let mut doc = shape_doc(blocks);
+            let mut margined = doc.para_shapes[0].clone();
+            margined.left_margin = 9_000;
+            margined.right_margin = 3_000;
+            doc.para_shapes.push(margined);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+            let naive_lines: usize = naive.pages.iter().map(|p| p.lines.len()).sum();
+            let walked_lines: usize = block_line_pages(&doc, &ApproxFontMetrics)
+                .map(|s| s[0].iter().map(Vec::len).sum())
+                .unwrap_or(naive_lines);
+            assert_eq!(naive_lines, walked_lines, "두 단 {columns}: 줄 수");
+            assert_eq!(
+                naive.pages.len(),
+                placed.pages.len(),
+                "두 단 {columns}: LOCKSTEP place_doc · NaiveLayout"
+            );
         }
     }
 
