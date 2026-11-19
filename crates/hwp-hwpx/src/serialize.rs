@@ -358,6 +358,10 @@ fn collect_image_items(doc: &SemanticDoc) -> Vec<ImageItem> {
                     for c in &t.cells {
                         walk(&c.blocks, used);
                     }
+                    // #543 — 표 캡션 문단도 내보낸다.
+                    if let Some(caption) = &t.caption {
+                        walk(&caption.blocks, used);
+                    }
                 }
             }
         }
@@ -477,6 +481,7 @@ fn mark_block_dirty(block: &mut Block) {
                     mark_block_dirty(cb);
                 }
             }
+            // #543 — 캡션 블록은 표시하지 않는다: `emit_table` 이 고침 표지와 무관하게 모델에서 통째로 쓴다.
         }
     }
 }
@@ -509,6 +514,10 @@ fn collect_used_shapes(doc: &SemanticDoc, chars: &mut IdxSet, paras: &mut IdxSet
                     }
                     for c in &t.cells {
                         walk_all(&c.blocks, chars, paras);
+                    }
+                    // #543 — 표 캡션 문단의 모양도 내보낸다.
+                    if let Some(caption) = &t.caption {
+                        walk_all(&caption.blocks, chars, paras);
                     }
                 }
             }
@@ -852,6 +861,11 @@ fn collect_bf_specs(doc: &SemanticDoc) -> BTreeMap<String, BfSpec> {
                             out.insert(bf_key(&spec), spec);
                         }
                         walk(&c.blocks, out);
+                    }
+                    // #543 — 캡션 안 표의 테두리 · 음영도 모은다(roundtrip_pages
+                    // `a_caption_tables_borders_survive_conversion`).
+                    if let Some(caption) = &t.caption {
+                        walk(&caption.blocks, out);
                     }
                 }
                 Block::Paragraph(p) => {
@@ -1949,6 +1963,7 @@ fn build_table_patch(
         treat_as_char: table_emit_props(t).0,
         float: t.float_placement.clone(),
         tbl_page_break: table_emit_props(t).2,
+        caption: t.caption.as_ref().map(EmitCaption::of),
     };
     let tid = *next_id;
     *next_id += 1;
@@ -1994,9 +2009,40 @@ fn valid_cell_span(original: &str, open_end: usize, e0: usize, c: &Cell) -> Opti
     })
 }
 
+/// #543 — where a table's OWN rows start in its body XML (the text after `<hp:tbl …>`): the first
+/// `<hp:tr` past the table's caption. A caption may hold a table with rows of its own, and taking ITS
+/// `<hp:tr` cut the copied head mid-caption — the saved section no longer parsed (review of #578).
+fn first_row_offset(body: &str) -> Option<usize> {
+    const OPEN: &str = "<hp:caption";
+    const CLOSE: &str = "</hp:caption>";
+    let tr = body.find("<hp:tr")?;
+    let mut from = 0;
+    if let Some(start) = body[..tr].find(OPEN) {
+        let (mut depth, mut i) = (0usize, start);
+        loop {
+            let close = i + body[i..].find(CLOSE)?;
+            match body[i..].find(OPEN).map(|k| i + k) {
+                Some(open) if open < close => {
+                    depth += 1;
+                    i = open + OPEN.len();
+                }
+                _ => {
+                    depth = depth.saturating_sub(1);
+                    i = close + CLOSE.len();
+                    if depth == 0 {
+                        from = i;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    body[from..].find("<hp:tr").map(|k| from + k)
+}
+
 /// #442 — re-emit a table whose ROW/COLUMN STRUCTURE an op changed (`Table::structure_edited`) from
 /// its ORIGINAL XML: the `<hp:tbl>` open tag (rowCnt/colCnt patched), every table-level child before
-/// the first `<hp:tr>` (sz height/width patched, pos/margins/caption verbatim), then fresh `<hp:tr>`
+/// its own first `<hp:tr>` ([`first_row_offset`] — sz height/width patched, pos/margins/caption verbatim), then fresh `<hp:tr>`
 /// rows whose `<hp:tc>`s are each cell's original XML (body byte-verbatim unless its content was
 /// edited) with `cellAddr`/`cellSpan`/`cellSz` re-written. A NEW cell copies a template `<hp:tc>`
 /// (look + fallback shape refs), body rebuilt from its own content and `name` cleared: a cloned row's
@@ -2019,7 +2065,7 @@ fn structural_table_xml(
 ) -> Option<String> {
     let close = e0.checked_sub("</hp:tbl>".len())?;
     let body = original.get(open_end..close)?;
-    let first_tr = body.find("<hp:tr")?;
+    let first_tr = first_row_offset(body)?;
     let last_tr = body.rfind("</hp:tr>")? + "</hp:tr>".len();
     let (prefix, tail) = (&body[..first_tr], &body[last_tr..]);
     let (rows, cols) = (t.rows.max(1), t.cols.max(1));
@@ -2637,6 +2683,38 @@ struct EmitTable {
     float: Option<TableFloat>,
     /// #483 — `<hp:tbl pageBreak>` token (`CELL` unless `SetTableProps` set it).
     tbl_page_break: &'static str,
+    /// #543 — the table's caption (`Table::caption`) → `<hp:caption>`; `None` = none (byte-stable with
+    /// earlier output).
+    caption: Option<EmitCaption>,
+}
+
+/// #543 — a [`TableCaption`] ready to write as `<hp:caption side fullSz width gap lastWidth>` — the
+/// attributes the HWPX parser reads back into the same fields.
+struct EmitCaption {
+    side: &'static str,
+    full_sz: bool,
+    width: i32,
+    gap: i32,
+    last_width: i32,
+    content: Vec<EmitBlock>,
+}
+
+impl EmitCaption {
+    fn of(caption: &TableCaption) -> Self {
+        EmitCaption {
+            side: match caption.position {
+                TableCaptionPosition::Left => "LEFT",
+                TableCaptionPosition::Right => "RIGHT",
+                TableCaptionPosition::Top => "TOP",
+                TableCaptionPosition::Bottom => "BOTTOM",
+            },
+            full_sz: caption.include_margin,
+            width: caption.width.max(0),
+            gap: caption.spacing.max(0),
+            last_width: caption.max_width.max(0),
+            content: emit_blocks(&caption.blocks),
+        }
+    }
 }
 
 /// #483 — the placement an emitted table writes: `SetTableProps` (`Table::props_override`) over the
@@ -2663,7 +2741,7 @@ enum EmitBlock {
         runs: Vec<RunPiece>,
         page_break: bool,
     },
-    Table(EmitTable),
+    Table(Box<EmitTable>),
     /// An image, emitted as a `<hp:pic>` wrapped in its own paragraph. `bin_ref` is the manifest
     /// item id + `binaryItemIDRef`; width/height are the display size in HWPUNIT.
     Image {
@@ -2762,7 +2840,7 @@ fn project_block(b: &Block) -> EmitBlock {
             runs: para_runs(p),
             page_break: p.page_break_before,
         },
-        Block::Table(t) => EmitBlock::Table(EmitTable {
+        Block::Table(t) => EmitBlock::Table(Box::new(EmitTable {
             rows: t.rows.max(1),
             cols: t.cols.max(1),
             cells: placed_cells(t),
@@ -2783,7 +2861,8 @@ fn project_block(b: &Block) -> EmitBlock {
             treat_as_char: table_emit_props(t).0,
             float: t.float_placement.clone(),
             tbl_page_break: table_emit_props(t).2,
-        }),
+            caption: t.caption.as_ref().map(EmitCaption::of),
+        })),
     }
 }
 
@@ -3318,8 +3397,24 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
         "<hp:tbl id=\"{tid}\" zOrder=\"{z}\" numberingType=\"TABLE\" textWrap=\"{wrap}\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"{tpb}\" repeatHeader=\"{repeat}\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{tbl_bf}\" noAdjust=\"{no_adjust}\">\
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{height}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
 <hp:pos treatAsChar=\"{tac}\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"{vrel}\" horzRelTo=\"{hrel}\" vertAlign=\"{valign}\" horzAlign=\"{halign}\" vertOffset=\"{voff}\" horzOffset=\"{hoff}\"/>\
-<hp:outMargin left=\"{oml}\" right=\"{omr}\" top=\"{omt}\" bottom=\"{omb}\"/>\
-<hp:inMargin left=\"{iml}\" right=\"{imr}\" top=\"{imt}\" bottom=\"{imb}\"/>"
+<hp:outMargin left=\"{oml}\" right=\"{omr}\" top=\"{omt}\" bottom=\"{omb}\"/>"
+    ));
+    // #543 — 캡션은 OWPML 순서대로 바깥 여백 다음 · 안 여백 앞(sz → pos → outMargin → caption → inMargin → tr).
+    if let Some(caption) = &t.caption {
+        out.push_str(&format!(
+            "<hp:caption side=\"{}\" fullSz=\"{}\" width=\"{}\" gap=\"{}\" lastWidth=\"{}\">\
+<hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"TOP\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">",
+            caption.side,
+            u8::from(caption.full_sz),
+            caption.width,
+            caption.gap,
+            caption.last_width
+        ));
+        emit_cell_content(out, &caption.content, ctx, next_id);
+        out.push_str("</hp:subList></hp:caption>");
+    }
+    out.push_str(&format!(
+        "<hp:inMargin left=\"{iml}\" right=\"{imr}\" top=\"{imt}\" bottom=\"{imb}\"/>"
     ));
     for r in 0..rows {
         // Origin cells whose top-left lies in this row, left to right.
