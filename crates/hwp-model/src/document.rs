@@ -822,6 +822,12 @@ pub struct Table {
     /// tables, so those helpers use its presence to target exactly them. Never round-trips: an unedited
     /// table re-emits via `src_span` verbatim, so this never reaches saved bytes.
     pub stored_row_heights: Vec<HwpUnit>,
+    /// RENDER-IR ONLY (#537): the height Hangul stored for this table OBJECT (HWP5 common-object height),
+    /// set by the `.hwp` readers for a 글자처럼 취급 table — one fragment, laid out on one page. Hangul
+    /// writes the height it actually drew there, which can exceed the stored row heights (rows grown to
+    /// their lines). When it is at least the stored row sum, [`Table::grow_fixed_rows`] never grows the
+    /// table past it. `None` for HWPX and floating tables.
+    pub stored_object_height: Option<HwpUnit>,
     /// True once an OP changed `col_widths`/`row_heights` (표 열너비/행높이 편집) — distinct from the
     /// geometry the HWPX parser now fills from the original `<hp:cellSz>` (issue #196 Batch C). The
     /// HWPX serializer gates its per-cell in-place surgery on `!geometry_edited`: a table whose geometry
@@ -975,6 +981,7 @@ impl Table {
         if !self.fixed_row_heights || self.row_heights.len() != rows.len() {
             return;
         }
+        let before: Vec<f64> = rows.to_vec();
         let fixed = |r: usize| self.row_heights.get(r).is_some_and(|&h| h > 0);
         for (i, c) in self.cells.iter().enumerate() {
             if c.active && c.row_span.max(1) == 1 && c.row < rows.len() && fixed(c.row) {
@@ -999,6 +1006,32 @@ impl Table {
             if want > sum {
                 rows[end - 1] += want - sum;
             }
+        }
+        self.cap_at_stored_object_height(rows, &before);
+    }
+
+    /// #537 — a one-fragment table never grows past the object height Hangul stored for it
+    /// ([`Table::stored_object_height`] — what Hangul drew), when that height is at least the stored row
+    /// sum and the table is unedited (an edited cell or column may need more than Hangul drew). On 69 one-page tables of two forms the grown height matched it on 68; the one that did not
+    /// grew 900 HWPUNIT more than Hangul and pushed a row onto an extra page. ⚠️ Assumption: the file stores
+    /// only the table's total, so the cut is shared between the grown rows in proportion to their growth —
+    /// the total (and so the page break) is Hangul's, a single row's height is not checked against Hangul.
+    fn cap_at_stored_object_height(&self, rows: &mut [f64], before: &[f64]) {
+        let Some(cap) = self.stored_object_height.map(f64::from) else {
+            return;
+        };
+        // An edit makes the stored height stale, like the stored lines: an edited cell may need more.
+        if self.geometry_edited || self.cells.iter().any(|c| c.dirty.is_dirty()) {
+            return;
+        }
+        let stored: f64 = before.iter().sum();
+        let total: f64 = rows.iter().sum();
+        if cap < stored || total <= cap || total <= stored {
+            return;
+        }
+        let keep = (cap - stored) / (total - stored);
+        for (row, base) in rows.iter_mut().zip(before) {
+            *row = base + (*row - base) * keep;
         }
     }
 

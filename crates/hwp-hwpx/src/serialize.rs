@@ -3586,6 +3586,43 @@ fn max_id(s: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #537 — the conversion bakes the same rows the typesetter grows: stored lines + padding, capped at
+    /// Hangul's stored object height for a one-fragment table (the cut shared by growth — an assumption).
+    #[test]
+    fn baking_grows_rows_up_to_the_stored_object_height() {
+        let table = |cap: Option<HwpUnit>| {
+            let cell = |row: usize, extent: HwpUnit| Cell {
+                row,
+                col: 0,
+                stored_line_extent: Some(extent),
+                ..Default::default()
+            };
+            Block::Table(Table {
+                rows: 2,
+                cols: 1,
+                cells: vec![cell(0, 3_000), cell(1, 2_000)],
+                col_widths: vec![10_000],
+                row_heights: vec![1_000, 1_000],
+                fixed_row_heights: true,
+                padding: Some([0, 0, 0, 0]),
+                stored_object_height: cap,
+                ..Default::default()
+            })
+        };
+        for (cap, want) in [
+            (None, vec![3_000, 2_000]),
+            (Some(3_500), vec![2_000, 1_500]),
+            (Some(2_000), vec![1_000, 1_000]),
+        ] {
+            let mut blocks = vec![table(cap)];
+            bake_stored_line_rows(&mut blocks);
+            let Block::Table(t) = &blocks[0] else {
+                unreachable!()
+            };
+            assert_eq!(t.row_heights, want, "{cap:?}");
+        }
+    }
     use crate::parse::parse_semantic;
 
     fn sample() -> Vec<u8> {

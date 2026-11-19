@@ -659,6 +659,12 @@ impl<'a> Lifter<'a> {
             // #467: a table floating in front of / behind the text (기안문 직인 box) takes no flow
             // space in Hancom; exporting it inline pushed the form onto a second page.
             treat_as_char: lift_table_float(&t.common).map(|_| false),
+            // #537 — the object height Hangul drew a one-fragment (글자처럼 취급) table at.
+            stored_object_height: t
+                .common
+                .treat_as_char
+                .then(|| i32::try_from(t.common.height).ok())
+                .flatten(),
             float_placement: lift_table_float(&t.common),
             provenance: Provenance {
                 source: Some(SourceFormat::Hwp5),

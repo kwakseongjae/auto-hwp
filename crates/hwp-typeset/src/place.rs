@@ -10724,6 +10724,34 @@ mod tests {
         assert!(row_h(&regeom) > 4_000.0, "열 너비를 고친 표는 내용만큼");
     }
 
+    /// #537 — 한 쪽짜리(글자처럼 취급) 표는 키운 합이 한글이 저장한 표 개체 높이를 넘지 않는다(개체 높이 ≥ 저장 행 합일
+    /// 때). 키운 양은 행마다 그 비율로 줄인다(⚠️ 가정 — 파일에는 표 전체 높이만 있다). 개체 높이가 저장 행 합보다 작거나, 칸 ·
+    /// 열을 고친 표는 상한을 쓰지 않는다.
+    #[test]
+    fn a_grown_fixed_table_stops_at_hanguls_object_height() {
+        let rows_of = |t: &Table| {
+            let doc = shape_doc(vec![Block::Table(t.clone())]);
+            crate::table_row_heights(t, 60_000.0, &doc, &ApproxFontMetrics)
+        };
+        let mut t = fixed_height_table(2, 1_000, false);
+        t.padding = Some([0, 0, 0, 0]);
+        t.cells[0].stored_line_extent = Some(3_000); // +2,000
+        t.cells[1].stored_line_extent = Some(2_000); // +1,000
+        assert_eq!(rows_of(&t), vec![3_000.0, 2_000.0], "상한 없음");
+        t.stored_object_height = Some(3_500); // 저장 2,000 + 키움 1,500 까지
+        assert_eq!(
+            rows_of(&t),
+            vec![2_000.0, 1_500.0],
+            "키운 양 3,000 중 1,500 — 비율대로"
+        );
+        t.stored_object_height = Some(1_800); // 저장 행 합보다 작음 → 상한으로 쓰지 않는다
+        assert_eq!(rows_of(&t), vec![3_000.0, 2_000.0]);
+        t.stored_object_height = Some(2_000); // 저장 행 합과 같음 → 한글은 키우지 않았다
+        assert_eq!(rows_of(&t), vec![1_000.0, 1_000.0]);
+        t.cells[0].dirty.mark(); // 편집한 칸은 상한을 넘을 수 있다
+        assert!(rows_of(&t).iter().sum::<f64>() > 2_000.0);
+    }
+
     /// #537 — 여러 행을 덮는 칸의 저장 줄이 덮는 행들의 합보다 길면 모자란 만큼만 마지막 행에 더한다.
     #[test]
     fn a_row_spanning_cells_stored_lines_extend_its_last_row() {
