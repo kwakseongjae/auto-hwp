@@ -87,8 +87,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   저장한 줄보다 작은 경우가 있는데, 한글은 행을 키워 다 그리고 이 엔진은 저장 높이에서 잘랐다(표 아래 내용이 수십 pt 올라가고 글이
   사라짐). 이제 고치지 않은 칸은 저장된 줄 + 칸 위 · 아래 여백이 저장 높이보다 크면 그만큼, 편집한 칸(또는 열 너비를 고친 표)은 조판한
   내용만큼 행을 키운다. 그 밖의 고정 행은 지금처럼 정확값이다(#247). `.hwp` → HWPX 변환도 키운 높이로 써서 다시 연 문서가 같다.
-  - 쪽 수가 바뀌는 문서: 공개 tac-img-02 63 → 65쪽(오라클 66), 비공개 4문서 +1쪽. 게이트 문서(8 · 18 · 24 · 6)는 그대로이고, 칸 안에서
+  - 쪽 수가 바뀌는 문서: 공개 tac-img-02 63 → 65쪽(오라클 66), 비공개 3문서 +1쪽. 게이트 문서(8 · 18 · 24 · 6)는 그대로이고, 칸 안에서
     잘린 줄은 127문서 합계 784 → 517 이다. ⚠️ 판단 기준은 한글이 저장한 줄이다 — 한글 PDF 와 행마다 맞춰 보지는 않았다.
+  - 한 쪽짜리(글자처럼 취급) 표는 키운 합이 한글이 저장한 표 개체 높이(한글이 그린 높이)를 넘지 않는다 — 개체 높이가 저장 행 합
+    이상이고 고치지 않은 표일 때. 두 양식의 한 쪽짜리 표 69개 중 68개에서 키운 높이가 개체 높이와 같았고, 한 표는 900 더 키워 한 쪽을
+    더 만들었다. ⚠️ 가정: 파일에는 표 전체 높이만 있어, 줄이는 양은 키운 행마다 키운 양의 비율로 나눈다(표 전체 · 쪽 나눔은 한글과
+    같고, 행 하나의 높이는 한글과 대조하지 않았다).
   - 동작 변화: 편집으로 넘친 고정 칸이 잘리지 않고 행이 늘어난다. `tableCellFits` 의 `overflow` 는 키운 행 기준이라 넘침이 줄어든다.
   *(EN — Fixed: a `.hwp` fixed-height row whose stored lines exceed its stored height now grows to them (unedited cells: stored lines +
   vertical padding; edited cells: laid-out content); conversion to HWPX writes the grown heights. Checked against Hangul's stored
@@ -1249,5 +1253,6 @@ deprecated on 2026-07-29 in favor of >=0.0.2.)*
 >
 > *(EN — No release-comparison links yet: the repository has zero tags, so a Keep a Changelog diff link
 > would be fabricated. Tag `v0.0.2` at publish time and start linking from there.)*
+
 
 

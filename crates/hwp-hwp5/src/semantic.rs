@@ -2543,6 +2543,9 @@ fn parse_inline_table(
         // 실제로 그래서 정부 배포 PDF 1쪽 문서가 2쪽이 됐다(law.go.kr T1 쌍, 초과 +2,474 HWPUNIT).
         // 생산 rhwp lift 와 LOCKSTEP — `hwp5_empty_run_layout` 이 두 경로의 기하 동일성을 잠근다.
         fixed_row_heights: true,
+        // #537 — every owned table is 글자처럼 취급 (the accepted common attrs all set bit 0): the object
+        // height Hangul drew it at, as the rhwp lift records it.
+        stored_object_height: HwpUnit::try_from(height).ok(),
         outer_margin_left: margins[0] as HwpUnit,
         outer_margin_right: margins[1] as HwpUnit,
         outer_margin_top: margins[2] as HwpUnit,
