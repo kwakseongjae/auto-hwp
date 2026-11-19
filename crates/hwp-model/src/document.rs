@@ -822,6 +822,12 @@ pub struct Table {
     /// tables, so those helpers use its presence to target exactly them. Never round-trips: an unedited
     /// table re-emits via `src_span` verbatim, so this never reaches saved bytes.
     pub stored_row_heights: Vec<HwpUnit>,
+    /// RENDER-IR ONLY (#537): the height Hangul stored for this table OBJECT (HWP5 common-object height),
+    /// set by the `.hwp` readers for a 글자처럼 취급 (treat-as-char) table. Hangul writes the height it
+    /// actually drew there (the total, also for a table running over several pages), which can exceed
+    /// the stored row heights (rows grown to their lines). See [`Table::grow_fixed_rows`] for when it
+    /// caps the growth. `None` for HWPX and floating tables.
+    pub stored_object_height: Option<HwpUnit>,
     /// True once an OP changed `col_widths`/`row_heights` (표 열너비/행높이 편집) — distinct from the
     /// geometry the HWPX parser now fills from the original `<hp:cellSz>` (issue #196 Batch C). The
     /// HWPX serializer gates its per-cell in-place surgery on `!geometry_edited`: a table whose geometry
@@ -829,6 +835,11 @@ pub struct Table {
     /// genuinely resized table falls back to a whole-table re-emit (which applies the new geometry).
     /// Parsed/lifted tables leave this false; only [`crate`]-level geometry ops set it.
     pub geometry_edited: bool,
+    /// #537: true once `SetTableColWidths` changed the column widths — lines wrap at the column width,
+    /// so every cell's stored lines are stale ([`Table::cell_lines_stale`]). Column insert/delete do not
+    /// set it: they mark the cells they move or resize dirty instead (every cell when the table's widths
+    /// are known). A row-height edit sets [`Table::geometry_edited`] but not this.
+    pub col_widths_edited: bool,
     /// Outer vertical margins (바깥 여백, HWPUNIT) above/below the table object — the gap HWP keeps
     /// between a table and its neighbours. Lifted from the binary; 0 when unknown. Without these,
     /// consecutive tables abut with no breathing room (the "tables stuck together" artifact).
@@ -949,7 +960,164 @@ pub struct TableCaption {
     pub include_margin: bool,
 }
 
+/// The vertical padding (HWPUNIT, top + bottom) the typesetter gives a table cell that declares none.
+/// Shared so the HWPX writer's #537 row growth uses the same value as layout.
+pub const CELL_PAD_DEFAULT: f64 = 280.0;
+
+/// #537 — the stored extent of a cell's lines from its stored `(vertical position, line height)` pairs, in
+/// order (positions run on across the cell's paragraphs): the last line's bottom minus the first line's
+/// top. When every line sits at one position (a file that leaves positions unfilled) the bare heights are
+/// summed instead. `None` when there are no lines. Shared by the `.hwp` readers ([`Cell::stored_line_extent`]).
+pub fn stored_line_extent(lines: impl IntoIterator<Item = (i64, i64)>) -> Option<HwpUnit> {
+    let lines: Vec<(i64, i64)> = lines.into_iter().collect();
+    let (&(first_pos, _), &(last_pos, last_height)) = (lines.first()?, lines.last()?);
+    let extent = if lines.len() == 1 || last_pos > first_pos {
+        last_pos + last_height - first_pos
+    } else {
+        lines.iter().map(|&(_, height)| height).sum()
+    };
+    HwpUnit::try_from(extent.max(0)).ok()
+}
+
 impl Table {
+    /// #537 — grow this fixed-height table's rows (`rows`: the row heights so far, one per row) where a
+    /// cell needs more. Two claims, applied in this order:
+    ///
+    /// 1. an unedited cell needs its stored lines ([`Table::stored_lines_need`]); the growth from these
+    ///    is capped at Hangul's stored object height ([`Table::stored_object_height`]);
+    /// 2. a cell whose stored lines are stale ([`Table::cell_lines_stale`] — the cell or anything in it
+    ///    was edited, or the table's column widths changed) needs `laid_out(i)`, its laid-out content,
+    ///    on top of the capped rows.
+    ///
+    /// A one-row cell raises its row; a row-spanning cell adds only its shortfall to the last row it
+    /// covers (narrower spans first), only when every row it covers has a stored height. Rows without a
+    /// stored height (`row_heights[r] <= 0`) are left alone. No-op unless `fixed_row_heights`.
+    /// Shared by the typesetter (laid-out rows) and the HWPX writer, which bakes claim 1 into a `.hwp` →
+    /// HWPX conversion (it does no layout, so it passes `|_| 0.0`) — both grow the same rows by the
+    /// same rule. `default_pad`: the vertical padding of a cell that declares none ([`CELL_PAD_DEFAULT`]).
+    pub fn grow_fixed_rows(
+        &self,
+        rows: &mut [f64],
+        default_pad: f64,
+        laid_out: impl Fn(usize) -> f64,
+    ) {
+        if !self.fixed_row_heights || self.row_heights.len() != rows.len() {
+            return;
+        }
+        let before: Vec<f64> = rows.to_vec();
+        // The cap's cut is set by the table as Hangul saved it (every cell's stored lines, edited or
+        // not), so an edit in one cell leaves the other rows where they were.
+        let mut as_saved = before.clone();
+        self.raise_rows(&mut as_saved, |i| self.saved_lines_need(i, default_pad));
+        let keep = self.stored_object_height_keep(&before, &as_saved);
+        self.raise_rows(rows, |i| self.stored_lines_need(i, default_pad));
+        if keep < 1.0 {
+            for (row, base) in rows.iter_mut().zip(&before) {
+                *row = base + (*row - base) * keep;
+            }
+        }
+        self.raise_rows(rows, |i| {
+            if self.cell_lines_stale(i) {
+                laid_out(i)
+            } else {
+                0.0
+            }
+        });
+    }
+
+    fn raise_rows(&self, rows: &mut [f64], wants: impl Fn(usize) -> f64) {
+        let fixed = |r: usize| self.row_heights.get(r).is_some_and(|&h| h > 0);
+        for (i, c) in self.cells.iter().enumerate() {
+            if c.active && c.row_span.max(1) == 1 && c.row < rows.len() && fixed(c.row) {
+                rows[c.row] = rows[c.row].max(wants(i));
+            }
+        }
+        let mut spans: Vec<usize> = (0..self.cells.len())
+            .filter(|&i| {
+                let c = &self.cells[i];
+                c.active && c.row_span.max(1) > 1 && c.row < rows.len()
+            })
+            .collect();
+        spans.sort_by_key(|&i| self.cells[i].row_span);
+        for i in spans {
+            let c = &self.cells[i];
+            let end = (c.row + c.row_span.max(1)).min(rows.len());
+            if !(c.row..end).all(fixed) {
+                continue;
+            }
+            let sum: f64 = rows[c.row..end].iter().sum();
+            let want = wants(i);
+            if want > sum {
+                rows[end - 1] += want - sum;
+            }
+        }
+    }
+
+    /// #537 — a 글자처럼 취급 (treat-as-char) table never grows past the object height Hangul stored for
+    /// it ([`Table::stored_object_height`] — what Hangul drew; for a table that runs over several pages
+    /// it is still the total). Applies to the growth from stored lines only (an edited cell's laid-out
+    /// need goes on top, see [`Table::grow_fixed_rows`]), and only when the object height is at least
+    /// the stored row sum and every row has a stored height — a row sized by its content (height 0)
+    /// has no stored value the writer could compare against, so the typesetter and the HWPX writer
+    /// would cap differently. On 69 such tables of two forms the grown height matched it on 68; the
+    /// one that did not grew 900 HWPUNIT more than Hangul and pushed a row onto an extra page.
+    /// ⚠️ Assumption: the file stores only the table's total, so the cut is shared between the grown
+    /// rows in proportion to their growth — the total (and so the page break) is Hangul's, a single
+    /// row's height is not checked against Hangul. The share is set by the table as Hangul saved it
+    /// (every cell's stored lines), so editing one cell leaves the other rows' share unchanged. ⚠️ The object height is what Hangul's desktop
+    /// editor stored; a table whose object height equals the stored row sum is not grown at all.
+    fn stored_object_height_keep(&self, before: &[f64], grown: &[f64]) -> f64 {
+        let Some(cap) = self.stored_object_height.map(f64::from) else {
+            return 1.0;
+        };
+        if self.row_heights.iter().any(|&h| h <= 0) {
+            return 1.0;
+        }
+        let stored: f64 = before.iter().sum();
+        let total: f64 = grown.iter().sum();
+        if cap < stored || total <= cap || total <= stored {
+            return 1.0;
+        }
+        (cap - stored) / (total - stored)
+    }
+
+    /// #537 — whether cell `i`'s stored lines no longer describe it: the cell or anything in it
+    /// (recursively — a paragraph's format, a nested table) was edited, or the table's column widths
+    /// changed ([`Table::col_widths_edited`] — lines wrap at the column width). A row-height edit
+    /// alone leaves them valid.
+    pub fn cell_lines_stale(&self, i: usize) -> bool {
+        self.col_widths_edited
+            || self
+                .cells
+                .get(i)
+                .is_some_and(|c| c.dirty.is_dirty() || c.blocks.iter().any(Block::any_dirty))
+    }
+
+    /// #537 — the height an UNEDITED cell's stored lines need: [`Cell::stored_line_extent`] plus its vertical
+    /// padding (its own, else the table's, else `default_pad`). 0 when the cell stores no lines, or when
+    /// the stored lines are stale ([`Table::cell_lines_stale`]).
+    pub fn stored_lines_need(&self, i: usize, default_pad: f64) -> f64 {
+        if self.cell_lines_stale(i) {
+            return 0.0;
+        }
+        self.saved_lines_need(i, default_pad)
+    }
+
+    /// What cell `i`'s stored lines need as Hangul saved them, stale or not.
+    fn saved_lines_need(&self, i: usize, default_pad: f64) -> f64 {
+        let Some(c) = self.cells.get(i) else {
+            return 0.0;
+        };
+        let Some(extent) = c.stored_line_extent else {
+            return 0.0;
+        };
+        let pad = match c.padding.as_ref().or(self.padding.as_ref()) {
+            Some(p) => (p[2].max(0) + p[3].max(0)) as f64,
+            None => default_pad,
+        };
+        extent.max(0) as f64 + pad
+    }
+
     /// If this is a 1×1 "frame wrapper" whose single active cell holds exactly ONE multi-row nested table
     /// (plus only empty paragraphs), return that inner table. This is what actually gets RENDERED and
     /// EDITED (e.g. the 자가진단표 = a 17×3 grid wrapped in a 1×1). The render unwrap (hwp_typeset) AND the
@@ -1088,6 +1256,14 @@ pub struct Cell {
     /// `pageBreak="CELL"` continuation; cell/table dirtiness or table geometry edits discard this
     /// stale cache and return pagination to live measurement.
     pub source_page_segments: usize,
+    /// RENDER-IR ONLY (#537): Hangul's stored extent of this cell's lines (HWPUNIT) — from the first
+    /// stored line's top to the last line's bottom (`PARA_LINE_SEG`), `None` when the file stores none.
+    /// A fixed-height row whose stored lines (plus the cell's vertical padding) do not fit the stored
+    /// row height grows to them — what Hangul draws (#537: the stored height can be smaller than the
+    /// lines Hangul itself stored). An edit in the cell (recursively) or a column-width edit makes it
+    /// stale ([`Table::cell_lines_stale`]); live measurement then decides instead. ⚠️ The rule is checked against Hangul's stored lines, not
+    /// row by row against a Hangul PDF.
+    pub stored_line_extent: Option<HwpUnit>,
     /// EXPORT PROVENANCE (#457, never serialized itself): a FRESH cell a row op cloned from an
     /// original cell (the template row's cell) — that cell's `<hp:tc>` byte range in
     /// `Section.provenance.raw`. The structural re-emit copies that XML (height · borders · cell
@@ -1220,6 +1396,7 @@ impl Default for Cell {
             padding: None,
             width: None,
             source_page_segments: 0,
+            stored_line_extent: None,
             template_span: None,
             height_delta: 0,
             dirty: Dirty::default(),

@@ -304,6 +304,7 @@ fn serialize_from_scratch(doc: &SemanticDoc) -> Result<Vec<u8>> {
     for sec in &mut seeded.sections {
         sec.provenance.raw = Some(base_section0.clone());
         sec.dirty.mark();
+        bake_stored_line_rows(&mut sec.blocks);
         for block in &mut sec.blocks {
             mark_block_dirty(block);
         }
@@ -2915,6 +2916,32 @@ fn emit_outer_margin(t: &Table) -> Option<[i32; 4]> {
     (captured || m.iter().any(|&v| v != 0)).then_some(m)
 }
 
+/// #537 — bake the rows a `.hwp` table grows for its stored lines into its stored heights, in place and
+/// recursively (cells' and captions' tables too). A `.hwp` → HWPX conversion writes `noAdjust="1"` (exact
+/// heights) and does not carry the stored lines, so without this the reopened document would clip again
+/// what the original draws. Same rows, same rule as the typesetter (`Table::grow_fixed_rows` — stored
+/// lines, capped at the stored object height; `CELL_PAD_DEFAULT` for a cell that declares no padding).
+/// Runs BEFORE the conversion marks every block dirty — an edited cell (dirty before that) is not
+/// baked: its need is a laid-out height and this writer does no layout.
+fn bake_stored_line_rows(blocks: &mut [Block]) {
+    for b in blocks {
+        let Block::Table(t) = b else { continue };
+        for c in &mut t.cells {
+            bake_stored_line_rows(&mut c.blocks);
+        }
+        if let Some(caption) = t.caption.as_mut() {
+            bake_stored_line_rows(&mut caption.blocks);
+        }
+        if !t.fixed_row_heights || t.cells.iter().all(|c| c.stored_line_extent.is_none()) {
+            continue;
+        }
+        let mut rows: Vec<f64> = t.row_heights.iter().map(|&h| f64::from(h)).collect();
+        // Claim 1 only (stored lines, capped): this writer does no layout, so a stale cell claims 0.
+        t.grow_fixed_rows(&mut rows, hwp_model::document::CELL_PAD_DEFAULT, |_| 0.0);
+        t.row_heights = rows.iter().map(|&h| h.ceil() as HwpUnit).collect();
+    }
+}
+
 /// Project a table's ACTIVE cells to [`PlacedCell`]s, recursively projecting each cell's content.
 fn placed_cells(t: &Table) -> Vec<PlacedCell> {
     t.cells
@@ -3560,6 +3587,77 @@ fn max_id(s: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #537 — the conversion bakes the same rows the typesetter grows: stored lines + padding, capped at
+    /// Hangul's stored object height for a 글자처럼 취급 table (the cut shared by growth — an assumption).
+    /// A table with a content-sized row (height 0) is not capped — the writer cannot size that row, so
+    /// the typesetter does not cap it either. An edited cell is not baked; other rows still are. Tables
+    /// in cells and in captions are baked too.
+    #[test]
+    fn baking_grows_rows_up_to_the_stored_object_height() {
+        let cell = |row: usize, extent: HwpUnit| Cell {
+            row,
+            col: 0,
+            stored_line_extent: Some(extent),
+            ..Default::default()
+        };
+        let table = |cap: Option<HwpUnit>, heights: Vec<HwpUnit>| Table {
+            rows: 2,
+            cols: 1,
+            cells: vec![cell(0, 3_000), cell(1, 2_000)],
+            col_widths: vec![10_000],
+            row_heights: heights,
+            fixed_row_heights: true,
+            padding: Some([0, 0, 0, 0]),
+            stored_object_height: cap,
+            ..Default::default()
+        };
+        let baked = |t: Table| {
+            let mut blocks = vec![Block::Table(t)];
+            bake_stored_line_rows(&mut blocks);
+            let Block::Table(t) = blocks.remove(0) else {
+                unreachable!()
+            };
+            t
+        };
+        for (cap, heights, want) in [
+            (None, vec![1_000, 1_000], vec![3_000, 2_000]),
+            (Some(3_500), vec![1_000, 1_000], vec![2_000, 1_500]),
+            (Some(2_000), vec![1_000, 1_000], vec![1_000, 1_000]),
+            // a content-sized row (0) → no cap; the 0 row is left alone
+            (Some(2_000), vec![1_000, 0], vec![3_000, 0]),
+        ] {
+            assert_eq!(
+                baked(table(cap, heights.clone())).row_heights,
+                want,
+                "{cap:?} {heights:?}"
+            );
+        }
+        // an edited cell's stored lines are stale (its need is a laid-out height): not baked
+        let mut edited = table(None, vec![1_000, 1_000]);
+        edited.cells[0].dirty.mark();
+        assert_eq!(baked(edited).row_heights, vec![1_000, 2_000]);
+        // a table in a cell and a table in a caption are baked
+        let mut outer = table(None, vec![9_000, 9_000]);
+        outer.cells[0].blocks = vec![Block::Table(table(None, vec![1_000, 1_000]))];
+        outer.caption = Some(TableCaption {
+            blocks: vec![Block::Table(table(None, vec![1_000, 1_000]))],
+            ..Default::default()
+        });
+        let outer = baked(outer);
+        let Block::Table(in_cell) = &outer.cells[0].blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(in_cell.row_heights, vec![3_000, 2_000], "table in a cell");
+        let Block::Table(in_caption) = &outer.caption.as_ref().unwrap().blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(
+            in_caption.row_heights,
+            vec![3_000, 2_000],
+            "table in a caption"
+        );
+    }
     use crate::parse::parse_semantic;
 
     fn sample() -> Vec<u8> {

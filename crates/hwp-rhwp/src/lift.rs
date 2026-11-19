@@ -596,6 +596,7 @@ impl<'a> Lifter<'a> {
                     width: i32::try_from(cell_layout_width(c))
                         .ok()
                         .filter(|width| *width > 0),
+                    stored_line_extent: stored_line_extent(c),
                     ..Default::default()
                 }
             })
@@ -658,6 +659,8 @@ impl<'a> Lifter<'a> {
             // #467: a table floating in front of / behind the text (기안문 직인 box) takes no flow
             // space in Hancom; exporting it inline pushed the form onto a second page.
             treat_as_char: lift_table_float(&t.common).map(|_| false),
+            // #537 — the object height Hangul drew a 글자처럼 취급 table at.
+            stored_object_height: lift_object_height(&t.common),
             float_placement: lift_table_float(&t.common),
             provenance: Provenance {
                 source: Some(SourceFormat::Hwp5),
@@ -921,6 +924,16 @@ fn splice_inline_objects(runs: &mut Vec<Run>, mut objects: Vec<(usize, Inline)>)
 /// the result as a FLOOR, so content-driven rows are untouched and only genuinely fixed rows grow. A
 /// height of 0 (empty/unsized cell) leaves the row content-sized. See the call site for why this pairs
 /// with the trailing-leading trim to land benchmark1's 18 pages.
+/// #537 — Hangul's stored extent of a cell's lines ([`hwp_model::document::stored_line_extent`]).
+fn stored_line_extent(c: &rhwp::model::table::Cell) -> Option<i32> {
+    hwp_model::document::stored_line_extent(
+        c.paragraphs
+            .iter()
+            .flat_map(|p| p.line_segs.iter())
+            .map(|l| (i64::from(l.vertical_pos), i64::from(l.line_height))),
+    )
+}
+
 fn stored_row_heights(cells: &[rhwp::model::table::Cell], rows: usize) -> Vec<i32> {
     let mut row_h = vec![0i32; rows];
     // ① 한 행짜리 셀이 그 행의 저장 높이를 정한다.
@@ -1385,6 +1398,15 @@ fn border_width_to_px(width: u8) -> f64 {
     px.max(HAIRLINE_MIN_PX)
 }
 
+/// #537 — the object height Hangul stored for a 글자처럼 취급 (treat-as-char) table — what it drew
+/// ([`Table::stored_object_height`]). `None` for any other table (a floating or wrapped table's
+/// object height is not the space it takes in the text).
+fn lift_object_height(c: &rhwp::model::shape::CommonObjAttr) -> Option<HwpUnit> {
+    c.treat_as_char
+        .then(|| HwpUnit::try_from(c.height).ok())
+        .flatten()
+}
+
 /// Floating placement of a non-inline table whose text wrap lets it overlap the text
 /// (`IN_FRONT_OF_TEXT`/`BEHIND_TEXT`) — see [`Table::float_placement`]. Other tables → `None`.
 /// Offsets are stored HWPUNIT as-is (unlike paragraph margins they are not doubled in HWP5).
@@ -1574,6 +1596,30 @@ mod tests {
             ..stamp
         };
         assert!(lift_table_float(&inline).is_none());
+    }
+
+    /// #537: only a 글자처럼 취급 table records its object height.
+    #[test]
+    fn only_a_treat_as_char_table_records_its_object_height() {
+        use rhwp::model::shape::{CommonObjAttr, TextWrap};
+        let inline = CommonObjAttr {
+            treat_as_char: true,
+            height: 7_972,
+            ..Default::default()
+        };
+        assert_eq!(lift_object_height(&inline), Some(7_972));
+        for text_wrap in [
+            TextWrap::TopAndBottom,
+            TextWrap::InFrontOfText,
+            TextWrap::BehindText,
+        ] {
+            let placed = CommonObjAttr {
+                treat_as_char: false,
+                text_wrap,
+                ..inline.clone()
+            };
+            assert_eq!(lift_object_height(&placed), None);
+        }
     }
 
     #[test]

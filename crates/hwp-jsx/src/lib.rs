@@ -1199,10 +1199,12 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         row_heights,
         // Render-IR only (HWPX auto-fit floor) — the JSX surface never carries it (defaults empty).
         stored_row_heights: Vec::new(),
+        stored_object_height: None,
         // Render-IR only (HWPX `noAdjust="1"`) — a JSX table's row heights stay FLOORS (이슈 080).
         fixed_row_heights: false,
         // A JSX projection carries no op-edit history — geometry re-emit fidelity is the HWPX lane's.
         geometry_edited: false,
+        col_widths_edited: false,
         outer_margin_top: el
             .attrs
             .get("data-omt")
@@ -1312,6 +1314,7 @@ fn parse_cell(el: &JsxElement) -> Result<Cell> {
         // 저장된 셀 실폭(074)도 JSX 투영 대상이 아니다 — 없으면 조판기가 열 격자로 근사한다.
         width: None,
         source_page_segments: 0,
+        stored_line_extent: None,
         template_span: None,
         height_delta: 0,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
