@@ -94,8 +94,12 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
     더 만들었다. ⚠️ 가정: 파일에는 표 전체 높이만 있어, 줄이는 양은 키운 행마다 키운 양의 비율로 나눈다(표 전체 · 쪽 나눔은 한글과
     같고, 행 하나의 높이는 한글과 대조하지 않았다).
   - 동작 변화: 편집으로 넘친 고정 칸이 잘리지 않고 행이 늘어난다. `tableCellFits` 의 `overflow` 는 키운 행 기준이라 넘침이 줄어든다.
+  - `.hwp` → HWPX 변환: `.hwp` 에서 읽은 표의 바깥 여백이 네 방향 모두 0 이면 0 으로 쓴다(전에는 「모름」으로 보고 283 을 써
+    다시 연 표가 위 · 아래 283 씩 커졌다 — tac-img-02 는 이것으로 1쪽 밀렸다). 편집기로 넣은 표 · 바깥 여백 속성이 없는 HWPX 표는
+    그대로 283. 공개 · 비공개 `.hwp` 40문서의 변환 왕복 쪽 수 중 바뀐 것은 tac-img-02(66 → 65, 원본과 같음) 하나다.
   *(EN — Fixed: a `.hwp` fixed-height row whose stored lines exceed its stored height now grows to them (unedited cells: stored lines +
-  vertical padding; edited cells: laid-out content); conversion to HWPX writes the grown heights. Checked against Hangul's stored
+  vertical padding; edited cells: laid-out content); conversion to HWPX writes the grown heights and keeps a `.hwp` table's
+  all-zero outer margin as 0 instead of the legacy 283. Checked against Hangul's stored
   lines, not row by row against a Hangul PDF.)*
 - **쪽 수 세기(`NaiveLayout` — 쪽 수 API · 레이아웃 오라클의 우리 쪽 수)가 그리기(`place_doc`)와 갈리던 두 자리를 고쳤다 (#537).**
   ① 구역의 마지막 쪽에 표의 행만 있으면(앞 쪽에서 넘어온 행 · 쪽보다 큰 행) 다음 구역을 같은 쪽에 이어 세었다. ② 왼 · 오른
