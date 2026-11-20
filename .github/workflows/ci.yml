@@ -91,6 +91,8 @@ jobs:
           node --test \
             scripts/tests/desktop-shell-mode.test.mjs \
             scripts/tests/desktop-release-manifest.test.mjs
+      - name: release e2e gate contract (#549)
+        run: node --test scripts/tests/e2e-gate.test.mjs
       - name: AI-native recorded task suite (issue 106)
         run: |
           node scripts/generate-ai-task-fixtures.mjs --check

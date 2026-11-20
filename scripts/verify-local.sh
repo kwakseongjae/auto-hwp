@@ -31,6 +31,9 @@ node --test scripts/tests/document-visual-check.test.mjs
 echo "═══ tests (hwp-rhwp features) ═══"
 cargo test -p hwp-rhwp --features "rhwp shaper"
 
+echo "═══ 발행 전 e2e 관문 계약 (#549 — publish.yml 이 부르는 판단) ═══"
+node --test scripts/tests/e2e-gate.test.mjs
+
 echo "═══ AI-native recorded task suite (이슈 106 — contributor network 없음) ═══"
 node scripts/generate-ai-task-fixtures.mjs --check
 node --test scripts/tests/ai-task-suite.test.mjs
