@@ -1970,6 +1970,16 @@ pub fn page_start_alignment_for_doc(bytes: &[u8], our: &SemanticDoc) -> Result<P
     page_start_alignment_inner(bytes, our, AnchorOrder::TablesFirst)
 }
 
+/// [`PageStartAlignment`] for a `.hwp` whose OUR side is an rhwp lift the caller already holds (e.g. with a
+/// section setting changed, to compare) — the lift's anchor order, as [`page_start_alignment`] uses.
+#[cfg(feature = "rhwp")]
+pub fn page_start_alignment_for_lifted(
+    bytes: &[u8],
+    our: &SemanticDoc,
+) -> Result<PageStartAlignment> {
+    page_start_alignment_inner(bytes, our, AnchorOrder::AnchorFirst)
+}
+
 /// Where a table anchor paragraph sits relative to its tables: the rhwp lift emits `[anchor, Table…]`,
 /// the HWPX parser `[Table…, anchor]` (byte-preserving order — see `hwp_typeset::section_page_breaks`).
 #[cfg(feature = "rhwp")]
@@ -2362,6 +2372,14 @@ pub fn page_start_alignment(_bytes: &[u8]) -> Result<PageStartAlignment> {
 
 #[cfg(not(feature = "rhwp"))]
 pub fn page_start_alignment_for_doc(
+    _bytes: &[u8],
+    _our: &SemanticDoc,
+) -> Result<PageStartAlignment> {
+    Err(Error::CapabilityUnavailable(NOT_WIRED))
+}
+
+#[cfg(not(feature = "rhwp"))]
+pub fn page_start_alignment_for_lifted(
     _bytes: &[u8],
     _our: &SemanticDoc,
 ) -> Result<PageStartAlignment> {

@@ -2397,13 +2397,17 @@ impl EmptyLineHider {
     }
 }
 
-/// #541 — 빈 문단: 글이 공백뿐이고 글 아닌 것(제어 · 개체 · 탭 등)이 없다.
+/// #541 — 빈 문단: 글이 공백뿐이고(rhwp 와 같은 `trim` 판정) 글 아닌 것(제어 · 개체 등)이 없다. 표 · 개체를 품은 문단(`is_table_anchor`),
+/// 쪽 번호 표지를 품은 문단, 쪽 나누기로 시작하는 문단은 글이 비어도 빈 문단이 아니다.
 pub(crate) fn is_empty_paragraph(p: &Paragraph) -> bool {
-    p.runs.iter().all(|run| {
-        run.content
-            .iter()
-            .all(|inline| matches!(inline, Inline::Text(text) if text.trim().is_empty()))
-    })
+    !p.is_table_anchor
+        && !p.page_break_before
+        && p.page_number_marks.is_empty()
+        && p.runs.iter().all(|run| {
+            run.content
+                .iter()
+                .all(|inline| matches!(inline, Inline::Text(text) if text.trim().is_empty()))
+        })
 }
 
 pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64, trailing: bool) -> bool {
@@ -2841,6 +2845,59 @@ mod tests {
             }],
             ..Default::default()
         }
+    }
+
+    /// #541 — 감출 수 있는 빈 문단: 글이 공백뿐이고 제어 · 개체가 없는 줄 하나짜리 문단. 쪽마다 둘까지, 켜진 단 하나
+    /// 구역에서만.
+    #[test]
+    fn empty_line_hider_judges_only_empty_single_line_paragraphs() {
+        let on_section = |columns: u8| {
+            let mut sec = Section::default();
+            sec.page.hide_first_empty_line = true;
+            sec.page.columns = columns;
+            sec
+        };
+        let empty = para("");
+        assert!(is_empty_paragraph(&empty));
+        assert!(is_empty_paragraph(&para(" \u{3000} ")), "공백만 있는 문단");
+        assert!(!is_empty_paragraph(&para("글")));
+        let anchor = Paragraph {
+            is_table_anchor: true,
+            ..para("")
+        };
+        assert!(!is_empty_paragraph(&anchor), "표 · 개체를 품은 문단");
+        let marked = Paragraph {
+            page_number_marks: vec![PageNumberMark::Hide],
+            ..para("")
+        };
+        assert!(!is_empty_paragraph(&marked), "쪽 번호 표지를 품은 문단");
+        let broken = Paragraph {
+            page_break_before: true,
+            ..para("")
+        };
+        assert!(!is_empty_paragraph(&broken), "쪽 나누기로 시작하는 문단");
+        let bookmark = Paragraph {
+            runs: vec![Run {
+                content: vec![Inline::Bookmark("b".into())],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(!is_empty_paragraph(&bookmark), "제어를 품은 문단");
+
+        let mut hider = EmptyLineHider::of(&on_section(1));
+        assert!(!hider.hides(0, &empty, 2), "줄이 둘인 문단은 감추지 않음");
+        assert!(!hider.hides(0, &para("글"), 1));
+        assert!(hider.hides(0, &empty, 1) && hider.hides(0, &empty, 1));
+        assert!(!hider.hides(0, &empty, 1), "쪽마다 둘까지");
+        assert!(hider.hides(1, &empty, 1), "다음 쪽에서 다시 센다");
+        let mut off = EmptyLineHider::of(&Section::default());
+        assert!(!off.hides(0, &empty, 1), "꺼진 구역");
+        assert!(!EmptyLineHider::off().hides(0, &empty, 1));
+        assert!(
+            !EmptyLineHider::of(&on_section(2)).hides(0, &empty, 1),
+            "다단 구역은 감추지 않음"
+        );
     }
 
     #[test]

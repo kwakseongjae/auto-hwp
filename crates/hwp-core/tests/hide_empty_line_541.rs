@@ -2,6 +2,8 @@
 //! 변환이 그 값을 그대로 쓴다. 조판은 아직 이 값을 쓰지 않는다(다음 단계).
 #![cfg(feature = "rhwp")]
 
+use std::io::Write;
+
 use hwp_core::open_hwp5_own;
 use hwp_model::document::SemanticDoc;
 use hwp_model::prelude::{DocumentParser, SourceFormat};
@@ -39,7 +41,7 @@ fn hwpx_sections_carry_the_setting() {
 fn both_hwp_readers_and_the_conversion_carry_the_setting() {
     let rel = "external/rhwp/samples/loading-fail-01.hwp";
     let Some(bytes) = read(rel) else {
-        eprintln!("건너뜀: {rel} 없음");
+        let _ = writeln!(std::io::stderr(), "건너뜀: {rel} 없음");
         return;
     };
     let lifted = RhwpEngine::new().parse(&bytes, SourceFormat::Hwp5).unwrap();
@@ -48,7 +50,13 @@ fn both_hwp_readers_and_the_conversion_carry_the_setting() {
     // hwp-hwp5 `layout_semantic::reads_the_hide_empty_line_section_attribute`(합성 .hwp)가 지킨다.
     match open_hwp5_own(&bytes) {
         Ok(owned) => assert_eq!(flags(&owned), flags(&lifted), "both .hwp readers"),
-        Err(error) => eprintln!("건너뜀(두 읽개 대조): 자체 파서가 {rel} 을 열지 못함 — {error}"),
+        Err(error) => {
+            // 시험 출력 가로채기를 거치지 않고 남긴다 — 통과한 시험의 `eprintln!` 은 보이지 않는다.
+            let _ = writeln!(
+                std::io::stderr(),
+                "건너뜀(두 읽개 대조): 자체 파서가 {rel} 을 열지 못함 — {error}"
+            );
+        }
     }
     let hwpx = hwp_hwpx::serialize::serialize(&lifted).unwrap();
     let reopened = hwp_hwpx::HwpxParser::new()

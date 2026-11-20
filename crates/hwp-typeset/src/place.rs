@@ -10946,41 +10946,91 @@ mod tests {
         assert_eq!(pages_of(blocks, true)[k], 1);
     }
 
+    /// #541 — 감춘 빈 문단은 위 · 아래 간격까지 되돌린다: 쪽 끝에 감춘 둘이 같은 세로 자리에 겹친다(한글의 저장 줄도
+    /// 같은 `vertpos`). 다단 구역은 감추지 않는다(켜져 있어도 꺼진 구역과 같은 쪽).
     #[test]
-    fn zz_dbg_541() {
+    fn hidden_empty_lines_overlap_and_multi_column_sections_do_not_hide() {
         use crate::LayoutEngine;
-        let k = {
-            let doc = shape_doc(
-                (0..400)
-                    .map(|i| Block::Paragraph(para(&format!("줄 {i}"))))
-                    .collect(),
-            );
-            let walked = block_pages(&doc, &ApproxFontMetrics);
-            walked[0]
-                .iter()
-                .position(|&pg| pg == 1)
-                .expect("a second page")
+        let doc_of = |blocks: Vec<Block>, columns: u8| {
+            let mut doc = shape_doc(blocks);
+            doc.sections[0].page.height = 79_200;
+            doc.sections[0].page.columns = columns;
+            doc.sections[0].page.hide_first_empty_line = true;
+            let spaced = ParaShape {
+                space_before: 2_000,
+                space_after: 2_000,
+                ..doc.para_shapes[0].clone()
+            };
+            doc.para_shapes.push(spaced);
+            doc
         };
-        let mut blocks: Vec<Block> = (0..k)
-            .map(|i| Block::Paragraph(para(&format!("줄 {i}"))))
-            .collect();
-        for t in ["", "  ", "", "", "끝"] {
-            blocks.push(Block::Paragraph(para(t)));
-        }
-        let mut doc = shape_doc(blocks);
-        doc.sections[0].page.hide_first_empty_line = true;
+        let text = |n: usize| -> Vec<Block> {
+            (0..n)
+                .map(|i| Block::Paragraph(para(&format!("줄 {i}"))))
+                .collect()
+        };
+        let k = block_pages(&doc_of(text(400), 1), &ApproxFontMetrics)[0]
+            .iter()
+            .position(|&pg| pg == 1)
+            .expect("a second page");
+        let spaced_empty = || {
+            Block::Paragraph(Paragraph {
+                para_shape: 1,
+                ..para("")
+            })
+        };
+        let mut blocks = text(k);
+        blocks.extend([spaced_empty(), spaced_empty(), Block::Paragraph(para("끝"))]);
+        let doc = doc_of(blocks, 1);
+        assert_eq!(
+            block_pages(&doc, &ApproxFontMetrics)[0][k..],
+            [0, 0, 1],
+            "간격이 있어도 둘은 첫 쪽에 남는다"
+        );
         let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
-        let (_, _, _, bh) = crate::body_box(&doc.sections[0].page);
-        for (pi, pg) in naive.pages.iter().enumerate() {
-            let n = pg.lines.len();
-            for l in pg.lines.iter().skip(n.saturating_sub(6)).take(6) {
-                eprintln!(
-                    "p{pi} vert {} h {} horz {} body {bh}",
-                    l.vert_pos, l.vert_size, l.horz_size
-                );
-            }
+        let tail: Vec<_> = naive.pages[0]
+            .lines
+            .iter()
+            .rev()
+            .take(2)
+            .map(|l| l.vert_pos)
+            .collect();
+        assert_eq!(tail[0], tail[1], "NaiveLayout: 감춘 둘이 같은 자리");
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), naive.pages.len(), "LOCKSTEP");
+        let band_y = |b: usize| {
+            placed.pages[0]
+                .blocks
+                .iter()
+                .find(|band| band.block == b)
+                .map(|band| band.y)
+        };
+        assert!(band_y(k).is_some(), "감춘 문단도 첫 쪽에 자리가 있다");
+        assert_eq!(band_y(k), band_y(k + 1), "place_doc: 감춘 둘이 같은 자리");
+
+        // 다단 구역: 켜져 있어도 감추지 않는다(세 걸음 모두 꺼진 구역과 같은 쪽).
+        let mut blocks = text(2 * k + 1);
+        blocks.extend([spaced_empty(), spaced_empty(), spaced_empty()]);
+        blocks.push(Block::Paragraph(para("끝")));
+        let on = doc_of(blocks.clone(), 2);
+        let mut off = doc_of(blocks, 2);
+        off.sections[0].page.hide_first_empty_line = false;
+        for doc in [&on, &off] {
+            assert_eq!(
+                place_doc(doc, &ApproxFontMetrics).pages.len(),
+                crate::NaiveLayout
+                    .layout(doc, &ApproxFontMetrics)
+                    .unwrap()
+                    .pages
+                    .len(),
+                "다단 LOCKSTEP"
+            );
         }
-        panic!("dbg k={k}");
+        assert_eq!(
+            block_pages(&on, &ApproxFontMetrics),
+            block_pages(&off, &ApproxFontMetrics),
+            "다단 구역은 감추지 않음"
+        );
     }
 
     /// #537 — 병합 칸이 덮는 행 가운데 하나라도 내용으로 정하는 행(높이 0)이면 그 칸의 저장 줄로 키우지 않는다(그 행은
