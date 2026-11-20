@@ -83,6 +83,11 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 고침 (Fixed)
 
+- **구역 설정 「빈 줄 감추기」를 읽고, `.hwp` → HWPX 변환에 그대로 쓴다 (#589).** HWPX `<hp:visibility hideFirstEmptyLine>` ·
+  HWP5 구역 정의 속성 비트 19 를 읽어 구역 쪽 설정에 둔다. 전에는 읽지 않았고, 변환은 늘 「끔」(`"0"`)으로 써서 켜진 `.hwp` 를 변환해
+  한글에서 열면 쪽 끝 빈 줄 배치가 원본과 달랐다. 조판은 아직 이 값을 쓰지 않는다(#541) — 쪽 수는 그대로다.
+  *(EN — Fixed: the section setting "hide empty line" is read (HWPX `hideFirstEmptyLine`, HWP5 section attribute bit 19) and kept by
+  `.hwp` → HWPX conversion, which always wrote "0". Layout does not use it yet.)*
 - **`.hwp` → HWPX 변환에서 표 바깥 여백 0 을 0 으로 쓴다.** `.hwp` 는 표 바깥 여백을 늘 적으므로 네 방향 0 도 실제 값인데, 쓰개가
   이것을 「모름」으로 보고 예전 283 을 써서 다시 연 표가 위 · 아래 283 씩 커졌다(쪽이 밀릴 수 있다). 이제 `.hwp` 읽개가 담은 표는 실제
   값을 쓰고, 편집기로 넣은 표 · JSX 를 거친 표 · 바깥 여백 속성이 없는 HWPX 표는 그대로 283 이다.
