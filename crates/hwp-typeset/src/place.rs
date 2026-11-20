@@ -11033,6 +11033,76 @@ mod tests {
         );
     }
 
+    /// #541 — 감춘 빈 문단의 위 간격까지 되돌리므로, 그 뒤의 낮은 줄은 감추기 전 자리에 들어간다. 세 걸음이 모두 그렇다
+    /// (한 걸음만 되돌리지 않으면 그 걸음만 낮은 줄을 다음 쪽으로 넘긴다 — LOCKSTEP 갈림).
+    #[test]
+    fn a_short_line_after_a_hidden_empty_line_fits_where_it_would_have() {
+        use crate::LayoutEngine;
+        let doc_of = |blocks: Vec<Block>, hide: bool| {
+            let mut doc = shape_doc(blocks);
+            doc.sections[0].page.height = 79_200;
+            doc.sections[0].page.hide_first_empty_line = hide;
+            doc.para_shapes.push(ParaShape {
+                space_before: 2_000,
+                ..doc.para_shapes[0].clone()
+            });
+            doc.char_shapes.push(CharShape {
+                height: 500,
+                ..Default::default()
+            });
+            doc
+        };
+        let text = |n: usize| -> Vec<Block> {
+            (0..n)
+                .map(|i| Block::Paragraph(para(&format!("줄 {i}"))))
+                .collect()
+        };
+        let k = block_pages(&doc_of(text(400), false), &ApproxFontMetrics)[0]
+            .iter()
+            .position(|&pg| pg == 1)
+            .expect("a second page");
+        let short = || {
+            let mut p = para("작은 글");
+            p.runs[0].char_shape = 1;
+            Block::Paragraph(p)
+        };
+        let spaced_empty = || {
+            Block::Paragraph(Paragraph {
+                para_shape: 1,
+                ..para("")
+            })
+        };
+        let walks = |doc: &SemanticDoc| {
+            let placed = place_doc(doc, &ApproxFontMetrics).pages.len();
+            let naive = crate::NaiveLayout
+                .layout(doc, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len();
+            let walked = block_pages(doc, &ApproxFontMetrics)[0].clone();
+            (placed, naive, walked)
+        };
+        // 대조: 글 k 줄 뒤의 남은 자리에 낮은 줄 하나는 들어간다.
+        let mut blocks = text(k);
+        blocks.push(short());
+        let (placed, naive, walked) = walks(&doc_of(blocks, true));
+        assert_eq!(
+            (placed, naive, walked[k]),
+            (1, 1, 0),
+            "낮은 줄은 첫 쪽에 들어간다"
+        );
+        // 그 사이에 위 간격이 있는 빈 문단: 감추면 위 간격까지 되돌려 낮은 줄이 그대로 첫 쪽에.
+        let mut blocks = text(k);
+        blocks.extend([spaced_empty(), short()]);
+        let (placed, naive, walked) = walks(&doc_of(blocks.clone(), true));
+        assert_eq!(walked[k..], [0, 0], "감춘 빈 줄 뒤 낮은 줄도 첫 쪽");
+        assert_eq!((placed, naive), (1, 1), "세 걸음 같은 쪽 수");
+        // 꺼진 구역: 위 간격으로 이미 넘친 자리의 빈 줄은 그 쪽이 흡수하고(이슈 302) 진행은 쌓여, 낮은 줄은 다음 쪽.
+        let (placed, naive, walked) = walks(&doc_of(blocks, false));
+        assert_eq!(walked[k..], [0, 1]);
+        assert_eq!((placed, naive), (2, 2));
+    }
+
     /// #537 — 병합 칸이 덮는 행 가운데 하나라도 내용으로 정하는 행(높이 0)이면 그 칸의 저장 줄로 키우지 않는다(그 행은
     /// 이미 내용 높이를 받는다).
     #[test]
