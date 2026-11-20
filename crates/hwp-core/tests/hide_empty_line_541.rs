@@ -44,8 +44,11 @@ fn both_hwp_readers_and_the_conversion_carry_the_setting() {
     };
     let lifted = RhwpEngine::new().parse(&bytes, SourceFormat::Hwp5).unwrap();
     assert_eq!(flags(&lifted), vec![true], "rhwp lift");
-    if let Ok(owned) = open_hwp5_own(&bytes) {
-        assert_eq!(flags(&owned), flags(&lifted), "both .hwp readers");
+    // 자체 파서가 이 표본을 열면 두 읽개를 대조한다. 못 열면 그렇다고 남긴다 — 자체 파서의 비트 19 는
+    // hwp-hwp5 `layout_semantic::reads_the_hide_empty_line_section_attribute`(합성 .hwp)가 지킨다.
+    match open_hwp5_own(&bytes) {
+        Ok(owned) => assert_eq!(flags(&owned), flags(&lifted), "both .hwp readers"),
+        Err(error) => eprintln!("건너뜀(두 읽개 대조): 자체 파서가 {rel} 을 열지 못함 — {error}"),
     }
     let hwpx = hwp_hwpx::serialize::serialize(&lifted).unwrap();
     let reopened = hwp_hwpx::HwpxParser::new()

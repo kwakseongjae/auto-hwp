@@ -549,6 +549,8 @@ impl LayoutEngine for NaiveLayout {
             let last_draw = crate::section_last_drawing_block(sec);
             // #544 — 글 앞 · 글 뒤 표의 자리. place_doc · block_pages 와 같은 판정(LOCKSTEP).
             let floats = SectionFloatTables::of(sec);
+            // #541 — 빈 줄 감추기(place_doc · block_pages 와 같은 판정).
+            let mut hider = EmptyLineHider::of(sec);
             let mut vert = 0.0f64; // page-relative vertical cursor
                                    // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 강제 개쪽은 이 쪽에서만 실행된다.
             let mut last_drawn = NOTHING_DRAWN;
@@ -576,6 +578,9 @@ impl LayoutEngine for NaiveLayout {
                         if floats.skips_line(blk_idx, p) {
                             continue;
                         }
+                        // #541 — 감춘 빈 문단은 위 · 아래 간격도 쓰지 않는다: 문단 위로 되돌린다.
+                        let para_top = vert;
+                        let mut hidden = false;
                         // 문단 위 간격 — Hancom adds it before the paragraph (suppressed at page top).
                         if vert > 0.0 {
                             vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
@@ -591,6 +596,7 @@ impl LayoutEngine for NaiveLayout {
                         // `para_anchor` 와 같은 규칙).
                         let mut anchor_page = band_page;
                         let first_line_pushed = band.is_some_and(|plan| plan.pushes_line(0));
+                        let n_lines = lines.len();
                         for (li, ls) in lines.into_iter().enumerate() {
                             if let Some(FloatBandPlan::Here {
                                 shift_line: Some(at),
@@ -602,8 +608,14 @@ impl LayoutEngine for NaiveLayout {
                                     vert += shift;
                                 }
                             }
+                            // #541 — 빈 줄 감추기: 안 들어가는 빈 문단 줄은 이 쪽에 높이 0 으로 남는다.
+                            let hide = vert + ls.vert_size > body_h
+                                && vert > 0.0
+                                && hider.hides(pages.len() - 1, p, n_lines);
+                            hidden |= hide;
                             // 이슈 302 — 아무것도 그리지 않는 줄은 쪽을 넘기지 못한다.
-                            if vert + ls.vert_size > body_h
+                            if !hide
+                                && vert + ls.vert_size > body_h
                                 && vert > 0.0
                                 && line_forces_break(
                                     &ls,
@@ -626,8 +638,8 @@ impl LayoutEngine for NaiveLayout {
                                     anchor_page = pages.len() - 1;
                                 }
                             }
-                            let adv = line_advance(&ls, ratio);
-                            if ls.horz_size > 0.0 {
+                            let adv = if hide { 0.0 } else { line_advance(&ls, ratio) };
+                            if ls.horz_size > 0.0 && !hide {
                                 last_drawn = pages.len() - 1; // 이슈 307
                             }
                             pages.last_mut().unwrap().lines.push(LineSeg {
@@ -662,8 +674,12 @@ impl LayoutEngine for NaiveLayout {
                         if floats.hosted_by(blk_idx).next().is_some() {
                             mark_drawn(&mut last_drawn, anchor_page);
                         }
-                        // 문단 아래 간격.
-                        vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+                        // 문단 아래 간격. #541 — 감춘 빈 문단은 위 간격까지 되돌린다.
+                        if hidden {
+                            vert = para_top;
+                        } else {
+                            vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+                        }
                     }
                     // Real table layout for pagination: each row is sized to its tallest cell's
                     // laid-out content (cells break lines at an equal-split width). A row that doesn't
@@ -2321,6 +2337,73 @@ pub fn paragraph_wrap_width(p: &Paragraph, doc: &SemanticDoc, avail_w: f64) -> f
     let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
     let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
     (avail_w - left - right).max(1.0)
+}
+
+/// #541 — 쪽마다 감출 수 있는 빈 줄의 수. 한글이 저장한 줄(15건 · 2문서)에서 쪽마다 둘까지 겹쳐 남고 셋째는 다음 쪽으로
+/// 갔다. 번들한 rhwp 조판도 같은 수를 쓴다.
+pub(crate) const HIDDEN_EMPTY_LINES_PER_PAGE: u8 = 2;
+
+/// #541 — 구역 설정 「빈 줄 감추기」(`PageSetup::hide_first_empty_line`). 켜진 구역에서 쪽 끝에 안 들어가는 빈 문단의
+/// 줄은 다음 쪽으로 넘기지 않고 **그 쪽에 높이 0 으로 남긴다**(위 · 아래 간격도 더하지 않는다 — 한글의 저장 줄은 같은
+/// 세로 위치에 겹친다). 쪽마다 [`HIDDEN_EMPTY_LINES_PER_PAGE`] 까지, 그다음 빈 줄은 지금처럼 넘긴다.
+///
+/// 판정은 이 한 곳이고 세 걸음(`NaiveLayout` · [`place_doc`] · [`block_pages`])이 같은 자리에서 부른다(LOCKSTEP).
+/// 부르는 쪽은 「이 줄이 지금 쪽에 안 들어감」(`vert > 0` · `vert + 줄 높이 > 본문 높이`)일 때만 묻는다.
+/// ⚠️ 단이 하나인 구역에서만 켠다(저장 줄 조사도 단 하나인 구역만 봤다). 공백만 있는 문단도 빈 문단이다(rhwp 와
+/// 같은 판정 — 한글이 둘을 같게 다루는지는 저장 줄로 가르지 못했다).
+#[derive(Clone, Debug)]
+pub(crate) struct EmptyLineHider {
+    on: bool,
+    page: usize,
+    hidden: u8,
+}
+
+impl EmptyLineHider {
+    pub(crate) fn of(sec: &Section) -> Self {
+        let single_column = sec.page.columns <= 1
+            && !sec.blocks.iter().any(|b| {
+                matches!(b, Block::Paragraph(p) if p.column_layout_before.is_some() || p.column_break_before)
+            });
+        EmptyLineHider {
+            on: sec.page.hide_first_empty_line && single_column,
+            page: usize::MAX,
+            hidden: 0,
+        }
+    }
+
+    /// A walk that never hides (captions, measuring passes).
+    pub(crate) fn off() -> Self {
+        EmptyLineHider {
+            on: false,
+            page: usize::MAX,
+            hidden: 0,
+        }
+    }
+
+    /// Whether the one line of `p` (it has `n_lines`) that does not fit on `page` stays there, hidden.
+    pub(crate) fn hides(&mut self, page: usize, p: &Paragraph, n_lines: usize) -> bool {
+        if !self.on || n_lines != 1 || !is_empty_paragraph(p) {
+            return false;
+        }
+        if self.page != page {
+            self.page = page;
+            self.hidden = 0;
+        }
+        if self.hidden >= HIDDEN_EMPTY_LINES_PER_PAGE {
+            return false;
+        }
+        self.hidden += 1;
+        true
+    }
+}
+
+/// #541 — 빈 문단: 글이 공백뿐이고 글 아닌 것(제어 · 개체 · 탭 등)이 없다.
+pub(crate) fn is_empty_paragraph(p: &Paragraph) -> bool {
+    p.runs.iter().all(|run| {
+        run.content
+            .iter()
+            .all(|inline| matches!(inline, Inline::Text(text) if text.trim().is_empty()))
+    })
 }
 
 pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64, trailing: bool) -> bool {

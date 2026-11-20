@@ -581,6 +581,8 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
         let mut marks = PageNumberMarkPages::default();
         // #544 — 글 앞 · 글 뒤 표의 자리. NaiveLayout · block_pages 와 같은 판정(LOCKSTEP).
         let floats = crate::SectionFloatTables::of(sec);
+        // #541 — 빈 줄 감추기(NaiveLayout · block_pages 와 같은 판정).
+        let mut hider = crate::EmptyLineHider::of(sec);
         // 쪽 아래를 넘은 떠 있는 표의 나머지 행 — 구역을 다 놓은 뒤 다음 쪽들 맨 위에 그린다.
         let mut float_rest: Vec<FloatTableRest> = Vec::new();
 
@@ -601,6 +603,8 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         started = true;
                         continue;
                     }
+                    // #541 — 감춘 빈 문단은 위 · 아래 간격도 쓰지 않는다: 문단 위로 되돌린다.
+                    let para_top = vert;
                     if vert > 0.0 {
                         vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
                     }
@@ -622,6 +626,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         &mut last_drawn,
                         last_draw.is_some_and(|last| blk_idx > last),
                         true,
+                        &mut hider,
                     );
                     marks.on_page(placed_para.first_line_page, p);
                     // #544 — 이 문단이 품은 글 앞 · 글 뒤 표를 문단 위 자리에 그린다(흐름은 안 쓴다).
@@ -677,7 +682,12 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         blk_idx,
                         kind,
                     );
-                    vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+                    // #541 — 감춘 빈 문단은 위 간격까지 되돌린다(아래 간격도 쓰지 않는다).
+                    if placed_para.hidden {
+                        vert = para_top;
+                    } else {
+                        vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+                    }
                     started = true;
                 }
                 Block::Table(t) => {
@@ -1270,6 +1280,8 @@ fn walk_block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<V
         // 순서)는 호스트를 놓은 뒤 쪽을 고쳐 적고, 앞에 오는 표(.hwp 순서)는 여기 적어 둔 쪽을 쓴다.
         let floats = crate::SectionFloatTables::of(sec);
         let mut float_page: Vec<Option<usize>> = vec![None; sec.blocks.len()];
+        // #541 — 빈 줄 감추기(NaiveLayout · place_doc 과 같은 판정).
+        let mut hider = crate::EmptyLineHider::of(sec);
         for (blk_idx, block) in sec.blocks.iter().enumerate() {
             match block {
                 Block::Paragraph(p) => {
@@ -1287,6 +1299,9 @@ fn walk_block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<V
                         started = true;
                         continue;
                     }
+                    // #541 — 감춘 빈 문단은 위 · 아래 간격도 쓰지 않는다: 문단 위로 되돌린다.
+                    let para_top = vert;
+                    let mut hidden = false;
                     if vert > 0.0 {
                         vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
                     }
@@ -1311,8 +1326,14 @@ fn walk_block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<V
                                 vert += shift;
                             }
                         }
+                        // #541 — 빈 줄 감추기(NaiveLayout · place_doc 과 같은 자리 · 같은 판정).
+                        let hide = vert + ls.vert_size > body_h
+                            && vert > 0.0
+                            && hider.hides(page_idx, p, lines.len());
+                        hidden |= hide;
                         // 이슈 302 — `NaiveLayout`·`place_doc` 과 같은 판정을 쓴다(불변식 2).
-                        if vert + ls.vert_size > body_h
+                        if !hide
+                            && vert + ls.vert_size > body_h
                             && vert > 0.0
                             && line_forces_break(
                                 ls,
@@ -1327,11 +1348,13 @@ fn walk_block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<V
                                 anchor_page = page_idx;
                             }
                         }
-                        if ls.horz_size > 0.0 {
+                        if ls.horz_size > 0.0 && !hide {
                             last_drawn = page_idx; // 이슈 307
                         }
                         line_pages.push(page_idx); // the block starts where its first line lands
-                        vert += crate::line_advance(ls, ratio);
+                        if !hide {
+                            vert += crate::line_advance(ls, ratio);
+                        }
                     }
                     if line_pages.is_empty() {
                         line_pages.push(page_idx);
@@ -1357,7 +1380,11 @@ fn walk_block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<V
                         }
                     }
                     sec_pages.push(line_pages);
-                    vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+                    if hidden {
+                        vert = para_top;
+                    } else {
+                        vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+                    }
                     started = true;
                 }
                 Block::Table(t) => {
@@ -1860,6 +1887,8 @@ fn place_paragraph(
     // #542 — 떠 있는 「자리 차지」 도형의 띠를 적용하는가. 본문 흐름만 그렇다: 캡션 · 머리말 경로의 줄
     // 걸음(flow_caption_naive · advance_caption_block_pages …)은 띠를 모르므로 LOCKSTEP 을 위해 끈다.
     float_band: bool,
+    // #541 — 빈 줄 감추기. 본문 흐름은 구역의 것을, 그 밖의 경로는 `EmptyLineHider::off()` 를 넘긴다.
+    hider: &mut crate::EmptyLineHider,
 ) -> ParaPlaced {
     // Flat (char, size, color, underline) over the paragraph's text — same order layout_paragraph
     // breaks on, so line `text_pos` indexes straight into this.
@@ -1882,6 +1911,7 @@ fn place_paragraph(
     // 띠에 밀려 넘어간 것이면 문단(과 띠)은 이 쪽에 남는다(띠는 이 쪽에 들어간다고 정해진 `Here` 다).
     let mut para_anchor = (band_page, band_top);
     let first_line_pushed = band.is_some_and(|plan| plan.pushes_line(0));
+    let mut hidden = false;
 
     for (li, ls) in lines.iter().enumerate() {
         if let Some(crate::FloatBandPlan::Here {
@@ -1894,8 +1924,14 @@ fn place_paragraph(
                 *vert += shift;
             }
         }
+        // #541 — 빈 줄 감추기(NaiveLayout · block_pages 와 같은 자리 · 같은 판정): 이 쪽에 높이 0 으로 남는다.
+        let hide = *vert + ls.vert_size > body_h
+            && *vert > 0.0
+            && hider.hides(pages.len() - 1, p, lines.len());
+        hidden |= hide;
         // 이슈 302 — 그려질 것이 없는 줄로 쪽을 만들면 그 쪽이 통째로 빈다.
-        if *vert + ls.vert_size > body_h
+        if !hide
+            && *vert + ls.vert_size > body_h
             && *vert > 0.0
             && line_forces_break(ls, *vert, body_h, trailing)
         {
@@ -1906,7 +1942,7 @@ fn place_paragraph(
             }
         }
         first_line_page.get_or_insert(pages.len() - 1);
-        if ls.horz_size > 0.0 {
+        if ls.horz_size > 0.0 && !hide {
             *last_drawn = pages.len() - 1; // 이슈 307
         }
         let pg = pages.last_mut().unwrap();
@@ -1949,7 +1985,9 @@ fn place_paragraph(
         // table/cell borders are drawn. Line-level hit geometry can come back behind a flag if the
         // own surface ever becomes editable.)
 
-        *vert += crate::line_advance(ls, ratio);
+        if !hide {
+            *vert += crate::line_advance(ls, ratio);
+        }
     }
     let mut spill = None;
     match band {
@@ -1992,6 +2030,7 @@ fn place_paragraph(
         first_line_page: first,
         anchor_page: para_anchor.0,
         frame,
+        hidden,
     }
 }
 
@@ -2155,6 +2194,7 @@ fn place_paragraph_columns(
         first_line_page: first,
         anchor_page,
         frame,
+        hidden: false, // 다단 흐름은 빈 줄 감추기를 쓰지 않는다(#541 — 단이 하나인 구역만)
     }
 }
 
@@ -2204,6 +2244,7 @@ fn place_caption(
                     &mut ignored,
                     false,
                     false,
+                    &mut crate::EmptyLineHider::off(),
                 );
                 vert += shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64;
             }
@@ -4350,6 +4391,8 @@ struct ParaPlaced {
     anchor_page: usize,
     /// The boxes those objects are placed against there.
     frame: FloatFrame,
+    /// #541 — its one empty line was hidden at the page bottom (the caller rewinds the paragraph's spacing).
+    hidden: bool,
 }
 
 /// The rows of a floating table (#544) that did not fit its anchor page — continued at the top of the
@@ -5333,6 +5376,7 @@ fn place_deco_blocks(
                     &mut ignored,
                     false,
                     false,
+                    &mut crate::EmptyLineHider::off(),
                 );
             }
             Block::Table(t) => {
@@ -10810,6 +10854,133 @@ mod tests {
             &ApproxFontMetrics,
         );
         assert_eq!(rows, vec![1_000.0, 2_000.0]);
+    }
+
+    /// #541 — 「빈 줄 감추기」가 켜진 구역: 쪽 끝에 안 들어가는 빈 문단은 그 쪽에 높이 0 으로 남는다(쪽당 둘, 공백만
+    /// 있는 문단 포함) · 셋째는 다음 쪽 · 감춘 수는 쪽마다 다시 센다. 꺼진 구역은 지금처럼 다음 쪽(이슈 302). 세 걸음이
+    /// 같은 쪽에 놓는다(LOCKSTEP).
+    #[test]
+    fn hidden_empty_lines_stay_at_the_page_bottom_two_per_page() {
+        use crate::LayoutEngine;
+        // 본문 높이를 줄 진행(1,600)의 배수에서 비켜, 첫 쪽 마지막 글 줄 뒤에 자리가 조금 남게 한다(쪽이 꼭 차면
+        // 이미 넘친 쪽에 온 빈 줄을 흡수하는 이슈 302 규칙이 먼저 걸린다).
+        let doc_of = |blocks: Vec<Block>| {
+            let mut doc = shape_doc(blocks);
+            doc.sections[0].page.height = 79_200;
+            doc
+        };
+        // 첫 쪽에 들어가는 글 문단 수(k) — 다음 문단은 줄 하나도 안 들어간다(빈 문단도 같은 줄 높이).
+        let k = {
+            let doc = doc_of(
+                (0..400)
+                    .map(|i| Block::Paragraph(para(&format!("줄 {i}"))))
+                    .collect(),
+            );
+            let walked = block_pages(&doc, &ApproxFontMetrics);
+            walked[0]
+                .iter()
+                .position(|&pg| pg == 1)
+                .expect("a second page")
+        };
+        let text = |n: usize| -> Vec<Block> {
+            (0..n)
+                .map(|i| Block::Paragraph(para(&format!("줄 {i}"))))
+                .collect()
+        };
+        let empty = |s: &str| Block::Paragraph(para(s));
+        let pages_of = |blocks: Vec<Block>, hide: bool| {
+            let mut doc = doc_of(blocks);
+            doc.sections[0].page.hide_first_empty_line = hide;
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+            let walked = block_pages(&doc, &ApproxFontMetrics);
+            assert_eq!(
+                placed.pages.len(),
+                naive.pages.len(),
+                "hide {hide}: LOCKSTEP"
+            );
+            assert_eq!(
+                walked[0].last().copied(),
+                Some(placed.pages.len() - 1),
+                "hide {hide}: block_pages"
+            );
+            walked[0].clone()
+        };
+        // 글 k 개 + 빈 문단 넷(하나는 공백만) + 끝. 빈 줄이 글 줄보다 낮으면 첫 쪽 남은 자리에 몇 개(fit)는 그냥
+        // 들어간다 — 꺼진 구역에서 센다.
+        let mut blocks = text(k);
+        blocks.extend([empty(""), empty("  "), empty(""), empty(""), empty("끝")]);
+        let off = pages_of(blocks.clone(), false);
+        let fit = off[k..k + 4].iter().filter(|&&pg| pg == 0).count();
+        assert_eq!(fit, 0, "남은 자리에는 빈 줄도 안 들어간다: {off:?}");
+        assert!(
+            off[k + fit..].iter().all(|&pg| pg == 1),
+            "꺼진 구역은 안 들어가는 빈 줄을 넘김"
+        );
+        let on = pages_of(blocks, true);
+        let mut want = vec![0; fit + 2];
+        want.resize(5, 1);
+        assert_eq!(
+            on[k..],
+            want,
+            "안 들어가는 빈 줄 둘은 첫 쪽에 남고 그다음부터 다음 쪽"
+        );
+        // 감춘 수는 쪽마다: 글 k · 빈 (fit+2) · 글 k · 빈 (fit+2) · 끝 → 빈 문단은 하나도 넘어가지 않는다.
+        let n = fit + 2;
+        let mut blocks = text(k);
+        blocks.extend((0..n).map(|_| empty("")));
+        blocks.extend(text(k));
+        blocks.extend((0..n).map(|_| empty("")));
+        blocks.push(empty("끝"));
+        let on = pages_of(blocks, true);
+        assert!(on[k..k + n].iter().all(|&pg| pg == 0), "{on:?}");
+        assert_eq!(on[k + n], 1, "다음 글은 다음 쪽 맨 위부터");
+        assert!(
+            on[2 * k + n..2 * k + 2 * n].iter().all(|&pg| pg == 1),
+            "{on:?}"
+        );
+        assert_eq!(on[2 * k + 2 * n], 2);
+        // 글이 있는 문단은 감추지 않는다.
+        let mut blocks = text(k);
+        blocks.push(empty("글"));
+        assert_eq!(pages_of(blocks, true)[k], 1);
+    }
+
+    #[test]
+    fn zz_dbg_541() {
+        use crate::LayoutEngine;
+        let k = {
+            let doc = shape_doc(
+                (0..400)
+                    .map(|i| Block::Paragraph(para(&format!("줄 {i}"))))
+                    .collect(),
+            );
+            let walked = block_pages(&doc, &ApproxFontMetrics);
+            walked[0]
+                .iter()
+                .position(|&pg| pg == 1)
+                .expect("a second page")
+        };
+        let mut blocks: Vec<Block> = (0..k)
+            .map(|i| Block::Paragraph(para(&format!("줄 {i}"))))
+            .collect();
+        for t in ["", "  ", "", "", "끝"] {
+            blocks.push(Block::Paragraph(para(t)));
+        }
+        let mut doc = shape_doc(blocks);
+        doc.sections[0].page.hide_first_empty_line = true;
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+        let (_, _, _, bh) = crate::body_box(&doc.sections[0].page);
+        for (pi, pg) in naive.pages.iter().enumerate() {
+            let n = pg.lines.len();
+            for l in pg.lines.iter().skip(n.saturating_sub(6)).take(6) {
+                eprintln!(
+                    "p{pi} vert {} h {} horz {} body {bh}",
+                    l.vert_pos, l.vert_size, l.horz_size
+                );
+            }
+        }
+        panic!("dbg k={k}");
     }
 
     /// #537 — 병합 칸이 덮는 행 가운데 하나라도 내용으로 정하는 행(높이 0)이면 그 칸의 저장 줄로 키우지 않는다(그 행은
