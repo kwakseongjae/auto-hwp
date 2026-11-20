@@ -26,6 +26,8 @@ const CTRL_TABLE: u32 = u32::from_be_bytes(*b"tbl ");
 #[derive(Clone, Copy)]
 enum Mutation {
     None,
+    /// #541: section definition attribute bit 19 (빈 줄 감추기) set.
+    HideEmptyLine,
     Landscape,
     NoBodyBox,
     BadLineCount,
@@ -391,6 +393,21 @@ fn rejects_non_integral_line_segment_payload() {
             ..
         })
     ));
+}
+
+/// #541: the section definition's attribute bit 19 (빈 줄 감추기) reaches the section's page setup.
+#[test]
+fn reads_the_hide_empty_line_section_attribute() {
+    let parse = |mutation| {
+        OwnHwp5Parser::new()
+            .parse(&fixture(mutation))
+            .expect("owned fixture parses")
+            .sections[0]
+            .page
+            .hide_first_empty_line
+    };
+    assert!(parse(Mutation::HideEmptyLine));
+    assert!(!parse(Mutation::None));
 }
 
 #[test]
@@ -1640,7 +1657,13 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
     }
     let mut section_control = Vec::with_capacity(28);
     section_control.extend_from_slice(&CTRL_SECTION_DEF.to_le_bytes());
-    section_control.extend([0; 24]);
+    let attributes: u32 = if matches!(mutation, Mutation::HideEmptyLine) {
+        1 << 19
+    } else {
+        0
+    };
+    section_control.extend_from_slice(&attributes.to_le_bytes());
+    section_control.extend([0; 20]);
     push_record(&mut body, TAG_CTRL_HEADER, 1, &section_control);
     if matches!(mutation, Mutation::UnsupportedSectionChild) {
         push_record(&mut body, TAG_FOOTNOTE_SHAPE, 2, &[0; 28]);

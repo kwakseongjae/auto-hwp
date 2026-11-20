@@ -395,6 +395,13 @@ fn parse_page_setup(sec_xml: &str) -> Option<PageSetup> {
     // parser and our serializer; deriving solely from width/height loses mixed-orientation sections.
     page.landscape = tag_attr_str(pp_tag, "landscape")
         .is_some_and(|value| value.eq_ignore_ascii_case("NARROWLY"));
+    // #541 — 구역 설정 「빈 줄 감추기」: secPr 안의 `<hp:visibility hideFirstEmptyLine>`.
+    let sec_pr_end = sec_xml.find("</hp:secPr>").unwrap_or(sec_xml.len());
+    if let Some(v) = sec_xml[..sec_pr_end].find("<hp:visibility") {
+        let v_end = sec_xml[v..].find('>').map_or(sec_xml.len(), |e| v + e);
+        page.hide_first_empty_line =
+            tag_attr_str(&sec_xml[v..v_end], "hideFirstEmptyLine") == Some("1");
+    }
     // The page `<hp:margin …/>` lives inside `<hp:pagePr>`; take the first one AFTER the pagePr open.
     if let Some(mrel) = sec_xml[pp_end..].find("<hp:margin") {
         let mstart = pp_end + mrel;
@@ -2891,6 +2898,35 @@ pub(crate) mod tests {
         );
         // No secPr → None (the caller keeps PageSetup::default()).
         assert!(parse_page_setup("<hs:sec><hp:p/></hs:sec>").is_none());
+    }
+
+    /// #541: 구역 설정 「빈 줄 감추기」(`<hp:visibility hideFirstEmptyLine>`)를 읽는다 — secPr 안의 것만.
+    #[test]
+    fn parse_page_setup_reads_hide_first_empty_line() {
+        let sec = |visibility: &str| {
+            format!(
+                r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:ctrl><hp:secPr>{visibility}<hp:pagePr landscape="WIDELY" width="59528" height="84186"><hp:margin left="5669" right="5670" top="4251" bottom="2834"/></hp:pagePr></hp:secPr></hp:ctrl></hp:run></hp:p></hs:sec>"#
+            )
+        };
+        let vis = |v: &str| {
+            format!(
+                r#"<hp:visibility hideFirstHeader="0" hideFirstEmptyLine="{v}" showLineNumber="0"/>"#
+            )
+        };
+        assert!(
+            parse_page_setup(&sec(&vis("1")))
+                .unwrap()
+                .hide_first_empty_line
+        );
+        assert!(
+            !parse_page_setup(&sec(&vis("0")))
+                .unwrap()
+                .hide_first_empty_line
+        );
+        assert!(
+            !parse_page_setup(&sec("")).unwrap().hide_first_empty_line,
+            "없으면 꺼짐"
+        );
     }
 
     /// 이슈 074: `<hp:cellSz width>` 는 셀에 **실폭**으로 실린다 — 한글 표는 행마다 열 경계가

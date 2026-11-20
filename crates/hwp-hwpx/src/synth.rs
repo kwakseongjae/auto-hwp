@@ -1178,6 +1178,19 @@ pub fn patch_page(section_xml: &str, page: &PageSetup) -> String {
             s = format!("{}{}{}", &s[..p], tag, &s[end..]);
         }
     }
+    // #541 — 빈 줄 감추기(`<hp:visibility hideFirstEmptyLine>`). 뼈대 secPr 은 늘 "0" 이라, `.hwp` 에서 켜진
+    // 구역을 변환하면 꺼진 채 나갔다.
+    if let Some(p) = s.find("<hp:visibility") {
+        if let Some(rel) = s[p..].find('>') {
+            let end = p + rel + 1;
+            let tag = set_attr(
+                &s[p..end],
+                "hideFirstEmptyLine",
+                if page.hide_first_empty_line { "1" } else { "0" },
+            );
+            s = format!("{}{}{}", &s[..p], tag, &s[end..]);
+        }
+    }
     // the page <hp:margin …/> (self-closing); set the four content margins.
     if let Some(p) = s.find("<hp:margin") {
         if let Some(rel) = s[p..].find("/>") {
@@ -1805,6 +1818,22 @@ mod tests {
         assert!(
             !parse_para_pr(r#"<hh:paraPr id="0"/>"#).zero_line_spacing,
             "줄 간격이 없으면 표지도 없다"
+        );
+    }
+
+    /// #541: the converted secPr carries the section's 「빈 줄 감추기」 — the skeleton's is always "0".
+    #[test]
+    fn patch_page_writes_hide_first_empty_line() {
+        let xml = r#"<hp:secPr><hp:visibility hideFirstHeader="0" hideFirstEmptyLine="0" showLineNumber="0"/><hp:pagePr landscape="WIDELY" width="1" height="1"><hp:margin left="0" right="0" top="0" bottom="0" header="0" footer="0" gutter="0"/></hp:pagePr></hp:secPr>"#;
+        let on = PageSetup {
+            hide_first_empty_line: true,
+            ..PageSetup::default()
+        };
+        assert!(patch_page(xml, &on).contains(r#"hideFirstEmptyLine="1""#));
+        assert!(patch_page(xml, &PageSetup::default()).contains(r#"hideFirstEmptyLine="0""#));
+        assert!(
+            patch_page(xml, &on).contains(r#"hideFirstHeader="0""#),
+            "the other flags stay"
         );
     }
 }
