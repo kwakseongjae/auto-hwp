@@ -1438,6 +1438,10 @@ pub struct PageSetup {
     pub margin_gutter: HwpUnit,
     pub landscape: bool,
     pub columns: u8,
+    /// #541 구역 설정 「빈 줄 감추기」(HWPX `<hp:visibility hideFirstEmptyLine>` · HWP5 구역 정의 속성 비트 19).
+    /// 켜진 구역에서 한글은 쪽 끝에 안 들어가는 빈 줄을 그 쪽에 남긴다(높이 0 · 쪽당 둘까지 — 저장 줄 조사).
+    /// 변환은 이 값을 secPr 에 그대로 쓴다.
+    pub hide_first_empty_line: bool,
 }
 
 impl Default for PageSetup {
@@ -1456,6 +1460,7 @@ impl Default for PageSetup {
             margin_gutter: 0,
             landscape: false,
             columns: 1,
+            hide_first_empty_line: false,
         }
     }
 }

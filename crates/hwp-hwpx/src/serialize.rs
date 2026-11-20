@@ -4301,6 +4301,7 @@ mod tests {
             margin_gutter: 0,
             landscape: true,
             columns: 1,
+            hide_first_empty_line: false,
         };
         sec.page_edited = true;
         sec.dirty.mark();

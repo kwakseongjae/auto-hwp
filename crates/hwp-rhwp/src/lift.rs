@@ -98,7 +98,11 @@ impl<'a> Lifter<'a> {
 
         for sec in &self.doc.sections {
             let mut section = Section {
-                page: lift_page(&sec.section_def.page_def),
+                page: PageSetup {
+                    // #541 — 빈 줄 감추기(구역 정의 속성 비트 19, rhwp 가 읽어 둔다).
+                    hide_first_empty_line: sec.section_def.hide_empty_line,
+                    ..lift_page(&sec.section_def.page_def)
+                },
                 // The converted HWPX seeds the Skeleton's secPr (hardcoded landscape A4); mark the
                 // page edited so the serializer patches in THIS document's real geometry/orientation.
                 page_edited: true,
@@ -1309,6 +1313,7 @@ fn lift_page(pd: &PageDef) -> PageSetup {
         margin_gutter: pd.margin_gutter as i32,
         landscape: pd.landscape,
         columns: 1,
+        hide_first_empty_line: false, // 구역 정의(SectionDef)에 있다 — 호출하는 곳이 채운다
     }
 }
 

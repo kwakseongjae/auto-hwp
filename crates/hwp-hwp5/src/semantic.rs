@@ -2688,7 +2688,10 @@ fn parse_section_control(
         }
         _ => return Err(unsupported(children[1], section)),
     }
-    parse_page_def(data(stream, &children[0]), &children[0], section)
+    let mut page = parse_page_def(data(stream, &children[0]), &children[0], section)?;
+    // #541 — 구역 정의 속성(ctrl id 다음 UINT32) 비트 19: 빈 줄 감추기.
+    page.hide_first_empty_line = read_u32(bytes, 4).is_some_and(|flags| flags & (1 << 19) != 0);
+    Ok(page)
 }
 
 /// Note-shape records are safe to ignore only in this parser's current lane because no foot/endnote
@@ -3144,6 +3147,7 @@ fn parse_page_def(bytes: &[u8], record: &Record, section: usize) -> Result<PageS
         margin_gutter,
         landscape,
         columns: 1,
+        hide_first_empty_line: false, // 구역 정의 속성에 있다 — parse_section_control 이 채운다
     })
 }
 

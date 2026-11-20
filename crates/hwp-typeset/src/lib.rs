@@ -3063,6 +3063,7 @@ mod tests {
             margin_gutter: 0,
             landscape: false,
             columns: 1,
+            hide_first_empty_line: false,
         };
         let (x, y, w, h) = body_box(&page);
         assert_eq!(

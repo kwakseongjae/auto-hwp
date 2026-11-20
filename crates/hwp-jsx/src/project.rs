@@ -130,6 +130,9 @@ pub struct PageSetupBlob {
     pub margin_gutter: i32,
     pub landscape: bool,
     pub columns: u8,
+    /// #541 빈 줄 감추기 — `serde(default)` 라 이전 project.json 은 꺼짐으로 읽힌다.
+    #[serde(default)]
+    pub hide_first_empty_line: bool,
 }
 
 impl Default for PageSetupBlob {
@@ -153,6 +156,7 @@ impl From<&hwp_model::document::PageSetup> for PageSetupBlob {
             margin_gutter: p.margin_gutter,
             landscape: p.landscape,
             columns: p.columns,
+            hide_first_empty_line: p.hide_first_empty_line,
         }
     }
 }
@@ -171,6 +175,7 @@ impl From<PageSetupBlob> for hwp_model::document::PageSetup {
             margin_gutter: b.margin_gutter,
             landscape: b.landscape,
             columns: b.columns,
+            hide_first_empty_line: b.hide_first_empty_line,
         }
     }
 }

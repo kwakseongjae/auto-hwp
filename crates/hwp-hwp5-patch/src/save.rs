@@ -609,6 +609,7 @@ fn page_equal(before: PageSetup, after: PageSetup) -> bool {
         && before.margin_gutter == after.margin_gutter
         && before.landscape == after.landscape
         && before.columns == after.columns
+        && before.hide_first_empty_line == after.hide_first_empty_line
 }
 
 fn bin_data_equal(before: &SemanticDoc, after: &SemanticDoc) -> bool {
