@@ -2397,7 +2397,8 @@ impl EmptyLineHider {
     }
 }
 
-/// #541 — 빈 문단: 글이 공백뿐이고(rhwp 와 같은 `trim` 판정) 글 아닌 것(제어 · 개체 등)이 없다. 표 · 개체를 품은 문단(`is_table_anchor`),
+/// #541 — 빈 문단: 글이 공백뿐이고 글 아닌 것(제어 · 개체 · 탭 등)이 없다. 공백 `trim` 은 rhwp 와 같고, 제어는
+/// 더 엄격하다(rhwp 는 제어 문자를 지운 뒤 판정해 탭만 있는 문단도 빈 문단으로 본다 — 한글의 동작은 근거 없음). 표 · 개체를 품은 문단(`is_table_anchor`),
 /// 쪽 번호 표지를 품은 문단, 쪽 나누기로 시작하는 문단은 글이 비어도 빈 문단이 아니다.
 pub(crate) fn is_empty_paragraph(p: &Paragraph) -> bool {
     !p.is_table_anchor

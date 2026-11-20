@@ -88,12 +88,10 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
   넘긴다. 우리는 늘 넘겨서 다음 쪽이 빈 줄로 시작하고 쪽 나눔이 한글과 어긋났다. 표 · 개체 · 쪽 번호 표지를 품은 문단, 쪽 나누기로
   시작하는 문단, 다단 구역은 그대로다. 공개 코퍼스의 설정이 켜진 HWPX 하나는 한글이 저장한 줄 배치와 같은 줄에서 시작하는 쪽이
   68 가운데 37 → 43 으로 늘고, 쪽 수는 74 → 72 가 됐다(한글은 76 — 우리가 이미 한글보다 먼저 쪽을 채우는 곳이 남아 총 쪽 수는
-  멀어진다. 조판 오라클 기준선을 이 값으로 고쳤다). Rust 에 `hwp_rhwp::page_start_alignment_for_lifted` 가 늘었다(리프트한 `.hwp`
-  문서를 설정을 바꿔 쪽 시작을 견줄 때).
+  멀어진다. 조판 오라클 기준선을 이 값으로 고쳤다).
   *(EN — Fixed: in a section with "hide empty line" on, an empty paragraph that does not fit at the page bottom stays on that page
   with zero height (two per page; the third moves on), as Hancom lays it out. Paragraphs hosting tables, objects or page-number
-  controls, paragraphs starting with a page break, and multi-column sections are unchanged. Adds
-  `hwp_rhwp::page_start_alignment_for_lifted`.)*
+  controls, paragraphs starting with a page break, and multi-column sections are unchanged.)*
 - **구역 설정 「빈 줄 감추기」를 읽고, `.hwp` → HWPX 변환에 그대로 쓴다 (#589).** HWPX `<hp:visibility hideFirstEmptyLine>` ·
   HWP5 구역 정의 속성 비트 19 를 읽어 구역 쪽 설정에 둔다. 전에는 읽지 않았고, 변환은 늘 「끔」(`"0"`)으로 써서 켜진 `.hwp` 를 변환해
   한글에서 열면 쪽 끝 빈 줄 배치가 원본과 달랐다. 조판은 아직 이 값을 쓰지 않는다(#541) — 쪽 수는 그대로다.
@@ -245,6 +243,11 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 ### 추가 (Added)
 
+- **`hwp_rhwp::page_start_alignment_for_lifted` (#541).** 이미 리프트한 `.hwp` 문서(예: 구역 설정을 바꾼 것)를 `.hwp` 의 앵커 순서로
+  한글이 저장한 쪽 시작과 맞댄다 — `page_start_alignment` 는 바이트에서 직접 리프트하고, `page_start_alignment_for_doc` 은 HWPX 파서의
+  순서다. Rust 크레이트 전용(`rhwp` 기능, 꺼지면 `CapabilityUnavailable`).
+  *(EN — Added: `hwp_rhwp::page_start_alignment_for_lifted` aligns an already-lifted `.hwp` document's page starts with the stored
+  layout, in the lift's anchor order. Rust only, behind `rhwp`.)*
 - **본문의 떠 있는 글상자(`rect`)를 `<hp:pos>` 자리에 그리고, 문단 기준 「자리 차지」 도형은 흐름을 민다 (#542 의 3단계).**
   떠 있는 `rect`(글 앞 · 글 뒤 · 문단 기준 위아래)는 앵커 문단이 놓인 쪽에, 가로 종이 · 쪽 · 단 · 문단 · 세로 종이 · 쪽 · 문단 기준으로
   채움 · 테두리 · 글상자 본문을 그린다 — 흐름 · 쪽 나눔은 움직이지 않는다. 어울림 · 종이/쪽 기준 위아래는 한글이 글을 좁히거나 미는
