@@ -27,7 +27,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95
         with:
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      # 이 워크플로의 초록이 곧 발행 허가라 서드파티 액션은 커밋으로 고정한다(태그는 옮겨질 수 있다).
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: install wasm-bindgen-cli (=0.2.125)
         run: cargo install wasm-bindgen-cli --version 0.2.125 --locked
       - uses: actions/setup-node@v7
