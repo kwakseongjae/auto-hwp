@@ -20,4 +20,4 @@ zip = { workspace = true, optional = true }
 quick-xml = { workspace = true, optional = true }
 # Pure-Rust PDF parser. Trim default features (chrono/jiff/rayon/time) — we only need object/content
 # parsing for positioned-text extraction, so we avoid pulling date/time + rayon into the build.
-lopdf = { version = "0.41", default-features = false, optional = true }
+lopdf = { version = "0.42", default-features = false, optional = true }
