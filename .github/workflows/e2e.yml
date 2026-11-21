@@ -1,0 +1,74 @@
+# 전체 e2e(playwright · chromium) — **수동 전용**(workflow_dispatch, 이 레포 CI 원칙). 발행 관문(#549).
+#
+# publish.yml 은 발행하려는 커밋에 이 워크플로의 성공한 실행이 있어야 실제 발행을 한다(scripts/e2e-gate.mjs).
+# 순서는 scripts/verify-local.sh --full 의 wasm 재빌드 · JS 빌드 · e2e 와 같다. 릴리스 순서: docs/RELEASING.md
+name: e2e
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive # external/rhwp — engine wasm 빌드(cargo resolve)에 필요
+
+      # engine 의 build-wasm.mjs 가 쓰는 툴체인(publish.yml 과 같다 — wasm-bindgen 은 Cargo.lock 과 정확히 일치).
+      - uses: dtolnay/rust-toolchain@1.95
+        with:
+          targets: wasm32-unknown-unknown
+      # 이 워크플로의 초록이 곧 발행 허가라 서드파티 액션은 커밋으로 고정한다(태그는 옮겨질 수 있다).
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: install wasm-bindgen-cli (=0.2.125)
+        run: cargo install wasm-bindgen-cli --version 0.2.125 --locked
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.19
+
+      # 1) 엔진 wasm → packages/engine/pkg (hwp-lab predev 의 copy-wasm.mjs 가 복사한다).
+      #    wasm-opt 다이어트는 생략한다 — 최적화일 뿐 동작은 같다(verify-local.sh 주석).
+      - name: build @auto-hwp/engine (wasm)
+        working-directory: packages/engine
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # 2) JS 패키지 — 커밋된 package-lock 이 정본(npm ci). 빌드 순서는 verify-local.sh --full 과 같다:
+      #    ai-protocol → editor-core → platform(react 보다 먼저, #268) → react.
+      - name: build JS packages
+        run: |
+          for pkg in ai-protocol editor-core platform react; do
+            (cd "packages/$pkg" && npm ci --no-audit --no-fund && npm run build)
+          done
+
+      # 3) 데모 앱 + 브라우저. playwright.config.ts 의 webServer 가 predev(빌드 · wasm · 글꼴 · 표본 복사)를 돈다.
+      - name: install hwp-lab
+        working-directory: apps/hwp-lab
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: e2e (playwright)
+        working-directory: apps/hwp-lab
+        env:
+          CI: "1"
+        run: npx playwright test
+
+      # 실패했을 때만 재시도 trace 를 남긴다. e2e 는 레포의 공개 표본(benchmarks)만 연다 — 사용자 문서 없음.
+      - name: upload playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: apps/hwp-lab/test-results
+          retention-days: 7
