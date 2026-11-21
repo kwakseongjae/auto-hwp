@@ -1,62 +1,38 @@
-import type { ReactNode } from "react";
-
 /// Shared shell primitives — the toolbar `Tool`/`Sep` and the repeated "pill group + white-bg active"
 /// segmented controls (view-mode toggle, zoom) were inlined in App.tsx; extracting them keeps the
 /// markup honest and the radius/spacing/border literals consistent. These are PURELY presentational:
 /// every gesture still emits the same handler the caller passes — no behavior lives here.
 
-/** A toolbar text button: icon + label, optional shortcut kbd + an "ai" generative tone. */
+/** A toolbar text button: label, optional icon, shortcut kbd, and an "ai" generative tone.
+ *  The main bar passes no icon — emoji glyphs do not belong on that row. */
 export function Button(p: {
   onClick: () => void;
-  icon: string;
+  icon?: string;
   label: string;
   keys?: string;
   tone?: "ai";
   disabled?: boolean;
+  active?: boolean;
 }) {
+  const toneClass = p.active
+    ? p.tone === "ai"
+      ? "bg-ai/10 text-ai"
+      : "bg-accent/10 text-accent"
+    : p.tone === "ai"
+      ? "text-ai"
+      : "text-neutral-700 dark:text-neutral-200";
   return (
     <button
       onClick={p.onClick}
       disabled={p.disabled}
       title={p.keys ? `${p.label} (${p.keys})` : p.label}
-      className={`flex items-center gap-1.5 rounded-token px-2 py-1 text-sm hover:bg-neutral-200/70 disabled:opacity-35 dark:hover:bg-neutral-700/60 ${
-        p.tone === "ai" ? "text-ai" : "text-neutral-700 dark:text-neutral-200"
-      }`}
+      className={`flex shrink-0 items-center gap-1.5 rounded-token px-2 py-1 text-sm hover:bg-neutral-200/70 disabled:opacity-35 dark:hover:bg-neutral-700/60 ${toneClass}`}
     >
-      <span className="text-xs opacity-80">{p.icon}</span>
+      {p.icon ? <span className="text-xs opacity-80">{p.icon}</span> : null}
       <span>{p.label}</span>
       {p.keys && (
         <kbd className="ml-0.5 rounded bg-black/5 px-1 text-[10px] text-neutral-400 dark:bg-white/10">{p.keys}</kbd>
       )}
-    </button>
-  );
-}
-
-/** A bordered "pill" button (header 명령/바이브, find-bar close, etc.): icon-or-text in a chip. The
- *  `active` state lights it with the accent tint; `tone` swaps that tint to the generative AI lane. */
-export function IconButton(p: {
-  onClick: () => void;
-  title: string;
-  active?: boolean;
-  tone?: "ai";
-  className?: string;
-  children: ReactNode;
-}) {
-  const accent =
-    p.tone === "ai"
-      ? "border-ai/40 bg-ai/10 text-ai"
-      : "border-accent/40 bg-accent/10 text-accent";
-  const idle =
-    "border-black/10 text-neutral-500 hover:bg-neutral-200/60 dark:border-white/10 dark:text-neutral-400 dark:hover:bg-neutral-700/60";
-  return (
-    <button
-      onClick={p.onClick}
-      title={p.title}
-      className={`flex items-center gap-1.5 rounded-token border px-2.5 py-1 text-xs ${
-        p.active ? accent : idle
-      } ${p.className ?? ""}`}
-    >
-      {p.children}
     </button>
   );
 }
