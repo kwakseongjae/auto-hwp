@@ -44,8 +44,14 @@ fn hiding_empty_lines_starts_more_pages_where_hangul_does() {
     let rel = "corpus/hwpxlib_corpus/error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx";
     let (on, pages_on) = matched(rel, true).expect("public corpus HWPX");
     let (off, pages_off) = matched(rel, false).unwrap();
+    let _ = writeln!(
+        std::io::stderr(),
+        "재난안전: 쪽 시작 같은 줄 {off} → {on} · 우리 쪽 수 {pages_off} → {pages_on}"
+    );
+    // 실제 · 근사 글꼴 모두 37 → 43(얻은 7 · 잃은 1). 늘어난 몫의 절반을 여유로 남긴 하한 — 「같은 줄 수」 회귀는
+    // 조판 오라클(쪽 수)이 보지 않아 이 시험이 관문이다.
     assert!(
-        on > off,
+        on >= off + 3,
         "same-line page starts: hidden {on} vs not {off} (pages {pages_on} vs {pages_off})"
     );
 }
@@ -60,5 +66,6 @@ fn hiding_empty_lines_on_a_hwp_sample() {
         return;
     };
     let (off, _) = matched(rel, false).unwrap();
+    let _ = writeln!(std::io::stderr(), "{rel}: 쪽 시작 같은 줄 {off} → {on}");
     assert!(on > off, "same-line page starts: hidden {on} vs not {off}");
 }
