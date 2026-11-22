@@ -10,6 +10,9 @@ name: publish
 #
 # 안전장치: dry_run 입력이 기본 true — 실제 레지스트리 반영 없이 `npm publish --dry-run` 으로 검증만 한다.
 # 실제 발행하려면 워크플로 실행 시 dry_run=false 로 명시해야 한다(npm unpublish 제약 — 되돌리기 어려움).
+#
+# 발행 관문(#549): 실제 발행은 같은 커밋에 e2e.yml 의 성공한 실행이 있어야 한다(scripts/e2e-gate.mjs — 없으면
+# 아무것도 발행하지 않고 멈춘다. dry-run 은 경고만). 순서: e2e.yml 실행 → 초록 확인 → 발행. docs/RELEASING.md
 
 on:
   workflow_dispatch:
@@ -33,12 +36,20 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read # #549 — e2e.yml 실행 기록 읽기
     env:
       DRY_RUN: ${{ inputs.dry_run }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive # external/rhwp — engine wasm 빌드에 필요(cargo resolve)
+
+      # #549 — 이 커밋의 전체 e2e 가 초록이었는지부터 본다. 없으면 실제 발행은 여기서 멈춘다(dry-run 은 경고).
+      # 인증 · 빌드보다 먼저라 빨간 커밋에서는 아무것도 하지 않는다. (node 는 러너 기본 — 이 스크립트는 내장 모듈만 쓴다)
+      - name: e2e gate (같은 커밋의 e2e.yml 성공 기록)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/e2e-gate.mjs
 
       # 빌드 툴체인을 설치하기 전에 발행 인증을 fail-fast 검증한다. `npm publish --dry-run`은 인증 없이도
       # 성공할 수 있고, OIDC 에는 whoami 가 없다 — 그래서 네 패키지 각각의 토큰 교환을 직접 해 본다.
