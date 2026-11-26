@@ -40,6 +40,17 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 고침 (Fixed)
+
+- **표 칸 안 문단 사이에 앞 문단의 줄 간격을 남긴다 (#596).** 칸 안에서는 문단마다 마지막 줄의 줄 간격을 깎아, 문단 사이 간격이
+  글자 크기만큼(100%)으로 붙었다(줄 간격 150% 문단 둘이 겹쳐 보임). 한글이 저장한 칸 줄은 다음 문단 첫 줄을 앞 줄 `vertpos + vertsize +
+  spacing` 에 둔다 — 이제 그 간격을 남기고 칸의 마지막 줄 뒤만 깎는다(행 예약 · 그리기 · 캐럿 · `tableCellFits` 모두). 문단 뒤에 칸 안
+  표가 오면 그대로 깎는다. 자동 높이 행은 그만큼 커질 수 있고, 저장 높이가 작게 들어간 고정 높이 칸은 마지막 줄이 잘릴 수 있다
+  (`.hwp` 원본에서 다시 변환하면 #537 이 행을 한글 저장 줄만큼 키운다). 공개 게이트 `.hwp` 문서의 쪽 수는 그대로이고, 칸 줄 캐시가
+  없는 손실 변환본 `benchmark1.hwpx` 는 30 → 32쪽이 된다.
+  *(EN — Fixed: inside a table cell, a paragraph followed by another paragraph keeps its last line's line-spacing leading as the gap,
+  as Hangul stores it; only the cell's last line drops it. Auto-height rows may grow; fixed rows saved too small may clip their last line.)*
+
 ---
 
 ## [0.0.23] — 2026-11-26

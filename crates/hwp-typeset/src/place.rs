@@ -3088,10 +3088,7 @@ fn place_cell_content(
     let clip_y = if clip { cy + ch + 0.5 } else { f64::INFINITY };
     let (mut hidden_lines, mut hidden_tables) = (0usize, 0usize);
     // Total content height → start offset for vertical centering within the cell box.
-    let content_h: f64 = blocks
-        .iter()
-        .map(|b| block_height_for_place(b, doc, textw, fonts))
-        .sum();
+    let content_h = crate::cell_blocks_height(blocks, doc, textw, fonts);
     let mut vy = cy + ((ch - content_h) / 2.0).max(0.0);
     for (bi, b) in blocks.iter().enumerate() {
         let Block::Paragraph(p) = b else {
@@ -3187,8 +3184,12 @@ fn place_cell_content(
         // reserve already subtracts this leading, so trimming the DRAW makes drawn == reserved and the
         // content sits inside the box. The trimmed span is empty space below the last line's ink → no
         // glyph is clipped. Reserve-only (pagination) is untouched, so page counts stay in lockstep.
-        if let Some(last) = lines.last() {
-            vy -= crate::trailing_leading(last, ratio);
+        // #596: a paragraph followed by another paragraph keeps the leading — the gap Hangul keeps
+        // (see `crate::cell_blocks_height`, which the reserve uses).
+        if !crate::keeps_trailing_leading(blocks, bi) {
+            if let Some(last) = lines.last() {
+                vy -= crate::trailing_leading(last, ratio);
+            }
         }
     }
     if hidden_lines + hidden_tables > 0 {
@@ -3292,13 +3293,10 @@ fn walk_cell_lines(
     on_line: &mut dyn FnMut(&CellLineGeom) -> bool,
 ) {
     let textw = (cw - pad_left - pad_right).max(1.0);
-    let content_h: f64 = blocks
-        .iter()
-        .map(|b| block_height_for_place(b, doc, textw, fonts))
-        .sum();
+    let content_h = crate::cell_blocks_height(blocks, doc, textw, fonts);
     let mut vy = cy + ((ch - content_h) / 2.0).max(0.0);
     let mut seg_base = 0usize; // cell-global ordinal of this model paragraph's FIRST "\n"-segment
-    for b in blocks {
+    for (bi, b) in blocks.iter().enumerate() {
         let Block::Paragraph(p) = b else {
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
@@ -3395,8 +3393,10 @@ fn walk_cell_lines(
             vy += crate::line_advance(ls, ratio);
         }
         // Trailing-leading trim — LOCKSTEP with place_cell_content (see its comment).
-        if let Some(last) = lines.last() {
-            vy -= crate::trailing_leading(last, ratio);
+        if !crate::keeps_trailing_leading(blocks, bi) {
+            if let Some(last) = lines.last() {
+                vy -= crate::trailing_leading(last, ratio);
+            }
         }
         seg_base += nl_pos.len() + 1;
     }
@@ -3696,11 +3696,7 @@ pub fn table_cell_fits(
         };
         let (pad_left, pad_right) = crate::cell_horizontal_padding(t, c);
         let text_width = (pc.w - pad_left - pad_right).max(1.0);
-        let content_height: f64 = c
-            .blocks
-            .iter()
-            .map(|b| block_height_for_place(b, doc, text_width, fonts))
-            .sum();
+        let content_height = crate::cell_blocks_height(&c.blocks, doc, text_width, fonts);
         let lines = c
             .blocks
             .iter()
@@ -4336,11 +4332,7 @@ fn place_text_box(
     let textw = (bw - left - right).max(1.0);
     // `place_cell_content` centers the body in the box it gets — give it a box exactly the body's
     // height at the top or bottom for those alignments.
-    let content_h: f64 = text_box
-        .body
-        .iter()
-        .map(|b| block_height_for_place(b, doc, textw, fonts))
-        .sum();
+    let content_h = crate::cell_blocks_height(&text_box.body, doc, textw, fonts);
     let (cy, ch) = match text_box.vert_align.as_str() {
         "TOP" => (inner_y, content_h),
         "BOTTOM" => (inner_y + inner_h - content_h, content_h),
@@ -6852,6 +6844,56 @@ mod tests {
             .pages
             .iter()
             .all(|page| page.clipped_cells.is_empty()));
+    }
+
+    /// #596 · #370 — 칸 안 문단 사이에는 앞 문단 마지막 줄의 줄 간격이 남는다(한글이 저장한 칸 줄: 다음 문단 첫 줄 =
+    /// 앞 줄 `vertpos + vertsize + spacing`). 칸 마지막 줄 뒤의 간격만 깎는다 — 그리기 · 예약 둘 다.
+    #[test]
+    fn cell_paragraphs_keep_their_line_spacing_between_them() {
+        let place = |texts: &[&str]| {
+            let mut table = one_cell_table(0);
+            table.cells[0].blocks = texts
+                .iter()
+                .map(|text| Block::Paragraph(para(text)))
+                .collect();
+            let mut doc = doc_with_page(vec![Block::Table(table)], 20_000);
+            doc.para_shapes[0].line_spacing_type = LineSpacingType::Percent;
+            doc.para_shapes[0].line_spacing_value = 150;
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            (doc, placed)
+        };
+        let (doc, two) = place(&["가", "나"]);
+        let baselines: Vec<f64> = two.pages[0]
+            .glyphs
+            .iter()
+            .filter(|glyph| glyph.origin == PlacedGlyphOrigin::SourceText)
+            .map(|glyph| glyph.baseline)
+            .collect();
+        assert_eq!(baselines.len(), 2);
+        let pitch = baselines[1] - baselines[0];
+        assert!(
+            (pitch - 1500.0).abs() < 1.0,
+            "문단 사이 피치 = 글자 1000 × 150% = 1500, 얻은 값 {pitch}"
+        );
+        // 캐럿 기하(`walk_cell_lines`)도 그리기와 같은 피치다.
+        let caret_top = |para: usize| {
+            cell_caret_rect(&doc, &two, &ApproxFontMetrics, 0, 0, 0, 0, para, 0)
+                .expect("caret")
+                .top
+        };
+        let caret_pitch = caret_top(1) - caret_top(0);
+        assert!(
+            (caret_pitch - 1500.0).abs() < 1.0,
+            "캐럿 피치 = 1500, 얻은 값 {caret_pitch}"
+        );
+        // 예약: 두 문단 칸은 한 문단 칸보다 한 줄 진행(1500)만큼 크다 — 둘째 문단 뒤(칸 끝)는 깎는다.
+        let (_, one) = place(&["가"]);
+        let height = |placed: &PlacedDoc| placed.pages[0].tables[0].cells[0].h;
+        let grown = height(&two) - height(&one);
+        assert!(
+            (grown - 1500.0).abs() < 1.0,
+            "두 문단 칸 − 한 문단 칸 = 1500, 얻은 값 {grown}"
+        );
     }
 
     /// 쪽을 넘는 행은 조각마다 이어 그리므로(잘림이 아니므로) 기록하지 않는다.
