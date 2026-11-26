@@ -21,12 +21,12 @@
 export const ENGINE_VERSION = '0.0.23';
 
 /** UNCOMPRESSED size of `pkg/hwp_wasm_bg.wasm` as published in ENGINE_VERSION (measured: 0.0.17 publish workflow,
- *  binaryen 119 `wasm-opt -Oz` with the binary's own target_features — #364 → 8,754,174 B, 0.0.22 publish dry-run 42011522392).
+ *  binaryen 119 `wasm-opt -Oz` with the binary's own target_features — #364 → 8,838,791 B, 0.0.23 publish dry-run 45819869986).
  *  Used ONLY as the progress denominator when the transfer is content-encoded — a compressed response
  *  reports the COMPRESSED byte count in `Content-Length` while `response.body` yields DECOMPRESSED
  *  bytes, so the header cannot be the denominator (progress is then flagged `estimated`).
  *  `scripts/build-wasm.mjs` warns when the local artifact drifts from this number. */
-export const WASM_BYTES = 8754174;
+export const WASM_BYTES = 8838791;
 
 const CDN_ORIGIN = 'https://cdn.jsdelivr.net';
 
