@@ -101,8 +101,11 @@ hwpx_check() { cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- layout-c
 #    OWPML NARROWLY 구역을 세로로 무시하던 parser 결함(#96)을 고쳐 22→30으로 이동했다.
 #    stored-lineseg 비교는 25쪽이라 남은 5쪽 과대조판은 숨기지 않는다. 줄수 바닥은 완전 불변.
 #    (같은 파일이 apps/hwp-lab/public/samples/sample-18p.hwpx 로도 배포된다 — 한 번만 잰다.)
+#    2026-11-26(#596) 30→32: 칸 안 문단 사이에 앞 문단의 줄 간격을 남기게 고쳤다(한글이 저장한 칸 줄 694/727 쌍이
+#    그렇게 놓는다). 이 파일은 칸 줄 캐시가 없어 우리 줄바꿈 · 행 높이가 이미 한글보다 커서(과대조판 5쪽) 쪽이 더 는다 —
+#    규칙이 틀린 게 아니라 다른 과대 원인이 드러난 것. 한컴 PDF 대조(공개 3쌍)는 줄 세로 오차 중앙 11.6→10.3pt 로 줄었다.
 HWPX_MAIN=benchmarks/benchmark1.hwpx
-HWPX_MAIN_PAGES=30
+HWPX_MAIN_PAGES=32
 HWPX_MAIN_EXACT_MIN=89.5
 HWPX_MAIN_W1_MIN=98.2
 out=$(hwpx_check "$HWPX_MAIN")

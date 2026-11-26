@@ -4,7 +4,7 @@
 >
 > 변환 .hwpx의 빈 `linesegarray`는 **채점 불가**이지 0점이 아니다.
 
-재현: `node scripts/oracle-sweep.mjs` (이슈 #72). 생성 2026-11-20. CLI: `auto-hwp layout-check --json` (features rhwp,shaper). 태그는 `corpus/typeset-coverage.json`(#71)과 조인.
+재현: `node scripts/oracle-sweep.mjs` (이슈 #72). 생성 2026-11-26. CLI: `auto-hwp layout-check --json` (features rhwp,shaper). 태그는 `corpus/typeset-coverage.json`(#71)과 조인.
 
 전수 재실행은 **로컬 전용**. CI는 `--check-committed`(요약 정합)만 본다. 기존 게이트 8==8 · 18==18 · 24==24 · 줄바꿈 98.9%+ 는 이 파일과 별개다.
 
@@ -52,7 +52,7 @@
 |---|---|---|---:|---:|---:|---:|---|
 | `benchmarks/benchmark.hwp` | benchmark | 일치 | 8 | 8 | 98.9 | 100 | nested_table |
 | `benchmarks/benchmark1.hwp` | benchmark | 일치 | 18 | 18 | 99.2 | 98.5 | nested_table, multipage_table |
-| `benchmarks/benchmark1.hwpx` | benchmark | 쪽격차 | 30 | 25 | 92.9 | — | nested_table, multipage_table |
+| `benchmarks/benchmark1.hwpx` | benchmark | 쪽격차 | 32 | 25 | 92.9 | — | nested_table, multipage_table |
 | `benchmarks/benchmark2.hwp` | benchmark | 일치 | 24 | 24 | 99.7 | 98.4 | nested_table, multipage_table |
 | `corpus/hwp/draw-group.hwp` | corpus-hwp | 일치 | 1 | 1 | 100 | — | shape_ole |
 | `corpus/hwp/field-01.hwp` | corpus-hwp | 일치 | 3 | 3 | 100 | — | shape_ole |
