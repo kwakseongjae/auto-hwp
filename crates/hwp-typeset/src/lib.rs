@@ -1301,6 +1301,17 @@ pub(crate) fn cell_paragraph_height(
     width: f64,
     fonts: &dyn FontMetricsProvider,
 ) -> f64 {
+    cell_paragraph_height_parts(p, doc, width, fonts).0
+}
+
+/// [`cell_paragraph_height`] and the trailing leading it trimmed — the leading a paragraph gives back
+/// to the next block when it is NOT the last block of its cell (see [`cell_blocks_height`]).
+fn cell_paragraph_height_parts(
+    p: &Paragraph,
+    doc: &SemanticDoc,
+    width: f64,
+    fonts: &dyn FontMetricsProvider,
+) -> (f64, f64) {
     let ps = doc.para_shapes.get(p.para_shape);
     let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
     let sa = ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
@@ -1311,17 +1322,46 @@ pub(crate) fn cell_paragraph_height(
         .last()
         .map(|l| trailing_leading(l, ratio))
         .unwrap_or(0.0);
-    sb + (text - last_leading) + sa
+    (sb + (text - last_leading) + sa, last_leading)
 }
 
-/// Laid-out height of one block (HWPUNIT) at the given content width — paragraph (lines×spacing +
-/// 위/아래 간격, trailing leading trimmed per [`cell_paragraph_height`]) or a nested table (recursive).
-/// Drives table-row sizing + pagination accounting.
-fn block_height(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetricsProvider) -> f64 {
-    match b {
-        Block::Paragraph(p) => cell_paragraph_height(p, doc, width, fonts),
-        Block::Table(t) => table_height(t, width, doc, fonts),
-    }
+/// Whether the paragraph at `blocks[i]` keeps its last line's leading in a cell stack: only when a
+/// PARAGRAPH follows it (#596). Before a nested table — or at the end of the cell — it trims as before;
+/// Hangul's stored lines were only checked paragraph → paragraph.
+pub(crate) fn keeps_trailing_leading(blocks: &[Block], i: usize) -> bool {
+    matches!(blocks.get(i + 1), Some(Block::Paragraph(_)))
+}
+
+/// Reserved height (HWPUNIT) of a cell's (or text box's) whole block stack at `width` (#596 · #370).
+/// A paragraph followed by another PARAGRAPH keeps its last line's line-spacing leading as the gap
+/// between them ([`keeps_trailing_leading`]); the cell's last line (and a paragraph before a nested
+/// table, which was not checked against Hangul) gives it back as before. Hangul stores it that way — in its
+/// saved cell lines the next paragraph starts at `vertpos + vertsize + spacing` of the previous
+/// paragraph's last line (public corpus 694 of 727 paragraph pairs, the rest carry paragraph
+/// spacing), while the cell height ends at the last line's box. Trimming every paragraph drew a
+/// two-paragraph 150% cell at 100% pitch. LOCKSTEP: the row reserve, the cell placer and the caret
+/// walk all size a cell through this one function.
+pub(crate) fn cell_blocks_height(
+    blocks: &[Block],
+    doc: &SemanticDoc,
+    width: f64,
+    fonts: &dyn FontMetricsProvider,
+) -> f64 {
+    blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| match b {
+            Block::Paragraph(p) => {
+                let (height, leading) = cell_paragraph_height_parts(p, doc, width, fonts);
+                if keeps_trailing_leading(blocks, i) {
+                    height + leading
+                } else {
+                    height
+                }
+            }
+            Block::Table(t) => table_height(t, width, doc, fonts),
+        })
+        .sum()
 }
 
 /// Whether a caption participates in today's vertical table flow. Side captions are preserved in
@@ -1511,11 +1551,7 @@ pub(crate) fn table_row_heights(
         // the exact text width. Using the old fixed 80+80 inset made 510+510-margin cells up to
         // 860 HWPUNIT too wide, hiding Hancom-authored wraps from the row reservation.
         let tw = table_cell_text_width(t, avail_w, i);
-        c.blocks
-            .iter()
-            .map(|b| block_height(b, doc, tw, fonts))
-            .sum::<f64>()
-            + CELL_PAD
+        cell_blocks_height(&c.blocks, doc, tw, fonts) + CELL_PAD
     };
     // ① 한 행짜리 셀만으로 각 행 높이를 정한다.
     for (i, c) in t.cells.iter().enumerate() {
@@ -1734,10 +1770,9 @@ pub(crate) fn table_page_flow_row_heights(
     rows
 }
 
-/// Text stack height for a row that continues through a page boundary. Ordinary cell sizing trims
-/// the last line's leading from every paragraph; in one continued cell, that leading remains the
-/// inter-paragraph gap and only the final paragraph trims it. This distinction is activated only
-/// after the stack exceeds a continuation lane, so the established row-height gates stay untouched.
+/// Text stack height for a row that continues through a page boundary: the tallest all-paragraph cell
+/// of the row, sized by [`cell_blocks_height`] (the inter-paragraph leading stays, only the cell's
+/// last line trims it — since #596 ordinary row sizing uses the same rule).
 fn continued_text_row_height(
     table: &Table,
     row: usize,
@@ -1760,21 +1795,7 @@ fn continued_text_row_height(
             return None;
         }
         let text_width = table_cell_text_width(table, avail_w, cell_index);
-        let paragraph_count = cell.blocks.len();
-        let mut height = 0.0;
-        for (index, block) in cell.blocks.iter().enumerate() {
-            let Block::Paragraph(paragraph) = block else {
-                unreachable!("checked above")
-            };
-            height += cell_paragraph_height(paragraph, doc, text_width, fonts);
-            if index + 1 < paragraph_count {
-                let ratio = line_spacing_ratio(paragraph, doc);
-                if let Some(last) = layout_cell_paragraph(paragraph, doc, text_width, fonts).last()
-                {
-                    height += trailing_leading(last, ratio);
-                }
-            }
-        }
+        let height = cell_blocks_height(&cell.blocks, doc, text_width, fonts);
         maximum = maximum.max(height + CELL_PAD);
         seen = true;
     }
@@ -1855,7 +1876,7 @@ fn cell_term_breakdown(
         ..Default::default()
     };
     let mut first_ratio: Option<f64> = None;
-    for blk in &c.blocks {
+    for (index, blk) in c.blocks.iter().enumerate() {
         match blk {
             Block::Paragraph(p) => {
                 let ps = doc.para_shapes.get(p.para_shape);
@@ -1868,10 +1889,15 @@ fn cell_term_breakdown(
                 let lines = layout_cell_paragraph(p, doc, tw, fonts);
                 let raw: f64 = lines.iter().map(|l| l.vert_size).sum();
                 let spaced: f64 = lines.iter().map(|l| line_advance(l, ratio)).sum();
-                let last_leading = lines
-                    .last()
-                    .map(|l| trailing_leading(l, ratio))
-                    .unwrap_or(0.0);
+                // Same trim rule as the reserve ([`cell_blocks_height`], #596).
+                let last_leading = if keeps_trailing_leading(&c.blocks, index) {
+                    0.0
+                } else {
+                    lines
+                        .last()
+                        .map(|l| trailing_leading(l, ratio))
+                        .unwrap_or(0.0)
+                };
                 b.lines += lines.len();
                 b.raw_em += raw;
                 b.spaced += spaced - last_leading;
