@@ -1,5 +1,13 @@
 # CURRENT STATE — 단일 복원 지점
 
+- 2026-11-26 · Claude Opus 5.5(워커) · **0.0.23 릴리스 준비(#597)** — 가지 `release/0.0.23`(main `022910b` 위).
+  · 11-13 뒤 이 파일에 빠진 머지: #537(`.hwp` 고정 높이 행 키우기 · PR #584) · #564(NaiveLayout 쪽 수 두 자리 · #580) · #582(표 바깥 여백 0) ·
+    #589(빈 줄 감추기 읽기 · 변환 · #590) · #541(빈 줄 감추기 조판 · #591) · #592(되돌리기 시험 · #593) · #549(발행 전 e2e 관문 · #594 — `docs/RELEASING.md`).
+  · `verify-local.sh --full`(`022910b`): 전부 초록 — 게이트 8 · 18 · 24 · 줄 98.9%+ · modu 6==6 · vitest core 309 · ai 65 · platform 17 · react 499 · lab 252 · proxy 11 ·
+    e2e 85 통과 / 3 건너뜀 / 0 실패(`cell-caret-053:90` 초록) · 오라클 전수 ok(82, 79 채점). 워크트리에서 platform 시험도 돈다(#548).
+  · 함정: `services/demo-ai-proxy` `npm ci` 는 lock 어긋남(`@emnapi/*` 1.11.3)으로 실패 — `npm install` 로 깔고 lock 은 되돌림.
+  · 다음: PR → 브랜치 publish dry-run(`WASM_BYTES` 실측) → cdn.js → 머지 → 머지 커밋 `e2e.yml` → dry-run → 발행. 그다음 조판: 칸 안 문단 사이 줄 간격(#596 = #370 앞 절반 —
+    한글 저장 줄은 문단 사이 간격을 깎지 않는다: 공개 694/727 · 비공개 932/970, 칸 마지막 줄 뒤만 깎음).
 - 2026-11-13 · Claude Opus 5.5(워커) · **#534 칸 안 잘림 신호(S1(a))** — 고정 높이 칸에서 그리지 않은 줄(잉크가 있는 줄만) · 중첩 표를
   `place_cell_content` 가 그 자리에서 세어 `PlacedPage.clipped_cells` → `--visual-regions` schema 5 `clipped_cell_text` · CLI 경고 · PDF 알림
   `cell-text-clipped`(진단과 따로). 비교기는 schema 5 만 받고 개수로만 보고(점수 밖). 26쌍: PDF 누락 1% 초과 7문서 모두 잘림 신호(칸 6 · 쪽 잘림 HD-01),

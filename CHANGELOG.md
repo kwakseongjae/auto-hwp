@@ -40,6 +40,14 @@ what an omitted RunSpec field means was logged under Breaking without an `intent
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.23] — 2026-11-26
+
+4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep. 아래 파괴 변경은 Rust 크레이트 · CLI 증거(schema 5)
+전용이다 — npm 패키지 4종의 JS 표면은 그대로다. 조판이 바뀌어(쪽 번호 · 표 캡션 · 떠 있는 도형 · 고정 높이 행 · 빈 줄 감추기) 쪽 수와
+그려지는 모양이 달라지는 문서가 있다.
+
 ### 파괴 변경 (Breaking)
 
 - **`UndrawnShape::TableCaption` 변형이 늘었다 (#543).** 배치하지 않는 표 캡션(옆 — 왼 · 오른 — 캡션, 글 앞 · 글 뒤로 띄운
