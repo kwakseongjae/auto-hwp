@@ -29,6 +29,13 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
+            // #602: 의존성 봇 PR 은 본문에 이슈 줄이 없다. `[bot]` 계정은 GitHub 가 예약해 사람이 흉내 낼 수 없다.
+            // 머지 조건(build-test 초록 · 사람이 머지)은 그대로다.
+            const author = context.payload.pull_request?.user ?? {};
+            if (author.type === "Bot" && author.login === "dependabot[bot]") {
+              core.notice("dependabot[bot] PR — 이슈 연결 검사를 건너뜁니다(#602).");
+              return;
+            }
             const body = context.payload.pull_request?.body ?? "";
             const closesIssue = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#[0-9]+\b/i.test(body);
             if (!closesIssue) {
